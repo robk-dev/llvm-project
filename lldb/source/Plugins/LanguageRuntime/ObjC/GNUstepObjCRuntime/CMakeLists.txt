@@ -1,20 +1,19 @@
 add_lldb_library(lldbPluginGNUstepObjCRuntime PLUGIN
   GNUstepObjCRuntime.cpp
+  GNUstepObjCRuntimeIntrospector.cpp
+  GNUstepObjCDeclVendor.cpp
 
   LINK_LIBS
-    lldbBreakpoint
     lldbCore
+    lldbDataFormatters
     lldbExpression
     lldbHost
-    lldbInterpreter
     lldbSymbol
     lldbTarget
     lldbUtility
-    lldbValueObject
-    lldbPluginExpressionParserClang
     lldbPluginTypeSystemClang
-  CLANG_LIBS
-    clangAST
+    lldbPluginObjCRuntime
+
   LINK_COMPONENTS
     Support
   )
