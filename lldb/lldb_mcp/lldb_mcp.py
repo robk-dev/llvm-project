@@ -41,7 +41,7 @@ from contextlib import asynccontextmanager
 
 from mcp.server.fastmcp import FastMCP, Context
 
-os.environ["LD_LIBRARY_PATH"] = "/home/robk/code/llvm-project/build/lib:/home/robk/libobjc2-build/libobjc2/build:/home/robk/code/libs-base/Source/obj"
+os.environ["LD_LIBRARY_PATH"] = "/home/robk/code/llvm-project/build/lib:/home/robk/gnustep-install/lib"
 
 # Global debug flag - set to False by default
 DEBUG = False

@@ -41,6 +41,7 @@ echo "Configuring LLVM/LLDB with CMake..."
 # Configure with CMake
 cmake -G Ninja \
     -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
+    -DLLVM_CCACHE_BUILD=ON \
     -DCMAKE_INSTALL_PREFIX="${INSTALL_PREFIX}" \
     -DLLVM_ENABLE_PROJECTS="clang;lldb" \
     -DLLVM_ENABLE_RUNTIMES="compiler-rt" \
@@ -73,7 +74,6 @@ ninja clang
 echo "Building LLDB components..."
 ninja lldb
 ninja lldb-server
-ninja lldb-vscode
 
 # Build additional LLDB tools
 echo "Building additional LLDB tools..."
@@ -91,7 +91,6 @@ echo "=========================================="
 echo "Built binaries:"
 echo "LLDB: ${BUILD_DIR}/bin/lldb"
 echo "lldb-server: ${BUILD_DIR}/bin/lldb-server"
-echo "lldb-vscode: ${BUILD_DIR}/bin/lldb-vscode"
 
 # Test that the binaries exist
 if [[ -f "${BUILD_DIR}/bin/lldb" ]]; then
@@ -127,5 +126,5 @@ echo "  export PATH=\"${BUILD_DIR}/bin:\$PATH\""
 echo "  export LLDB_DEBUGSERVER_PATH=\"${BUILD_DIR}/bin/lldb-server\""
 echo "  cd /home/robk/code/llvm-project/lldb/examples"
 echo "  make clean && make"
-echo "  ${BUILD_DIR}/bin/lldb ./custom_class_test"
+echo "  ${BUILD_DIR}/bin/lldb ./custom_class_test -o 'b main' -o 'r' -o 'br set -l 128' -o 'c'
 echo "=========================================="

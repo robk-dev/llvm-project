@@ -55,29 +55,8 @@ bool ExtractElementSummariesForPreview(addr_t set_ptr, ProcessSP process_sp,
   Status error;
   size_t ptr_size = process_sp->GetAddressByteSize();
   
-  // Try to use runtime API for offset discovery (same logic as main provider)
-  ptrdiff_t map_offset = ptr_size;  // Default fallback
-  
-  GNUstepRuntimeAPISP runtime_api = GNUstepRuntimeAPI::Create(process_sp.get());
-  if (runtime_api && runtime_api->IsValid()) {
-    auto class_info = runtime_api->GetObjectClassInfo(set_ptr);
-    if (class_info) {
-      // Look for _map or map ivar
-      for (const auto& ivar : class_info.value.ivars) {
-        if (ivar.name == "_map" || ivar.name == "map") {
-          map_offset = ivar.offset;
-          LLDB_LOG(log, "Preview: Found _map ivar at offset {0} using runtime API", map_offset);
-          break;
-        }
-      }
-    } else {
-      LLDB_LOG(log, "Preview: Runtime API class info failed: {0}, using default offset", class_info.error_message);
-    }
-  } else {
-    LLDB_LOG(log, "Preview: Runtime API not available, using default map offset {0}", map_offset);
-  }
-  
-  addr_t map_addr = set_ptr + map_offset;
+  // Use same GSIMapTable traversal logic as ExtractElementsFromMemoryDirect
+  addr_t map_addr = set_ptr + ptr_size;
   
   uint64_t bucket_count = process_sp->ReadUnsignedIntegerFromMemory(
       map_addr + (2 * ptr_size), ptr_size, 0, error);
@@ -158,26 +137,9 @@ bool GNUstepNSSetSummaryProvider(ValueObject &valobj, Stream &stream,
   size_t ptr_size = process_sp->GetAddressByteSize();
   Status error;
   
-  // Try to use runtime API for dynamic offset discovery
-  ptrdiff_t map_offset = ptr_size;  // Default fallback
-  ptrdiff_t nodeCount_offset = ptr_size; // Default: nodeCount at map + ptr_size
-  
-  GNUstepRuntimeAPISP runtime_api = GNUstepRuntimeAPI::Create(process_sp.get());
-  if (runtime_api && runtime_api->IsValid()) {
-    auto class_info = runtime_api->GetObjectClassInfo(valobj_addr);
-    if (class_info) {
-      for (const auto& ivar : class_info.value.ivars) {
-        if (ivar.name == "_map" || ivar.name == "map") {
-          map_offset = ivar.offset;
-          LLDB_LOG(log, "Summary: Found _map ivar at offset {0} using runtime API", map_offset);
-          break;
-        }
-      }
-    }
-  }
-  
-  addr_t map_addr = valobj_addr + map_offset;
-  addr_t node_count_addr = map_addr + nodeCount_offset;
+  // GSSet layout: GSIMapTable_t map at offset ptr_size
+  addr_t map_addr = valobj_addr + ptr_size;
+  addr_t node_count_addr = map_addr + ptr_size;
   
   uint64_t count = process_sp->ReadUnsignedIntegerFromMemory(
       node_count_addr, ptr_size, 0, error);
@@ -206,50 +168,6 @@ bool GNUstepNSSetSummaryProvider(ValueObject &valobj, Stream &stream,
   return true;
 }
 
-// Dynamic offset discovery using runtime API
-bool GNUstepNSSetSyntheticProvider::DiscoverOffsets() {
-  if (m_offsets_cached) {
-    return true;
-  }
-  
-  if (!m_runtime_api || !m_runtime_api->IsValid()) {
-    return false;
-  }
-  
-  Log *log = GetLog(LLDBLog::DataFormatters);
-  LLDB_LOG(log, "GNUstepNSSet: Discovering offsets using runtime API");
-  
-  auto class_info = m_runtime_api->GetObjectClassInfo(m_set_ptr);
-  if (!class_info) {
-    LLDB_LOG(log, "GNUstepNSSet: Failed to get class info: {0}", class_info.error_message);
-    return false;
-  }
-  
-  LLDB_LOG(log, "GNUstepNSSet: Found class {0} with {1} ivars", 
-           class_info.value.name, class_info.value.ivars.size());
-  
-  // Find _map ivar
-  for (const auto& ivar : class_info.value.ivars) {
-    LLDB_LOG(log, "GNUstepNSSet: Examining ivar '{0}' at offset {1}", ivar.name, ivar.offset);
-    if (ivar.name == "_map" || ivar.name == "map") {
-      m_map_offset = ivar.offset;
-      LLDB_LOG(log, "GNUstepNSSet: Found _map ivar at offset {0}", m_map_offset);
-      break;
-    }
-  }
-  
-  // GSIMapTable offsets are well-defined in the GNUstep source
-  // See libs-base/Source/GSIMap.h for the structure definition
-  m_nodeCount_offset = m_ptr_size;         // nodeCount at offset 8 (after zone pointer)
-  m_buckets_offset = 3 * m_ptr_size;       // buckets at offset 24 (after zone, nodeCount, bucketCount)
-  
-  LLDB_LOG(log, "GNUstepNSSet: Using offsets - _map: {0}, nodeCount: {1}, buckets: {2}",
-           m_map_offset, m_nodeCount_offset, m_buckets_offset);
-  
-  m_offsets_cached = true;
-  return true;
-}
-
 // Main synthetic provider implementation
 GNUstepNSSetSyntheticProvider::GNUstepNSSetSyntheticProvider(
     lldb::ValueObjectSP valobj_sp)
@@ -265,17 +183,6 @@ GNUstepNSSetSyntheticProvider::GNUstepNSSetSyntheticProvider(
             scratch_ts_sp->getASTContext().ObjCBuiltinIdTy.getAsOpaquePtr());
       }
     }
-    
-    // Initialize runtime API
-    ProcessSP process_sp = valobj_sp->GetProcessSP();
-    if (process_sp) {
-      m_runtime_api = GNUstepRuntimeAPI::Create(process_sp.get());
-      if (m_runtime_api && m_runtime_api->IsValid()) {
-        Log *log = GetLog(LLDBLog::DataFormatters);
-        LLDB_LOG(log, "GNUstepNSSet: Runtime API initialized successfully");
-      }
-    }
-    
     Update();
   }
 }
@@ -433,9 +340,10 @@ GNUstepNSSetSyntheticProvider::GetChildAtIndex(uint32_t idx) {
                      process_sp->GetAddressByteSize());
 
   // Use CreateValueObjectFromData as fallback
-  // Use the already initialized m_objc_id_type instead of GetBasicTypeFromAST
   return CreateValueObjectFromData(
-      name.GetString(), data, m_exe_ctx_ref, m_objc_id_type);
+      name.GetString(), data, m_exe_ctx_ref,
+      m_backend.GetCompilerType().GetBasicTypeFromAST(
+          lldb::eBasicTypeObjCID));
 }
 
 lldb::ChildCacheState
@@ -587,23 +495,18 @@ GNUstepNSSetSyntheticProvider::ExtractElementsFromMemoryDirect() {
   Status error;
   Log *log = GetLog(LLDBLog::DataFormatters);
   
-  // Use dynamic offset discovery instead of hardcoded layout assumptions
-  if (!DiscoverOffsets()) {
-    LLDB_LOG(log, "Failed to discover offsets using runtime API, falling back to defaults");
-  }
+  // GSSet layout: 
+  // - isa at offset 0
+  // - GSIMapTable_t map at offset m_ptr_size (embedded struct, not pointer)
+  addr_t map_addr = m_set_ptr + m_ptr_size;
   
-  // Apply discovered or default offsets
-  ptrdiff_t map_offset = (m_map_offset >= 0) ? m_map_offset : m_ptr_size;
-  ptrdiff_t nodeCount_offset = (m_nodeCount_offset >= 0) ? m_nodeCount_offset : m_ptr_size;
-  ptrdiff_t buckets_offset = (m_buckets_offset >= 0) ? m_buckets_offset : (3 * m_ptr_size);
-  
-  addr_t map_addr = m_set_ptr + map_offset;
-  
-  LLDB_LOG(log, "Using offsets - map: {0}, nodeCount: {1}, buckets: {2}", 
-           map_offset, nodeCount_offset, buckets_offset);
-  
+  // GSIMapTable layout:
+  // - zone at offset 0
+  // - nodeCount at offset m_ptr_size
+  // - bucketCount at offset 2*m_ptr_size
+  // - buckets pointer at offset 3*m_ptr_size
   uint64_t node_count = process_sp->ReadUnsignedIntegerFromMemory(
-      map_addr + nodeCount_offset, m_ptr_size, 0, error);
+      map_addr + m_ptr_size, m_ptr_size, 0, error);
   if (error.Fail() || node_count > 100000) {
     LLDB_LOG(log, "Failed to read nodeCount or invalid count: {0}", node_count);
     return false;
@@ -617,7 +520,7 @@ GNUstepNSSetSyntheticProvider::ExtractElementsFromMemoryDirect() {
   }
     
   addr_t buckets_ptr = process_sp->ReadPointerFromMemory(
-      map_addr + buckets_offset, error);
+      map_addr + (3 * m_ptr_size), error);
   if (error.Fail() || !buckets_ptr) {
     LLDB_LOG(log, "Failed to read buckets pointer");
     return false;

@@ -144,16 +144,12 @@ private:
   /// @return Symbol address, or LLDB_INVALID_ADDRESS if not found
   lldb::addr_t FindRuntimeSymbol(const std::string &symbol_name);
 
-  /// Execute a runtime function call directly via thread plan
-  /// @param function_name Name of the runtime function
-  /// @param return_addr Where to store the return value
-  /// @param args Array of argument values
-  /// @param arg_count Number of arguments
-  /// @return True on success, false on failure
-  bool CallRuntimeFunctionDirect(const std::string &function_name,
-                                lldb::addr_t &return_value,
-                                const lldb::addr_t *args = nullptr,
-                                size_t arg_count = 0);
+  /// Execute a runtime function call safely
+  /// @param symbol_addr Address of the runtime function
+  /// @param args Function arguments
+  /// @return Function result, or error on failure
+  template <typename T, typename... Args>
+  RuntimeResult<T> CallRuntimeFunction(lldb::addr_t symbol_addr, Args... args);
 
   /// Internal helper to get class pointer by name
   RuntimeResult<Class> GetClassByName(const std::string &class_name);
@@ -175,12 +171,6 @@ private:
 
   /// Clear last error
   void ClearError();
-
-  /// Helper to evaluate runtime expressions safely
-  bool EvaluateExpression(const std::string &expr, uint64_t &result);
-  
-  /// Helper to estimate size from Objective-C type encoding
-  size_t EstimateSizeFromTypeEncoding(const std::string &type_encoding);
 
 private:
   Process *m_process;                      ///< LLDB process handle
@@ -209,9 +199,6 @@ private:
   
   // Class info cache to avoid repeated runtime calls
   std::unordered_map<std::string, ClassInfo> m_class_cache;
-  
-  // Re-entrancy guard to prevent recursive expression evaluation
-  static thread_local bool s_in_expression_evaluation;
 };
 
 /// Convenience typedef for shared pointer

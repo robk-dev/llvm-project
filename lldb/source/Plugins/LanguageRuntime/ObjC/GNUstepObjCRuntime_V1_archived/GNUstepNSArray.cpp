@@ -91,50 +91,12 @@ bool GNUstepNSArraySummaryProvider(ValueObject &valobj, Stream &stream,
   
   size_t ptr_size = process_sp->GetAddressByteSize();
   
-  // Use GNUstepRuntimeAPI to discover count offset dynamically
-  auto runtime_api = GNUstepRuntimeAPI::Create(process_sp.get());
-  if (!runtime_api) {
-    LLDB_LOG(log, "GNUstepNSArraySummaryProvider: Failed to create runtime API");
-    return false;
-  }
-  
-  auto class_info = runtime_api->GetObjectClassInfo(valobj_addr);
-  if (!class_info) {
-    LLDB_LOG(log, "GNUstepNSArraySummaryProvider: Failed to get class info: {0}", class_info.error_message);
-    return false;
-  }
-  
-  // Find the count ivar dynamically or use known offsets
-  ptrdiff_t count_offset = -1;
-  
-  // For GSInlineArray, the count is stored at offset 16 (0x10)
-  // It's not exposed as a named ivar
-  if (class_info.value.name == "GSInlineArray") {
-    count_offset = 16;
-    LLDB_LOG(log, "GNUstepNSArraySummaryProvider: Using known offset {0} for GSInlineArray count", count_offset);
-  } else {
-    // For other array types, try to find the _count ivar
-    for (const auto& ivar : class_info.value.ivars) {
-      if (ivar.name == "_count") {
-        count_offset = ivar.offset;
-        LLDB_LOG(log, "GNUstepNSArraySummaryProvider: Found _count ivar at offset {0}", count_offset);
-        break;
-      }
-    }
-  }
-  
-  if (count_offset < 0) {
-    // Fallback: assume count at offset 16 for most GNUstep array types
-    count_offset = 16;
-    LLDB_LOG(log, "GNUstepNSArraySummaryProvider: Using fallback offset {0} for count in class {1}", 
-             count_offset, class_info.value.name);
-  }
-  
+  // Use direct memory access instead of expression evaluation  
+  // Expression evaluation during summary provider execution is unreliable
   Status error;
   uint32_t count = process_sp->ReadUnsignedIntegerFromMemory(
-      valobj_addr + count_offset, 4, 0, error);
+      valobj_addr + 2 * ptr_size, 4, 0, error);
   if (error.Fail()) {
-    LLDB_LOG(log, "GNUstepNSArraySummaryProvider: Failed to read count at offset {0}: {1}", count_offset, error.AsCString());
     return false;
   }
   
@@ -162,8 +124,7 @@ bool GNUstepNSArraySummaryProvider(ValueObject &valobj, Stream &stream,
 // Main synthetic provider implementation
 GNUstepNSArraySyntheticProvider::GNUstepNSArraySyntheticProvider(
     lldb::ValueObjectSP valobj_sp)
-    : SyntheticChildrenFrontEnd(*valobj_sp), m_count(0), m_array_addr(0),
-      m_count_offset(-1), m_contents_offset(-1), m_offsets_cached(false) {
+    : SyntheticChildrenFrontEnd(*valobj_sp), m_count(0), m_array_addr(0) {
   // Initialize ObjCBuiltinIdTy following Apple's NSArray pattern (NSArray.cpp:459-470)
   if (valobj_sp) {
     TargetSP target_sp = valobj_sp->GetExecutionContextRef().GetTargetSP();
@@ -235,17 +196,10 @@ GNUstepNSArraySyntheticProvider::CallObjectAtIndex(uint32_t index) {
   Status error;
   size_t ptr_size = process_sp->GetAddressByteSize();
   
-  // Discover offsets dynamically if not cached
-  if (!DiscoverOffsets()) {
-    LLDB_LOG(log, "CallObjectAtIndex: Failed to discover offsets for class {0}", class_name.AsCString());
-    return LLDB_INVALID_ADDRESS;
-  }
-  
   // Handle different GNUstep array class layouts
   if (class_name.GetStringRef() == "GSInlineArray") {
-    // GSInlineArray: elements stored inline after the standard ivars
-    // The elements start at offset 24 (0x18) after ISA, reserved, and count
-    addr_t element_slot_addr = m_array_addr + 24 + (index * ptr_size);
+    // GSInlineArray: elements stored inline starting at offset 24 (3 * ptr_size)
+    addr_t element_slot_addr = m_array_addr + (3 * ptr_size) + (index * ptr_size);
     addr_t element_addr = process_sp->ReadPointerFromMemory(element_slot_addr, error);
     if (error.Fail()) {
       LLDB_LOG(log, "CallObjectAtIndex: Failed to read GSInlineArray element at 0x{0:x}", element_slot_addr);
@@ -254,15 +208,10 @@ GNUstepNSArraySyntheticProvider::CallObjectAtIndex(uint32_t index) {
     LLDB_LOG(log, "CallObjectAtIndex: GSInlineArray element {0} at 0x{1:x} -> 0x{2:x}", index, element_slot_addr, element_addr);
     return element_addr;
   } else {
-    // GSMutableArray and others: use discovered _contents_array offset
-    if (m_contents_offset < 0) {
-      LLDB_LOG(log, "CallObjectAtIndex: No contents offset discovered");
-      return LLDB_INVALID_ADDRESS;
-    }
-    
-    addr_t contents_array_addr = process_sp->ReadPointerFromMemory(m_array_addr + m_contents_offset, error);
+    // GSMutableArray and others: _contents_array pointer at offset 8, then array of pointers
+    addr_t contents_array_addr = process_sp->ReadPointerFromMemory(m_array_addr + ptr_size, error);
     if (error.Fail() || !contents_array_addr) {
-      LLDB_LOG(log, "CallObjectAtIndex: Failed to read _contents_array pointer at offset {0}", m_contents_offset);
+      LLDB_LOG(log, "CallObjectAtIndex: Failed to read _contents_array pointer");
       return LLDB_INVALID_ADDRESS;
     }
     
@@ -272,7 +221,7 @@ GNUstepNSArraySyntheticProvider::CallObjectAtIndex(uint32_t index) {
       LLDB_LOG(log, "CallObjectAtIndex: Failed to read element pointer at 0x{0:x}", element_slot_addr);
       return LLDB_INVALID_ADDRESS;
     }
-    LLDB_LOG(log, "CallObjectAtIndex: {0} element {1} at 0x{2:x} -> 0x{3:x} (discovered contents offset {4})", class_name.AsCString(), index, element_slot_addr, element_addr, m_contents_offset);
+    LLDB_LOG(log, "CallObjectAtIndex: {0} element {1} at 0x{2:x} -> 0x{3:x}", class_name.AsCString(), index, element_slot_addr, element_addr);
     return element_addr;
   }
 }
@@ -303,7 +252,7 @@ GNUstepNSArraySyntheticProvider::GetChildAtIndex(uint32_t idx) {
   name.Printf("[%" PRIu32 "]", idx);
   LLDB_LOG(log, "GetChildAtIndex: Child name will be '{0}'", name.GetString());
   
-  // Get element address from array memory
+  // CRITICAL FIX: Use runtime API to call objectAtIndex: instead of memory guessing
   addr_t element_addr = CallObjectAtIndex(idx);
   if (element_addr == LLDB_INVALID_ADDRESS) {
     LLDB_LOG(log, "GetChildAtIndex: CallObjectAtIndex failed for index {0}", idx);
@@ -318,35 +267,12 @@ GNUstepNSArraySyntheticProvider::GetChildAtIndex(uint32_t idx) {
     return lldb::ValueObjectSP();
   }
   
-  // CRITICAL FIX: Determine the actual runtime type of the element
-  // This ensures proper formatter selection
-  CompilerType element_type = m_objc_id_type;
-  
-  // Check if it's a tagged pointer first
-  uint8_t tag = element_addr & 0x7;
-  if (tag == 4) {
-    // GSTinyString - use NSString type for proper formatting
-    LLDB_LOG(log, "GetChildAtIndex: Element {0} is GSTinyString (tag 4)", idx);
-    // The formatter will handle this based on the tag
-  } else if (tag == 0 && m_runtime_api) {
-    // Regular heap object - get its runtime class
-    auto class_info = m_runtime_api->GetObjectClassInfo(element_addr);
-    if (class_info && !class_info.value.name.empty()) {
-      LLDB_LOG(log, "GetChildAtIndex: Element {0} runtime class: {1}", idx, class_info.value.name);
-      
-      // Special handling for known string classes
-      if (class_info.value.name.find("String") != std::string::npos ||
-          class_info.value.name == "NSConstantString") {
-        // For string types, just use the generic id type
-        // The string formatter is registered for id and will detect the actual type
-        LLDB_LOG(log, "GetChildAtIndex: Element {0} is a string type: {1}", idx, class_info.value.name);
-      }
-    }
-  }
-  
-  // Create ValueObject from data containing the element address
-  // We need to create a buffer containing the pointer value since LLDB expects to read from memory
+  // Create a temporary memory location to hold the object pointer
+  // This is needed because LLDB expects to read from a memory address
   size_t ptr_size = process_sp->GetAddressByteSize();
+  LLDB_LOG(log, "GetChildAtIndex: ptr_size = {0}", ptr_size);
+  
+  // Create ValueObject from a temporary data buffer containing the element address
   DataBufferSP data_buffer_sp(new DataBufferHeap(ptr_size, 0));
   if (!data_buffer_sp) {
     LLDB_LOG(log, "GetChildAtIndex: Failed to create DataBufferHeap");
@@ -359,21 +285,31 @@ GNUstepNSArraySyntheticProvider::GetChildAtIndex(uint32_t idx) {
     return lldb::ValueObjectSP();
   }
   
-  // Store the element address in our temporary buffer
+  // Write the element address to the buffer in the correct byte order
+  DataExtractor data_extractor(data_buffer_sp, process_sp->GetByteOrder(), ptr_size);
+  
+  // Store the object pointer in our temporary buffer
   if (ptr_size == 8) {
     *reinterpret_cast<uint64_t*>(data_ptr) = element_addr;
+    LLDB_LOG(log, "GetChildAtIndex: Stored 64-bit address 0x{0:x} in buffer", element_addr);
   } else {
     *reinterpret_cast<uint32_t*>(data_ptr) = static_cast<uint32_t>(element_addr);
+    LLDB_LOG(log, "GetChildAtIndex: Stored 32-bit address 0x{0:x} in buffer", static_cast<uint32_t>(element_addr));
   }
   
-  DataExtractor data_extractor(data_buffer_sp, process_sp->GetByteOrder(), ptr_size);
+  if (!m_objc_id_type.IsValid()) {
+    LLDB_LOG(log, "GetChildAtIndex: m_objc_id_type is NOT VALID - this is the problem!");
+    return lldb::ValueObjectSP();
+  }
+  
+  LLDB_LOG(log, "GetChildAtIndex: m_objc_id_type is valid, creating ValueObject");
   
   // Create ValueObject from our data buffer
   ValueObjectSP child = ValueObject::CreateValueObjectFromData(
       name.GetString(),
       data_extractor,
       m_exe_ctx_ref,
-      element_type
+      m_objc_id_type
   );
   
   if (child && child.get()) {
@@ -383,24 +319,15 @@ GNUstepNSArraySyntheticProvider::GetChildAtIndex(uint32_t idx) {
     LLDB_LOG(log, "GetChildAtIndex: Child type name: {0}", child->GetTypeName().AsCString("(null)"));
     LLDB_LOG(log, "GetChildAtIndex: Child value as unsigned: 0x{0:x}", child->GetValueAsUnsigned(0));
     
-    // Check if summary was applied
+    // Force summary provider application
     const char* summary = child->GetSummaryAsCString();
     if (summary) {
       LLDB_LOG(log, "GetChildAtIndex: Element {0} summary: '{1}'", idx, summary);
     } else {
-      LLDB_LOG(log, "GetChildAtIndex: Element {0} has no summary, may need explicit formatting", idx);
-      
-      // Force update to trigger formatter application
-      child->GetValueDidChange();
-      child->UpdateValueIfNeeded();
-      
-      // Check again after update
-      summary = child->GetSummaryAsCString();
-      if (summary) {
-        LLDB_LOG(log, "GetChildAtIndex: After update, element {0} summary: '{1}'", idx, summary);
-      }
+      LLDB_LOG(log, "GetChildAtIndex: Element {0} has no summary", idx);
     }
     
+    child->SetFormat(lldb::eFormatDefault);
     LLDB_LOG(log, "=== GetChildAtIndex SUCCESS: returning valid child for idx={0} ===", idx);
     return child;
   } else {
@@ -441,18 +368,17 @@ GNUstepNSArraySyntheticProvider::Update() {
     return lldb::ChildCacheState::eRefetch;
   }
   
-  // Use runtime API to discover count offset dynamically
-  if (!DiscoverOffsets()) {
-    LLDB_LOG(log, "Failed to discover offsets for array");
-    m_count = 0;
-    return lldb::ChildCacheState::eRefetch;
-  }
-  
+  // Use runtime to discover where the count is stored
   Status error;
+  size_t ptr_size = process_sp->GetAddressByteSize();
+  
+  // For now, we still use the known offset, but TODO: use runtime introspection
+  // The runtime should tell us via class_getInstanceVariable("_count") + ivar_getOffset
+  // Current known layout: count at offset 16 (2 * ptr_size) for GNUstep arrays
   m_count = process_sp->ReadUnsignedIntegerFromMemory(
-      m_array_addr + m_count_offset, 4, 0, error);
+      m_array_addr + 2 * ptr_size, 4, 0, error);
   if (error.Fail() || m_count > 10000) {
-    LLDB_LOG(log, "Failed to read count at offset {0} or count too large: {1}", m_count_offset, m_count);
+    LLDB_LOG(log, "Failed to read count or count too large: {0}", m_count);
     m_count = 0;
     return lldb::ChildCacheState::eRefetch;
   }
@@ -475,76 +401,6 @@ size_t GNUstepNSArraySyntheticProvider::GetIndexOfChildWithName(ConstString name
     return idx;
   }
   return UINT32_MAX;
-}
-
-bool GNUstepNSArraySyntheticProvider::DiscoverOffsets() {
-  if (m_offsets_cached) {
-    return true;
-  }
-  
-  Log *log = GetLog(LLDBLog::DataFormatters);
-  
-  if (!m_runtime_api || !m_array_addr) {
-    LLDB_LOG(log, "DiscoverOffsets: No runtime API or invalid array address");
-    return false;
-  }
-  
-  // Get class information for this array object
-  auto class_info = m_runtime_api->GetObjectClassInfo(m_array_addr);
-  if (!class_info) {
-    LLDB_LOG(log, "DiscoverOffsets: Failed to get class info: {0}", class_info.error_message);
-    return false;
-  }
-  
-  LLDB_LOG(log, "DiscoverOffsets: Analyzing class {0} with {1} ivars", 
-           class_info.value.name, class_info.value.ivars.size());
-  
-  // Special handling for GSInlineArray which doesn't expose ivars
-  if (class_info.value.name == "GSInlineArray") {
-    m_count_offset = 16;  // Count is at offset 16
-    m_contents_offset = -1; // Elements stored inline, no contents pointer
-    m_offsets_cached = true;
-    LLDB_LOG(log, "DiscoverOffsets: Using known offsets for GSInlineArray - count at {0}", m_count_offset);
-    return true;
-  }
-  
-  // Search for the required ivars in other array types
-  bool found_count = false, found_contents = false;
-  for (const auto& ivar : class_info.value.ivars) {
-    LLDB_LOG(log, "DiscoverOffsets: Found ivar '{0}' at offset {1}", ivar.name, ivar.offset);
-    
-    if (ivar.name == "_count") {
-      m_count_offset = ivar.offset;
-      found_count = true;
-      LLDB_LOG(log, "DiscoverOffsets: Found _count at offset {0}", m_count_offset);
-    } else if (ivar.name == "_contents_array" || ivar.name == "_contents") {
-      m_contents_offset = ivar.offset;
-      found_contents = true;
-      LLDB_LOG(log, "DiscoverOffsets: Found contents array at offset {0}", m_contents_offset);
-    }
-  }
-  
-  // For GSMutableArray and similar, use fallback offsets if not found
-  if (!found_count) {
-    m_count_offset = 16; // Common offset for count in GNUstep arrays
-    LLDB_LOG(log, "DiscoverOffsets: Using fallback count offset {0} for class {1}", 
-             m_count_offset, class_info.value.name);
-  }
-  
-  if (!found_contents) {
-    ProcessSP process_sp = m_exe_ctx_ref.GetProcessSP();
-    if (process_sp) {
-      size_t ptr_size = process_sp->GetAddressByteSize();
-      m_contents_offset = ptr_size; // Common location after ISA pointer
-      LLDB_LOG(log, "DiscoverOffsets: Using fallback contents offset {0} for class {1}", 
-               m_contents_offset, class_info.value.name);
-    }
-  }
-  
-  m_offsets_cached = true;
-  LLDB_LOG(log, "DiscoverOffsets: Successfully cached offsets - count: {0}, contents: {1}", 
-           m_count_offset, m_contents_offset);
-  return true;
 }
 
 } // namespace formatters

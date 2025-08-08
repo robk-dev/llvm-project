@@ -1,67 +1,43 @@
 #import <Foundation/Foundation.h>
+#include <stdio.h>
 
 int main(int argc, const char * argv[]) {
     @autoreleasepool {
-        // Test Foundation collection types
+        printf("=== GNUstep Foundation Types Test ===\n");
         
-        // Array tests
-        NSArray *immutableArray = @[@"Apple", @"Banana", @"Cherry", @"Date"];
-        NSMutableArray *mutableArray = [NSMutableArray arrayWithArray:immutableArray];
-        [mutableArray addObject:@"Elderberry"];
+        // NSDate test
+        NSDate *currentDate = [NSDate date];
+        NSDate *fixedDate = [NSDate dateWithTimeIntervalSinceReferenceDate:123456789.0];
+        printf("Current date: %p\n", currentDate);
+        printf("Fixed date: %p\n", fixedDate);
         
-        // Dictionary tests
-        NSDictionary *immutableDict = @{
-            @"name": @"Foundation Test",
-            @"version": @"1.0",
-            @"features": @[@"arrays", @"dictionaries", @"strings"]
-        };
-        NSMutableDictionary *mutableDict = [NSMutableDictionary dictionaryWithDictionary:immutableDict];
-        mutableDict[@"timestamp"] = [NSDate date];
+        // NSURL test  
+        NSURL *url1 = [NSURL URLWithString:@"https://example.com/path"];
+        NSURL *url2 = [NSURL URLWithString:@"file:///tmp/test.txt"];
+        printf("URL 1: %p\n", url1);
+        printf("URL 2: %p\n", url2);
         
-        // String tests
-        NSString *simpleString = @"Hello World";
-        NSMutableString *mutableString = [NSMutableString stringWithString:simpleString];
-        [mutableString appendString:@" - LLDB Bridge Test"];
+        // NSError test
+        NSError *error1 = [NSError errorWithDomain:@"TestDomain" code:404 userInfo:nil];
+        NSError *error2 = [NSError errorWithDomain:@"NSCocoaErrorDomain" code:42 userInfo:nil];
+        printf("Error 1: %p\n", error1);  
+        printf("Error 2: %p\n", error2);
         
-        // Number tests
-        NSNumber *intNumber = @42;
-        NSNumber *floatNumber = @3.14159;
-        NSNumber *boolNumber = @YES;
+        // NSData test
+        NSString *testString = @"Hello, World!";
+        NSData *data1 = [testString dataUsingEncoding:NSUTF8StringEncoding];
+        NSMutableData *data2 = [NSMutableData dataWithLength:128];
+        printf("Data 1: %p\n", data1);
+        printf("Data 2: %p\n", data2);
         
-        // Nested structure test
-        NSDictionary *nestedData = @{
-            @"user": @{
-                @"name": @"Test User",
-                @"preferences": @{
-                    @"theme": @"dark",
-                    @"notifications": @YES,
-                    @"recent_files": @[@"file1.txt", @"file2.txt", @"file3.txt"]
-                }
-            },
-            @"statistics": @{
-                @"files_processed": @156,
-                @"success_rate": @0.95,
-                @"last_run": [NSDate date]
-            }
-        };
+        // NSUUID test (if available)
+        Class uuidClass = NSClassFromString(@"NSUUID");
+        if (uuidClass) {
+            NSUUID *uuid1 = [[uuidClass alloc] init];
+            printf("UUID: %p\n", uuid1);
+        }
         
-        // Array of dictionaries
-        NSArray *users = @[
-            @{@"name": @"Alice", @"age": @25, @"role": @"developer"},
-            @{@"name": @"Bob", @"age": @30, @"role": @"designer"},
-            @{@"name": @"Charlie", @"age": @28, @"role": @"manager"}
-        ];
-        
-        // Set breakpoint here to test Foundation type debugging
-        NSLog(@"Foundation types debugging test");
-        NSLog(@"Immutable array count: %lu", (unsigned long)immutableArray.count);
-        NSLog(@"Mutable array count: %lu", (unsigned long)mutableArray.count);
-        NSLog(@"Dictionary keys: %@", immutableDict.allKeys);
-        NSLog(@"String length: %lu", (unsigned long)simpleString.length);
-        NSLog(@"Numbers: int=%@, float=%@, bool=%@", intNumber, floatNumber, boolNumber);
-        NSLog(@"Nested data: %@", nestedData);
-        NSLog(@"Users: %@", users);
-        
-        return 0;
+        printf("=== Test objects created successfully ===\n");
+        return 0; // Breakpoint here
     }
 }

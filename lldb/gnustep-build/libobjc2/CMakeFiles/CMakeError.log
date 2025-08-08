@@ -1,0 +1,6 @@
+Checking whether the ASM compiler is GNU using "--version" did not match "(GNU assembler)|(GCC)|(Free Software Foundation)":
+clang version 20.1.8 (https://github.com/robk-dev/llvm-project.git bbf91aa53798c9e24933040e73c336b57262af58)
+Target: x86_64-unknown-linux-gnu
+Thread model: posix
+InstalledDir: /home/robk/code/llvm-project/build/bin
+Build config: +assertions

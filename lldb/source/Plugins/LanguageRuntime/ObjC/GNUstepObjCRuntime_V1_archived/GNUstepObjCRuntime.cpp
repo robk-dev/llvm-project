@@ -7,9 +7,18 @@
 //===----------------------------------------------------------------------===//
 
 #include "GNUstepObjCRuntime.h"
-#include "GNUstepFormatterRegistration.h"
 #include "GNUstepSyntheticProvider.h"
 #include "GNUstepUniversalProvider.h"
+#include "GNUstepStringSummaryProvider.h"
+#include "GNUstepNSString.h"
+#include "GNUstepNumberSummaryProvider.h"
+#include "GNUstepNSDate.h"
+#include "GNUstepArraySyntheticProvider.h"
+#include "GNUstepArraySummaryProvider.h"
+#include "GNUstepNSArray.h"
+#include "GNUstepNSSet.h"
+#include "GNUstepNSDictionary.h"
+#include "GNUstepCustomClass.h"
 #include "GNUstepUtilities.h"
 #include "ISAResolver.h"
 #include "RuntimeIntrospector.h"
@@ -1430,46 +1439,442 @@ void GNUstepObjCRuntime::RegisterSyntheticProviders() {
     return;
   }
   
+  // HYBRID APPROACH: Skip C++ synthetic children, use Python instead
+  // This avoids offset discovery and recursion issues
+  LLDB_LOG(log, "GNUstepObjCRuntime: HYBRID MODE - Registering summary providers only");
+  LLDB_LOG(log, "GNUstepObjCRuntime: Synthetic children will be handled by Python bridge");
+  
   if (!m_process) {
     LLDB_LOG(log, "GNUstepObjCRuntime: No process available for provider registration");
     return;
   }
   
-  LLDB_LOG(log, "GNUstepObjCRuntime: Starting modular formatter registration");
+  // Create synthetic children provider for custom objects using GNUstepUniversalProvider
+  SyntheticChildrenSP synth_sp(new CXXSyntheticChildren(
+      SyntheticChildren::Flags()
+          .SetCascades(true)
+          .SetSkipPointers(false)
+          .SetSkipReferences(false),
+      "GNUstep Universal Provider for custom objects",
+      formatters::GNUstepUniversalProviderCreator));
+  LLDB_LOG(log, "GNUstepObjCRuntime: Created GNUstepUniversalProvider synthetic children provider");
   
-  // Create our own "gnustep/libobjc2" category for GNUstep/libobjc2 formatters
-  // This avoids conflicts with Apple's built-in NSArray/NSDictionary formatters
-  TypeCategoryImplSP gnustep_libobjc2_category;
-  DataVisualization::Categories::GetCategory(ConstString("gnustep/libobjc2"), gnustep_libobjc2_category);
+  // Get or create the objc category
+  TypeCategoryImplSP objc_category;
+  if (!DataVisualization::Categories::GetCategory(ConstString("objc"), objc_category)) {
+    LLDB_LOG(log, "GNUstepObjCRuntime: objc category not found, using default");
+    DataVisualization::Categories::GetCategory(ConstString("default"), objc_category);
+  }
   
-  if (!gnustep_libobjc2_category) {
-    LLDB_LOG(log, "GNUstepObjCRuntime: Failed to get/create gnustep/libobjc2 category");
+  if (!objc_category) {
+    LLDB_LOG(log, "GNUstepObjCRuntime: No category available for provider registration");
     return;
   }
   
-  // Register formatters using modular functions in our gnustep/libobjc2 category
-  formatters::RegisterGNUstepStringFormatters(gnustep_libobjc2_category, log);
-  formatters::RegisterGNUstepNumberFormatters(gnustep_libobjc2_category, log);
-  formatters::RegisterGNUstepDateFormatters(gnustep_libobjc2_category, log);
-  formatters::RegisterGNUstepCollectionFormatters(gnustep_libobjc2_category, log);
-  formatters::RegisterGNUstepUniversalFormatters(gnustep_libobjc2_category, log);
+  // RESEARCH-GUIDED APPROACH: Register as dynamic type handler for generic ObjC objects
+  // This follows our research principle: "generic ivar dumping is enough for simple cases"
+  // and "dynamic type resolution for id or base NSObject* types"
+  
+  // Register for BASE Objective-C types only (not specific classes)
+  // This allows dynamic type resolution to work properly
+  std::vector<std::pair<std::string, bool>> target_types = {
+    // REMOVED: {"NSObject *", false},  // This causes recursion!
+    // REMOVED: {"NSObject", false},   // This also causes recursion!
+    {"id", false},          // Generic Objective-C object pointer
+    
+    // Pointer types (for direct variable access like 'account')
+    // CRITICAL FIX: Exclude Foundation collection types to avoid conflicts with specific providers
+    {"^(?!NS(Array|Dictionary|Set|String|Number|Date|Object))[A-Z][a-zA-Z0-9_]+ \\*$", true},  // REGEX: Custom class with space, excluding Foundation
+    {"^(?!NS(Array|Dictionary|Set|String|Number|Date|Object))[A-Z][a-zA-Z0-9_]+\\*$", true},   // REGEX: Custom class without space, excluding Foundation
+    
+    // Non-pointer types (for dereferenced access like '*account')
+    {"^(?!NS(Array|Dictionary|Set|String|Number|Date|Object)|GS(Array|Dictionary|Set|String|Number|Date))[A-Z][a-zA-Z0-9_]+$", true}, // REGEX: Custom class, excluding Foundation and GNUstep internals
+    // NO NSObject to avoid recursion - only user-defined classes!
+  };
+  
+  // Register GNUstepUniversalProvider for custom objects
+  // This enables property display for custom classes like BankAccount
+  if (synth_sp) {
+    // Register the provider for each custom object type pattern
+    for (const auto &type_info : target_types) {
+      const std::string &type_name = type_info.first;
+      bool is_regex = type_info.second;
+      
+      ConstString type_const(type_name.c_str());
+      lldb::FormatterMatchType match_type = is_regex ? 
+          lldb::eFormatterMatchRegex : lldb::eFormatterMatchExact;
+      
+      objc_category->AddTypeSynthetic(type_const, match_type, synth_sp);
+      LLDB_LOG(log, "GNUstepObjCRuntime: Registered GNUstepUniversalProvider for type: {0}", type_name);
+    }
+  }
+  
+  // Register NSString summary provider to show actual string content
+  TypeSummaryImplSP string_summary_sp(new CXXFunctionSummaryFormat(
+      TypeSummaryImpl::Flags().SetCascades(true)
+                              .SetSkipPointers(false)
+                              .SetSkipReferences(false)
+                              .SetDontShowChildren(false)
+                              .SetDontShowValue(false)
+                              .SetShowMembersOneLiner(false)
+                              .SetHideItemNames(false),
+      formatters::GNUstepNSStringSummaryProvider,
+      "NSString summary"));
+  
+  if (string_summary_sp) {
+    // Register for NSString and related classes + generic id type
+    std::vector<std::string> string_types = {
+      "NSString",
+      "NSString *",
+      "NSConstantString", 
+      "NSConstantString *",
+      "NSMutableString",
+      "NSMutableString *",
+      "GSTinyString",
+      "GSTinyString *",
+      "GSPlaceholderString", 
+      "GSPlaceholderString *",
+      "GSCString",
+      "GSCString *",
+      "GSUnicodeString",
+      "GSUnicodeString *",
+      "id"  // CRITICAL: Register for id type to handle synthetic children from expression evaluation
+    };
+    
+    for (const std::string &type_name : string_types) {
+      objc_category->AddTypeSummary(ConstString(type_name.c_str()), 
+                                   lldb::eFormatterMatchExact, 
+                                   string_summary_sp);
+      LLDB_LOG(log, "GNUstepObjCRuntime: Registered NSString summary provider for type: {0}", type_name);
+    }
+  }
 
-  // Enable the gnustep/libobjc2 category with HIGH PRIORITY
-  // This ensures our formatters take precedence over Apple's
-  DataVisualization::Categories::Enable(ConstString("gnustep/libobjc2"));
+  // Register NSNumber summary provider to show actual numeric values
+  TypeSummaryImplSP number_summary_sp(new CXXFunctionSummaryFormat(
+      TypeSummaryImpl::Flags().SetCascades(true)
+                              .SetSkipPointers(false)
+                              .SetSkipReferences(false)
+                              .SetDontShowChildren(false)
+                              .SetDontShowValue(false)
+                              .SetShowMembersOneLiner(false)
+                              .SetHideItemNames(false),
+      formatters::GNUstepNumberSummaryProvider::FormatObject,
+      "NSNumber summary"));
   
-  // Set it to be applicable for Objective-C
-  gnustep_libobjc2_category->AddLanguage(lldb::eLanguageTypeObjC);
-  gnustep_libobjc2_category->AddLanguage(lldb::eLanguageTypeObjC_plus_plus);
+  if (number_summary_sp) {
+    // Register for NSNumber and related classes
+    std::vector<std::string> number_types = {
+      "NSNumber",
+      "NSNumber *", 
+      "NSDecimalNumber",
+      "NSDecimalNumber *"
+    };
+    
+    for (const std::string &type_name : number_types) {
+      objc_category->AddTypeSummary(ConstString(type_name.c_str()), 
+                                   lldb::eFormatterMatchExact, 
+                                   number_summary_sp);
+      LLDB_LOG(log, "GNUstepObjCRuntime: Registered NSNumber summary provider for type: {0}", type_name);
+    }
+  }
+
+  // Register NSDate summary provider to show actual date/time values
+  TypeSummaryImplSP date_summary_sp(new CXXFunctionSummaryFormat(
+      TypeSummaryImpl::Flags().SetCascades(true)
+                              .SetSkipPointers(false)
+                              .SetSkipReferences(false)
+                              .SetDontShowChildren(false)
+                              .SetDontShowValue(false)
+                              .SetShowMembersOneLiner(false)
+                              .SetHideItemNames(false),
+      formatters::GNUstepNSDateSummaryProvider,
+      "NSDate summary"));
   
-  // Also enable objc category for fallback (lower priority)
+  if (date_summary_sp) {
+    // Register for NSDate and related classes
+    std::vector<std::string> date_types = {
+      "NSDate",
+      "NSDate *",
+      "NSCalendarDate", 
+      "NSCalendarDate *"
+      // DO NOT register for "id" - it overrides all other providers!
+    };
+    
+    for (const std::string &type_name : date_types) {
+      objc_category->AddTypeSummary(ConstString(type_name.c_str()), 
+                                   lldb::eFormatterMatchExact, 
+                                   date_summary_sp);
+      LLDB_LOG(log, "GNUstepObjCRuntime: Registered NSDate summary provider for type: {0}", type_name);
+    }
+  }
+
+  // Register NSSet synthetic provider to enable expansion of set elements
+  SyntheticChildrenSP set_synth_sp(new CXXSyntheticChildren(
+      SyntheticChildren::Flags().SetCascades(true)
+                                .SetSkipPointers(false)
+                                .SetSkipReferences(false),
+      "NSSet synthetic children",
+      formatters::GNUstepNSSetSyntheticFrontEndCreator));
+
+  if (set_synth_sp) {
+    // Register for NSSet and related classes
+    std::vector<std::string> set_types = {
+      "NSSet",
+      "NSSet *",
+      "NSMutableSet",
+      "NSMutableSet *",
+      "GSSet",
+      "GSSet *",
+      "GSMutableSet",
+      "GSMutableSet *",
+      "__NSSetI",
+      "__NSSetI *",
+      "__NSSetM",
+      "__NSSetM *"
+    };
+    
+    for (const std::string &type_name : set_types) {
+      objc_category->AddTypeSynthetic(ConstString(type_name.c_str()),
+                                     lldb::eFormatterMatchExact,
+                                     set_synth_sp);
+      LLDB_LOG(log, "GNUstepObjCRuntime: Registered NSSet synthetic provider for type: {0}", type_name);
+    }
+  }
+
+  // Register NSSet summary provider to show element count
+  TypeSummaryImplSP set_summary_sp(new CXXFunctionSummaryFormat(
+      TypeSummaryImpl::Flags().SetCascades(true)
+                              .SetSkipPointers(false)
+                              .SetSkipReferences(false)
+                              .SetDontShowChildren(false)
+                              .SetDontShowValue(false)
+                              .SetShowMembersOneLiner(false)
+                              .SetHideItemNames(false),
+      formatters::GNUstepNSSetSummaryProvider,
+      "NSSet summary"));
+  
+  if (set_summary_sp) {
+    // Register for same types as synthetic provider
+    std::vector<std::string> set_types = {
+      "NSSet",
+      "NSSet *",
+      "NSMutableSet",
+      "NSMutableSet *",
+      "GSSet",
+      "GSSet *",
+      "GSMutableSet",
+      "GSMutableSet *",
+      "__NSSetI",
+      "__NSSetI *",
+      "__NSSetM",
+      "__NSSetM *"
+    };
+    
+    for (const std::string &type_name : set_types) {
+      objc_category->AddTypeSummary(ConstString(type_name.c_str()), 
+                                   lldb::eFormatterMatchExact, 
+                                   set_summary_sp);
+      LLDB_LOG(log, "GNUstepObjCRuntime: Registered NSSet summary provider for type: {0}", type_name);
+    }
+  }
+
+  // Register NSDictionary synthetic provider to enable expansion of key-value pairs
+  SyntheticChildrenSP dict_synth_sp(new CXXSyntheticChildren(
+      SyntheticChildren::Flags().SetCascades(true)
+                                .SetSkipPointers(false)
+                                .SetSkipReferences(false),
+      "NSDictionary synthetic children",
+      formatters::GNUstepNSDictionarySyntheticFrontEndCreator));
+
+  if (dict_synth_sp) {
+    // Register for NSDictionary and related classes
+    std::vector<std::string> dict_types = {
+      "NSDictionary",
+      "NSDictionary *",
+      "NSMutableDictionary",
+      "NSMutableDictionary *",
+      "GSDictionary",
+      "GSDictionary *",
+      "GSMutableDictionary",
+      "GSMutableDictionary *",
+      "__NSDictionaryI",
+      "__NSDictionaryI *",
+      "__NSDictionaryM",
+      "__NSDictionaryM *"
+    };
+    
+    for (const std::string &type_name : dict_types) {
+      objc_category->AddTypeSynthetic(ConstString(type_name.c_str()),
+                                     lldb::eFormatterMatchExact,
+                                     dict_synth_sp);
+      LLDB_LOG(log, "GNUstepObjCRuntime: Registered NSDictionary synthetic provider for type: {0}", type_name);
+    }
+  }
+
+  // Register NSDictionary summary provider to show key-value pair count and preview
+  TypeSummaryImplSP dict_summary_sp(new CXXFunctionSummaryFormat(
+      TypeSummaryImpl::Flags().SetCascades(true)
+                              .SetSkipPointers(false)
+                              .SetSkipReferences(false)
+                              .SetDontShowChildren(false)
+                              .SetDontShowValue(false)
+                              .SetShowMembersOneLiner(false)
+                              .SetHideItemNames(false),
+      formatters::GNUstepNSDictionarySummaryProvider,
+      "NSDictionary summary"));
+  
+  if (dict_summary_sp) {
+    // Register for same types as synthetic provider
+    std::vector<std::string> dict_types = {
+      "NSDictionary",
+      "NSDictionary *",
+      "NSMutableDictionary",
+      "NSMutableDictionary *",
+      "GSDictionary",
+      "GSDictionary *",
+      "GSMutableDictionary",
+      "GSMutableDictionary *",
+      "__NSDictionaryI",
+      "__NSDictionaryI *",
+      "__NSDictionaryM",
+      "__NSDictionaryM *"
+    };
+    
+    for (const std::string &type_name : dict_types) {
+      objc_category->AddTypeSummary(ConstString(type_name.c_str()), 
+                                   lldb::eFormatterMatchExact, 
+                                   dict_summary_sp);
+      LLDB_LOG(log, "GNUstepObjCRuntime: Registered NSDictionary summary provider for type: {0}", type_name);
+    }
+  }
+
+  // Register NSArray summary provider with element preview
+  TypeSummaryImplSP array_summary_sp(new CXXFunctionSummaryFormat(
+      TypeSummaryImpl::Flags().SetCascades(true)
+                              .SetSkipPointers(false)
+                              .SetSkipReferences(false)
+                              .SetDontShowChildren(false)
+                              .SetDontShowValue(false)
+                              .SetShowMembersOneLiner(false)
+                              .SetHideItemNames(false),
+      formatters::GNUstepNSArraySummaryProvider,
+      "NSArray summary"));
+  
+  if (array_summary_sp) {
+    // Register for NSArray and related classes
+    std::vector<std::string> array_types = {
+      "NSArray",
+      "NSArray *",
+      "NSMutableArray", 
+      "NSMutableArray *",
+      "GSInlineArray",
+      "GSInlineArray *",
+      "GSMutableArray",
+      "GSMutableArray *",
+      "GSArray",
+      "GSArray *",
+      "GSArray0",
+      "GSArray0 *", 
+      "GSArray1",
+      "GSArray1 *",
+      "__NSArrayI",
+      "__NSArrayI *",
+      "__NSArrayM", 
+      "__NSArrayM *"
+    };
+    
+    for (const std::string &type_name : array_types) {
+      objc_category->AddTypeSummary(ConstString(type_name.c_str()), 
+                                   lldb::eFormatterMatchExact, 
+                                   array_summary_sp);
+      LLDB_LOG(log, "GNUstepObjCRuntime: Registered NSArray summary provider for type: {0}", type_name);
+    }
+  }
+
+  // Register NSArray synthetic provider to enable expansion of array elements  
+  // Uses our improved GNUstepNSArraySyntheticProvider with inline array support
+  SyntheticChildrenSP array_synth_sp(new CXXSyntheticChildren(
+      SyntheticChildren::Flags().SetCascades(true)
+                                .SetSkipPointers(false)
+                                .SetSkipReferences(false),
+      "NSArray synthetic children",
+      [](CXXSyntheticChildren *, lldb::ValueObjectSP valobj_sp) -> SyntheticChildrenFrontEnd * {
+        if (!valobj_sp)
+          return nullptr;
+        return new formatters::GNUstepNSArraySyntheticProvider(valobj_sp);
+      }));
+
+  if (array_synth_sp) {
+    // Register for NSArray and related classes - using EUREKA pattern
+    std::vector<std::string> array_types = {
+      "NSArray",
+      "NSArray *",
+      "NSMutableArray", 
+      "NSMutableArray *",
+      "GSInlineArray",
+      "GSInlineArray *",
+      "GSMutableArray",
+      "GSMutableArray *",
+      "GSArray0",
+      "GSArray0 *", 
+      "GSArray1",
+      "GSArray1 *",
+      "__NSArrayI",
+      "__NSArrayI *",
+      "__NSArrayM", 
+      "__NSArrayM *"
+    };
+    
+    // Register the synthetic provider for all array types
+    for (const std::string &type_name : array_types) {
+      objc_category->AddTypeSynthetic(ConstString(type_name.c_str()),
+                                     lldb::eFormatterMatchExact,
+                                     array_synth_sp);
+      LLDB_LOG(log, "GNUstepObjCRuntime: Registered NSArray synthetic provider for type: {0}", type_name);
+    }
+  }
+
+  // Register Custom Class summary provider for ALL non-Foundation classes
+  // This provides "ClassName {prop1=val1, prop2=val2, ...}" format for user-defined classes
+  TypeSummaryImplSP custom_summary_sp(new CXXFunctionSummaryFormat(
+      TypeSummaryImpl::Flags().SetCascades(true)   // HIGH priority - allow cascading
+                              .SetSkipPointers(false)
+                              .SetSkipReferences(false)
+                              .SetDontShowChildren(false)
+                              .SetDontShowValue(false)
+                              .SetShowMembersOneLiner(false)
+                              .SetHideItemNames(false),
+      formatters::GNUstepCustomClassSummaryProvider,
+      "Custom Class summary"));
+  
+  if (custom_summary_sp) {
+    // Register using regex pattern for custom classes (non-Foundation classes)
+    // Pattern matches classes starting with uppercase letter, not starting with NS/GS prefixes
+    std::vector<std::string> custom_class_patterns = {
+      "^[A-Z][a-zA-Z0-9_]+$",       // Match: BankAccount, Person, CustomClass
+      "^[A-Z][a-zA-Z0-9_]+ \\*$"    // Match: BankAccount *, Person *, CustomClass *
+    };
+    
+    // Use objc category but with higher priority (cascading=true)
+    // This ensures our custom class formatter takes precedence
+    
+    for (const std::string &pattern : custom_class_patterns) {
+      objc_category->AddTypeSummary(ConstString(pattern.c_str()),
+                                   lldb::eFormatterMatchRegex,
+                                   custom_summary_sp);
+      LLDB_LOG(log, "GNUstepObjCRuntime: Registered Custom Class summary provider for pattern: {0}", pattern);
+    }
+  }
+
+
+  // Enable the categories
   DataVisualization::Categories::Enable(ConstString("objc"));
   DataVisualization::Categories::Enable(ConstString("default"));
   
   // Mark providers as registered to prevent duplicates
   m_providers_registered = true;
   
-  LLDB_LOG(log, "GNUstepObjCRuntime: Modular formatter registration completed successfully!");
+  LLDB_LOG(log, "GNUstepObjCRuntime: GENERIC runtime introspection registration completed - now with NSString, NSNumber, and NSDate summaries!");
 }
 
 DeclVendor *GNUstepObjCRuntime::GetDeclVendor() {

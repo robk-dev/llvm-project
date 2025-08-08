@@ -1,0 +1,67 @@
+# LLDB command script for testing NSString formatter
+# Usage: lldb -s test_nsstring_formatter.lldb test_nsstring_formatter
+
+# Set breakpoint at test point
+breakpoint set --file test_nsstring_formatter.m --line 69
+
+# Run the program
+run
+
+# Test basic string formatting with po (print object)
+print "=== Testing NSString formatter with 'po' command ==="
+
+po constantString1
+po constantString2
+po emptyConstant
+
+po mutableString1
+po mutableString2
+
+po cStringBased
+po utf8String
+
+po formatString
+po formatWithFloat
+
+po specialChars
+po unicode
+
+po substring1
+po substring2
+po substring3
+
+# Test with p command (should also use formatter)
+print "=== Testing NSString formatter with 'p' command ==="
+
+p constantString1
+p mutableString1
+p utf8String
+p unicode
+
+# Test frame variable with object description
+print "=== Testing with 'frame variable -O' ==="
+
+frame variable -O constantString1
+frame variable -O mutableString1
+frame variable -O utf8String
+frame variable -O unicode
+frame variable -O specialChars
+
+# Test nil handling
+print "=== Testing nil string handling ==="
+po nilString
+
+# Test long string (should truncate appropriately)
+print "=== Testing long string ==="
+po immutableLong
+
+# Test array of strings
+print "=== Testing array of strings ==="
+po stringArray
+
+# Show all string variables with their types
+print "=== All string variables ==="
+frame variable -T -O
+
+# Continue execution
+continue

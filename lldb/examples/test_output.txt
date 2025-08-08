@@ -1,0 +1,32 @@
+[GNUstepObjC] Initialize() called, registering plugin
+[GNUstepObjC] Initialize() complete
+🎯 Global .lldbinit loaded - project-specific .lldbinit files will now be read
+(lldb) target create custom_class_test
+Current executable set to '/home/robk/code/llvm-project/lldb/examples/custom_class_test' (x86_64).
+(lldb) breakpoint set -f custom_class_test.m -l 125
+Breakpoint 1: where = custom_class_test`main + 1687 at custom_class_test.m:128:5, address = 0x0000000000002fe7
+(lldb) run
+[GNUstepObjC] CreateInstance called, language=16
+[GNUstepObjC] Checking for GNUstep runtime libraries...
+[GNUstepObjC] Checking module: custom_class_test
+[GNUstepObjC] Checking module: ld-linux-x86-64.so.2
+[GNUstepObjC] Libraries not found, checking executable for .objc_ symbols
+[GNUstepObjC] Found .objc_ symbol '.objc_method_list', creating runtime
+[GNUstepObjC] Runtime constructor called
+[GNUstepObjC] ModulesDidLoad called with 1 modules
+[GNUstepObjC] No GNUstep libraries found in this module load
+[GNUstepObjC] CreateInstance called, language=17
+[GNUstepObjC] Wrong language (17 != 16), returning nullptr
+[GNUstepObjC] ModulesDidLoad called with 1 modules
+[GNUstepObjC] No GNUstep libraries found in this module load
+[GNUstepObjC] CreateInstance called, language=17
+[GNUstepObjC] Wrong language (17 != 16), returning nullptr
+[GNUstepObjC] ModulesDidLoad called with 1 modules
+[GNUstepObjC] No GNUstep libraries found in this module load
+[GNUstepObjC] CreateInstance called, language=17
+[GNUstepObjC] Wrong language (17 != 16), returning nullptr
+Process 477785 launched: '/home/robk/code/llvm-project/lldb/examples/custom_class_test' (x86_64)
+frame variable fruits
+quit
+[GNUstepObjC] CreateInstance called, language=17
+[GNUstepObjC] Wrong language (17 != 16), returning nullptr

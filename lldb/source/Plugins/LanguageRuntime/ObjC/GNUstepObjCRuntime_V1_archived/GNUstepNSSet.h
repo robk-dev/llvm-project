@@ -11,7 +11,6 @@
 #include "lldb/DataFormatters/TypeSummary.h"
 #include "lldb/DataFormatters/TypeSynthetic.h"
 #include "lldb/Symbol/CompilerType.h"
-#include "GNUstepRuntimeAPI.h"
 
 namespace lldb_private {
 namespace formatters {
@@ -44,16 +43,6 @@ private:
   std::vector<lldb::addr_t> m_element_addresses;
   bool m_has_valid_data = false;
   CompilerType m_objc_id_type; // Apple's ObjCBuiltinIdTy for automatic summary provider application
-  
-  // Runtime API for dynamic offset discovery
-  GNUstepRuntimeAPISP m_runtime_api;
-  ptrdiff_t m_map_offset = -1;
-  ptrdiff_t m_nodeCount_offset = -1;
-  ptrdiff_t m_buckets_offset = -1;
-  bool m_offsets_cached = false;
-  
-  // Dynamic offset discovery using runtime API
-  bool DiscoverOffsets();
   
   // Try to extract elements using expression evaluation (most reliable)
   bool ExtractElementsUsingExpression(lldb::StackFrameSP frame_sp);

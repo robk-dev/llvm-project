@@ -7,26 +7,784 @@
 //===----------------------------------------------------------------------===//
 
 #include "GNUstepObjCDeclVendor.h"
-#include "Plugins/TypeSystem/Clang/TypeSystemClang.h"
-#include "lldb/Utility/ConstString.h"
+#include "GNUstepObjCRuntimeIntrospector.h"
 
-using namespace lldb;
+#include "Plugins/ExpressionParser/Clang/ClangASTMetadata.h"
+#include "Plugins/ExpressionParser/Clang/ClangUtil.h"
+#include "Plugins/LanguageRuntime/ObjC/ObjCLanguageRuntime.h"
+#include "lldb/Core/Module.h"
+#include "lldb/Target/Process.h"
+#include "lldb/Target/Target.h"
+#include "lldb/Utility/LLDBLog.h"
+#include "lldb/Utility/Log.h"
+
+#include "clang/AST/ASTContext.h"
+#include "clang/AST/DeclObjC.h"
+#include "clang/AST/ExternalASTSource.h"
+
 using namespace lldb_private;
 
-GNUstepObjCDeclVendor::GNUstepObjCDeclVendor(TypeSystemClang &ast,
-                                             GNUstepObjCRuntimeIntrospector &introspector)
-    : ClangDeclVendor(eClangDeclVendorKindGNUstepObjC), m_ast(ast), m_introspector(introspector) {}
+class lldb_private::GNUstepObjCExternalASTSource
+    : public clang::ExternalASTSource {
+public:
+  GNUstepObjCExternalASTSource(GNUstepObjCDeclVendor &decl_vendor)
+      : m_decl_vendor(decl_vendor) {}
+
+  bool FindExternalVisibleDeclsByName(
+      const clang::DeclContext *decl_ctx, clang::DeclarationName name,
+      const clang::DeclContext *original_dc) override {
+
+    Log *log(GetLog(LLDBLog::Expressions));
+
+    if (log) {
+      LLDB_LOGF(log,
+                "GNUstepObjCExternalASTSource::FindExternalVisibleDeclsByName"
+                " on (ASTContext*)%p Looking for %s in (%sDecl*)%p",
+                static_cast<void *>(&decl_ctx->getParentASTContext()),
+                name.getAsString().c_str(), decl_ctx->getDeclKindName(),
+                static_cast<const void *>(decl_ctx));
+    }
+
+    do {
+      const clang::ObjCInterfaceDecl *interface_decl =
+          llvm::dyn_cast<clang::ObjCInterfaceDecl>(decl_ctx);
+
+      if (!interface_decl)
+        break;
+
+      clang::ObjCInterfaceDecl *non_const_interface_decl =
+          const_cast<clang::ObjCInterfaceDecl *>(interface_decl);
+
+      if (!m_decl_vendor.FinishDecl(non_const_interface_decl))
+        break;
+
+      clang::DeclContext::lookup_result result =
+          non_const_interface_decl->lookup(name);
+
+      return (!result.empty());
+    } while (false);
+
+    SetNoExternalVisibleDeclsForName(decl_ctx, name);
+    return false;
+  }
+
+  void CompleteType(clang::TagDecl *tag_decl) override {
+    Log *log(GetLog(LLDBLog::Expressions));
+    LLDB_LOGF(log,
+              "GNUstepObjCExternalASTSource::CompleteType on "
+              "(ASTContext*)%p Completing (TagDecl*)%p named %s",
+              static_cast<void *>(&tag_decl->getASTContext()),
+              static_cast<void *>(tag_decl), tag_decl->getName().str().c_str());
+  }
+
+  void CompleteType(clang::ObjCInterfaceDecl *interface_decl) override {
+    Log *log(GetLog(LLDBLog::Expressions));
+
+    if (log) {
+      LLDB_LOGF(log,
+                "GNUstepObjCExternalASTSource::CompleteType on "
+                "(ASTContext*)%p Completing (ObjCInterfaceDecl*)%p named %s",
+                static_cast<void *>(&interface_decl->getASTContext()),
+                static_cast<void *>(interface_decl),
+                interface_decl->getName().str().c_str());
+    }
+
+    m_decl_vendor.FinishDecl(interface_decl);
+  }
+
+  bool layoutRecordType(
+      const clang::RecordDecl *Record, uint64_t &Size, uint64_t &Alignment,
+      llvm::DenseMap<const clang::FieldDecl *, uint64_t> &FieldOffsets,
+      llvm::DenseMap<const clang::CXXRecordDecl *, clang::CharUnits>
+          &BaseOffsets,
+      llvm::DenseMap<const clang::CXXRecordDecl *, clang::CharUnits>
+          &VirtualBaseOffsets) override {
+    return false;
+  }
+
+  void StartTranslationUnit(clang::ASTConsumer *Consumer) override {
+    clang::TranslationUnitDecl *translation_unit_decl =
+        m_decl_vendor.m_ast_ctx->getASTContext().getTranslationUnitDecl();
+    translation_unit_decl->setHasExternalVisibleStorage();
+    translation_unit_decl->setHasExternalLexicalStorage();
+  }
+
+private:
+  GNUstepObjCDeclVendor &m_decl_vendor;
+};
+
+GNUstepObjCDeclVendor::GNUstepObjCDeclVendor(ObjCLanguageRuntime &runtime)
+    : ClangDeclVendor(eGNUstepObjCDeclVendor), m_runtime(runtime),
+      m_type_realizer_sp(m_runtime.GetEncodingToType()) {
+  m_ast_ctx = std::make_shared<TypeSystemClang>(
+      "GNUstepObjCDeclVendor AST",
+      runtime.GetProcess()->GetTarget().GetArchitecture().GetTriple());
+  m_external_source = new GNUstepObjCExternalASTSource(*this);
+  llvm::IntrusiveRefCntPtr<clang::ExternalASTSource> external_source_owning_ptr(
+      m_external_source);
+  m_ast_ctx->getASTContext().setExternalSource(external_source_owning_ptr);
+}
+
+clang::ObjCInterfaceDecl *
+GNUstepObjCDeclVendor::GetDeclForISA(ObjCLanguageRuntime::ObjCISA isa) {
+  ISAToInterfaceMap::const_iterator iter = m_isa_to_interface.find(isa);
+
+  if (iter != m_isa_to_interface.end())
+    return iter->second;
+
+  clang::ASTContext &ast_ctx = m_ast_ctx->getASTContext();
+
+  ObjCLanguageRuntime::ClassDescriptorSP descriptor =
+      m_runtime.GetClassDescriptorFromISA(isa);
+
+  if (!descriptor)
+    return nullptr;
+
+  ConstString name(descriptor->GetClassName());
+
+  clang::IdentifierInfo &identifier_info =
+      ast_ctx.Idents.get(name.GetStringRef());
+
+  clang::ObjCInterfaceDecl *new_iface_decl = clang::ObjCInterfaceDecl::Create(
+      ast_ctx, ast_ctx.getTranslationUnitDecl(), clang::SourceLocation(),
+      &identifier_info, nullptr, nullptr);
+
+  ClangASTMetadata meta_data;
+  meta_data.SetISAPtr(isa);
+  m_ast_ctx->SetMetadata(new_iface_decl, meta_data);
+
+  new_iface_decl->setHasExternalVisibleStorage();
+  new_iface_decl->setHasExternalLexicalStorage();
+
+  ast_ctx.getTranslationUnitDecl()->addDecl(new_iface_decl);
+
+  m_isa_to_interface[isa] = new_iface_decl;
+
+  return new_iface_decl;
+}
+
+// Foundation class method signatures for common classes
+struct FoundationMethodSignature {
+  const char *name;
+  const char *types;
+  bool is_instance;
+};
+
+// Method signatures for NSString
+static const FoundationMethodSignature NSString_methods[] = {
+  {"length", "Q@:", true},
+  {"characterAtIndex:", "S@:Q", true},
+  {"UTF8String", "*@:", true},
+  {"stringWithFormat:", "@#@:@", false},
+  {"stringWithCString:encoding:", "@#@:*Q", false},
+  {"description", "@@:", true},
+  {"isEqualToString:", "B@:@", true},
+  {"substringFromIndex:", "@@:Q", true},
+  {"substringToIndex:", "@@:Q", true},
+  {"substringWithRange:", "@@:{_NSRange=QQ}", true},
+  {nullptr, nullptr, false}
+};
+
+// Method signatures for NSNumber
+static const FoundationMethodSignature NSNumber_methods[] = {
+  {"numberWithInt:", "@#@:i", false},
+  {"numberWithDouble:", "@#@:d", false},
+  {"numberWithBool:", "@#@:B", false},
+  {"intValue", "i@:", true},
+  {"doubleValue", "d@:", true},
+  {"boolValue", "B@:", true},
+  {"stringValue", "@@:", true},
+  {"description", "@@:", true},
+  {nullptr, nullptr, false}
+};
+
+// Method signatures for NSArray
+static const FoundationMethodSignature NSArray_methods[] = {
+  {"count", "Q@:", true},
+  {"objectAtIndex:", "@@:Q", true},
+  {"firstObject", "@@:", true},
+  {"lastObject", "@@:", true},
+  {"arrayWithObjects:", "@#@:@@", false},
+  {"description", "@@:", true},
+  {"containsObject:", "B@:@", true},
+  {nullptr, nullptr, false}
+};
+
+// Method signatures for NSDictionary
+static const FoundationMethodSignature NSDictionary_methods[] = {
+  {"count", "Q@:", true},
+  {"objectForKey:", "@@:@", true},
+  {"allKeys", "@@:", true},
+  {"allValues", "@@:", true},
+  {"dictionaryWithObject:forKey:", "@#@:@@", false},
+  {"description", "@@:", true},
+  {nullptr, nullptr, false}
+};
+
+// Method signatures for NSSet
+static const FoundationMethodSignature NSSet_methods[] = {
+  {"count", "Q@:", true},
+  {"anyObject", "@@:", true},
+  {"allObjects", "@@:", true},
+  {"containsObject:", "B@:@", true},
+  {"setWithObjects:", "@#@:@@", false},
+  {"description", "@@:", true},
+  {nullptr, nullptr, false}
+};
+
+// Class-specific method signature tables
+static const struct {
+  const char *class_name;
+  const FoundationMethodSignature *methods;
+} foundation_class_methods[] = {
+  {"NSString", NSString_methods},
+  {"NSMutableString", NSString_methods},
+  {"NSConstantString", NSString_methods},
+  {"GSTinyString", NSString_methods},
+  {"GSMutableString", NSString_methods},
+  {"NSNumber", NSNumber_methods},
+  {"GSNumber", NSNumber_methods},
+  {"NSArray", NSArray_methods},
+  {"NSMutableArray", NSArray_methods},
+  {"GSArray", NSArray_methods},
+  {"GSMutableArray", NSArray_methods},
+  {"NSDictionary", NSDictionary_methods},
+  {"NSMutableDictionary", NSDictionary_methods},
+  {"GSDictionary", NSDictionary_methods},
+  {"GSMutableDictionary", NSDictionary_methods},
+  {"NSSet", NSSet_methods},
+  {"NSMutableSet", NSSet_methods},
+  {"GSSet", NSSet_methods},
+  {"GSMutableSet", NSSet_methods},
+  {nullptr, nullptr}
+};
+
+class GNUstepObjCRuntimeMethodType {
+public:
+  GNUstepObjCRuntimeMethodType(const char *types) {
+    const char *cursor = types;
+    enum ParserState { Start = 0, InType, InPos } state = Start;
+    const char *type = nullptr;
+    int brace_depth = 0;
+
+    uint32_t stepsLeft = 256;
+
+    while (true) {
+      if (--stepsLeft == 0) {
+        m_is_valid = false;
+        return;
+      }
+
+      switch (state) {
+      case Start: {
+        switch (*cursor) {
+        default:
+          state = InType;
+          type = cursor;
+          break;
+        case '\0':
+          m_is_valid = true;
+          return;
+        case '0':
+        case '1':
+        case '2':
+        case '3':
+        case '4':
+        case '5':
+        case '6':
+        case '7':
+        case '8':
+        case '9':
+          m_is_valid = false;
+          return;
+        }
+      } break;
+      case InType: {
+        switch (*cursor) {
+        default:
+          ++cursor;
+          break;
+        case '0':
+        case '1':
+        case '2':
+        case '3':
+        case '4':
+        case '5':
+        case '6':
+        case '7':
+        case '8':
+        case '9':
+          if (!brace_depth) {
+            state = InPos;
+            if (type) {
+              m_type_vector.push_back(std::string(type, (cursor - type)));
+            } else {
+              m_is_valid = false;
+              return;
+            }
+            type = nullptr;
+          } else {
+            ++cursor;
+          }
+          break;
+        case '[':
+        case '{':
+        case '(':
+          ++brace_depth;
+          ++cursor;
+          break;
+        case ']':
+        case '}':
+        case ')':
+          if (!brace_depth) {
+            m_is_valid = false;
+            return;
+          }
+          --brace_depth;
+          ++cursor;
+          break;
+        case '\0':
+          m_is_valid = false;
+          return;
+        }
+      } break;
+      case InPos: {
+        switch (*cursor) {
+        default:
+          state = InType;
+          type = cursor;
+          break;
+        case '0':
+        case '1':
+        case '2':
+        case '3':
+        case '4':
+        case '5':
+        case '6':
+        case '7':
+        case '8':
+        case '9':
+          ++cursor;
+          break;
+        case '\0':
+          m_is_valid = true;
+          return;
+        }
+      } break;
+      }
+    }
+  }
+
+  clang::ObjCMethodDecl *
+  BuildMethod(TypeSystemClang &clang_ast_ctxt,
+              clang::ObjCInterfaceDecl *interface_decl, const char *name,
+              bool instance,
+              ObjCLanguageRuntime::EncodingToTypeSP type_realizer_sp) {
+    // CRITICAL SAFETY CHECKS: Prevent crashes from invalid parameters
+    if (!interface_decl) {
+      return nullptr;
+    }
+    
+    if (!name || strlen(name) == 0) {
+      // This is the exact cause of the GSTinyString crash!
+      return nullptr;
+    }
+    
+    if (!m_is_valid || m_type_vector.size() < 3) {
+      return nullptr;
+    }
+
+    clang::ASTContext &ast_ctx(interface_decl->getASTContext());
+
+    const bool isInstance = instance;
+    const bool isVariadic = false;
+    const bool isPropertyAccessor = false;
+    const bool isSynthesizedAccessorStub = false;
+    const bool isImplicitlyDeclared = true;
+    const bool isDefined = false;
+    const clang::ObjCImplementationControl impControl =
+        clang::ObjCImplementationControl::None;
+    const bool HasRelatedResultType = false;
+    const bool for_expression = true;
+
+    std::vector<const clang::IdentifierInfo *> selector_components;
+
+    const char *name_cursor = name;
+    bool is_zero_argument = true;
+
+    // ENHANCED SAFETY: Validate name before processing
+    size_t name_len = strlen(name);
+    if (name_len == 0) {
+      // Double-check for empty selector names
+      return nullptr;
+    }
+
+    while (*name_cursor != '\0') {
+      const char *colon_loc = strchr(name_cursor, ':');
+      if (!colon_loc) {
+        // Ensure we don't create empty identifier
+        if (name_cursor != name || strlen(name_cursor) > 0) {
+          selector_components.push_back(
+              &ast_ctx.Idents.get(llvm::StringRef(name_cursor)));
+        }
+        break;
+      } else {
+        is_zero_argument = false;
+        // Ensure we don't create empty identifier components
+        if (colon_loc > name_cursor) {
+          selector_components.push_back(&ast_ctx.Idents.get(
+              llvm::StringRef(name_cursor, colon_loc - name_cursor)));
+        }
+        name_cursor = colon_loc + 1;
+      }
+    }
+
+    // SAFETY: Ensure we have at least one selector component
+    if (selector_components.empty()) {
+      return nullptr;
+    }
+
+    const clang::IdentifierInfo **identifier_infos = selector_components.data();
+    if (!identifier_infos) {
+      return nullptr;
+    }
+
+    clang::Selector sel = ast_ctx.Selectors.getSelector(
+        is_zero_argument ? 0 : selector_components.size(),
+        identifier_infos);
+
+    clang::QualType ret_type =
+        ClangUtil::GetQualType(type_realizer_sp->RealizeType(
+            clang_ast_ctxt, m_type_vector[0].c_str(), for_expression));
+
+    if (ret_type.isNull())
+      return nullptr;
+
+    clang::ObjCMethodDecl *ret = clang::ObjCMethodDecl::Create(
+        ast_ctx, clang::SourceLocation(), clang::SourceLocation(), sel,
+        ret_type, nullptr, interface_decl, isInstance, isVariadic,
+        isPropertyAccessor, isSynthesizedAccessorStub, isImplicitlyDeclared,
+        isDefined, impControl, HasRelatedResultType);
+
+    std::vector<clang::ParmVarDecl *> parm_vars;
+
+    for (size_t ai = 3, ae = m_type_vector.size(); ai != ae; ++ai) {
+      const bool for_expression = true;
+      clang::QualType arg_type =
+          ClangUtil::GetQualType(type_realizer_sp->RealizeType(
+              clang_ast_ctxt, m_type_vector[ai].c_str(), for_expression));
+
+      if (arg_type.isNull())
+        return nullptr; // well, we just wasted a bunch of time.  Wish we could
+                        // delete the stuff we'd just made!
+
+      parm_vars.push_back(clang::ParmVarDecl::Create(
+          ast_ctx, ret, clang::SourceLocation(), clang::SourceLocation(),
+          nullptr, arg_type, nullptr, clang::SC_None, nullptr));
+    }
+
+    ret->setMethodParams(ast_ctx,
+                         llvm::ArrayRef<clang::ParmVarDecl *>(parm_vars),
+                         llvm::ArrayRef<clang::SourceLocation>());
+
+    return ret;
+  }
+
+  explicit operator bool() { return m_is_valid; }
+
+  size_t GetNumTypes() { return m_type_vector.size(); }
+
+  const char *GetTypeAtIndex(size_t idx) { return m_type_vector[idx].c_str(); }
+
+private:
+  typedef std::vector<std::string> TypeVector;
+
+  TypeVector m_type_vector;
+  bool m_is_valid = false;
+};
+
+void GNUstepObjCDeclVendor::AddFoundationClassMethods(
+    clang::ObjCInterfaceDecl *interface_decl, const std::string &class_name) {
+  Log *log(GetLog(LLDBLog::Expressions));
+  
+  // SAFETY CHECK: Validate input parameters to prevent crashes
+  if (!interface_decl) {
+    LLDB_LOGF(log, "[GNUstepObjCDeclVendor] ERROR: interface_decl is null for class %s",
+              class_name.c_str());
+    return;
+  }
+  
+  if (class_name.empty()) {
+    LLDB_LOGF(log, "[GNUstepObjCDeclVendor] ERROR: class_name is empty");
+    return;
+  }
+  
+  // Find the method signatures for this class
+  const FoundationMethodSignature *methods = nullptr;
+  for (int i = 0; foundation_class_methods[i].class_name; i++) {
+    if (class_name == foundation_class_methods[i].class_name) {
+      methods = foundation_class_methods[i].methods;
+      break;
+    }
+  }
+  
+  if (!methods) {
+    LLDB_LOGF(log, "[GNUstepObjCDeclVendor] No method signatures found for class %s",
+              class_name.c_str());
+    return;
+  }
+  
+  // Add each method to the interface with enhanced safety checks
+  for (int i = 0; methods[i].name; i++) {
+    // CRITICAL SAFETY CHECK: Ensure method name and types are valid
+    if (!methods[i].name || strlen(methods[i].name) == 0) {
+      LLDB_LOGF(log, "[GNUstepObjCDeclVendor] ERROR: Invalid method name at index %d for class %s - SKIPPING",
+                i, class_name.c_str());
+      continue;  // Skip this method to prevent crash
+    }
+    
+    if (!methods[i].types || strlen(methods[i].types) == 0) {
+      LLDB_LOGF(log, "[GNUstepObjCDeclVendor] ERROR: Invalid method types for %s at index %d for class %s - SKIPPING",
+                methods[i].name, i, class_name.c_str());
+      continue;  // Skip this method to prevent crash
+    }
+    
+    clang::ObjCMethodDecl *method_decl = CreateMethodDecl(
+        interface_decl, methods[i].name, methods[i].types, methods[i].is_instance);
+    
+    if (method_decl) {
+      interface_decl->addDecl(method_decl);
+      LLDB_LOGF(log, "[GNUstepObjCDeclVendor] Successfully added method %s to %s",
+                methods[i].name, class_name.c_str());
+    } else {
+      LLDB_LOGF(log, "[GNUstepObjCDeclVendor] WARNING: Failed to create method decl for %s in class %s",
+                methods[i].name, class_name.c_str());
+    }
+  }
+}
+
+clang::ObjCMethodDecl *GNUstepObjCDeclVendor::CreateMethodDecl(
+    clang::ObjCInterfaceDecl *interface_decl, const char *name, const char *types,
+    bool is_instance) {
+  Log *log(GetLog(LLDBLog::Expressions));
+  
+  // CRITICAL SAFETY CHECKS: Prevent crashes from invalid inputs
+  if (!interface_decl) {
+    LLDB_LOGF(log, "[GNUstepObjCDeclVendor] ERROR: interface_decl is null in CreateMethodDecl");
+    return nullptr;
+  }
+  
+  if (!name) {
+    LLDB_LOGF(log, "[GNUstepObjCDeclVendor] ERROR: name is null in CreateMethodDecl");
+    return nullptr;
+  }
+  
+  if (!types) {
+    LLDB_LOGF(log, "[GNUstepObjCDeclVendor] ERROR: types is null in CreateMethodDecl");
+    return nullptr;
+  }
+  
+  // Handle empty selector names - this is a major source of crashes!
+  if (strlen(name) == 0) {
+    LLDB_LOGF(log, "[GNUstepObjCDeclVendor] CRITICAL ERROR: Empty selector name provided - this would cause NSInvalidArgumentException!");
+    return nullptr;
+  }
+  
+  // Validate types string is not empty
+  if (strlen(types) == 0) {
+    LLDB_LOGF(log, "[GNUstepObjCDeclVendor] ERROR: Empty types string provided for method %s", name);
+    return nullptr;
+  }
+  
+  // Additional safety: Check for reasonable selector name
+  if (strlen(name) > 1024) {
+    LLDB_LOGF(log, "[GNUstepObjCDeclVendor] ERROR: Selector name too long (%zu chars) for method %s", 
+              strlen(name), name);
+    return nullptr;
+  }
+  
+  LLDB_LOGF(log, "[GNUstepObjCDeclVendor] Creating method decl for selector '%s' with types '%s' (instance=%s)", 
+            name, types, is_instance ? "YES" : "NO");
+  
+  GNUstepObjCRuntimeMethodType method_type(types);
+  
+  if (!method_type) {
+    LLDB_LOGF(log, "[GNUstepObjCDeclVendor] ERROR: Invalid method type signature '%s' for method %s", 
+              types, name);
+    return nullptr;
+  }
+  
+  clang::ObjCMethodDecl *method_decl = method_type.BuildMethod(
+      *m_ast_ctx, interface_decl, name, is_instance, m_type_realizer_sp);
+  
+  if (!method_decl) {
+    LLDB_LOGF(log, "[GNUstepObjCDeclVendor] ERROR: Failed to build method declaration for %s", name);
+  } else {
+    LLDB_LOGF(log, "[GNUstepObjCDeclVendor] Successfully created method declaration for %s", name);
+  }
+  
+  return method_decl;
+}
+
+bool GNUstepObjCDeclVendor::FinishDecl(clang::ObjCInterfaceDecl *interface_decl) {
+  Log *log(GetLog(LLDBLog::Expressions));
+
+  // CRITICAL SAFETY CHECK: Prevent crash from null interface_decl
+  if (!interface_decl) {
+    LLDB_LOGF(log, "[GNUstepObjCDeclVendor::FinishDecl] CRITICAL ERROR: interface_decl is null!");
+    return false;
+  }
+
+  ObjCLanguageRuntime::ObjCISA objc_isa = 0;
+  if (std::optional<ClangASTMetadata> metadata =
+          m_ast_ctx->GetMetadata(interface_decl))
+    objc_isa = metadata->GetISAPtr();
+
+  if (!objc_isa) {
+    LLDB_LOGF(log, "[GNUstepObjCDeclVendor::FinishDecl] No ISA found for interface_decl");
+    return false;
+  }
+
+  if (!interface_decl->hasExternalVisibleStorage()) {
+    LLDB_LOGF(log, "[GNUstepObjCDeclVendor::FinishDecl] Interface already finished");
+    return true;
+  }
+
+  interface_decl->startDefinition();
+
+  interface_decl->setHasExternalVisibleStorage(false);
+  interface_decl->setHasExternalLexicalStorage(false);
+
+  ObjCLanguageRuntime::ClassDescriptorSP descriptor =
+      m_runtime.GetClassDescriptorFromISA(objc_isa);
+
+  if (!descriptor) {
+    LLDB_LOGF(log, "[GNUstepObjCDeclVendor::FinishDecl] No class descriptor found for ISA 0x%lx", (unsigned long)objc_isa);
+    return false;
+  }
+
+  std::string class_name = descriptor->GetClassName().AsCString();
+  
+  // SAFETY CHECK: Ensure class name is valid
+  if (class_name.empty()) {
+    LLDB_LOGF(log, "[GNUstepObjCDeclVendor::FinishDecl] ERROR: Empty class name for ISA 0x%lx", (unsigned long)objc_isa);
+    return false;
+  }
+  
+  LLDB_LOGF(log,
+            "[GNUstepObjCDeclVendor::FinishDecl] Finishing Objective-C "
+            "interface for %s (ISA: 0x%lx)", class_name.c_str(), (unsigned long)objc_isa);
+
+  // Add Foundation class methods if this is a known Foundation class
+  // This call is now protected with enhanced safety checks (no exceptions in LLDB)
+  AddFoundationClassMethods(interface_decl, class_name);
+
+  // For runtime introspection, we would need to implement:
+  // auto superclass_func = [interface_decl, this](ObjCLanguageRuntime::ObjCISA isa) { ... };
+  // auto instance_method_func = [log, interface_decl, this](const char *name, const char *types) -> bool { ... };
+  // auto class_method_func = [log, interface_decl, this](const char *name, const char *types) -> bool { ... };
+  // auto ivar_func = [log, interface_decl, this](const char *name, const char *type, lldb::addr_t offset_ptr, uint64_t size) -> bool { ... };
+  // descriptor->Describe(superclass_func, instance_method_func, class_method_func, ivar_func);
+
+  if (log) {
+    LLDB_LOGF(
+        log,
+        "[GNUstepObjCDeclVendor::FinishDecl] Finished Objective-C interface for %s",
+        class_name.c_str());
+
+    LLDB_LOG(log, "  [GNUstepObjCDeclVendor::FinishDecl] {0}", ClangUtil::DumpDecl(interface_decl));
+  }
+
+  return true;
+}
 
 uint32_t GNUstepObjCDeclVendor::FindDecls(ConstString name, bool append,
-                                           uint32_t max_matches,
-                                           std::vector<CompilerDecl> &decls) {
-  // For now, this is a stub implementation.
-  // In the full implementation, this would:
-  // 1. Use the introspector to find the class by name
-  // 2. Read the class's method list and instance variables
-  // 3. Create a clang::ObjCInterfaceDecl with those methods
-  // 4. Add it to the decls vector
-  
-  // TODO: Implement class lookup and AST node synthesis
-  return 0;
+                                        uint32_t max_matches,
+                                        std::vector<CompilerDecl> &decls) {
+
+  Log *log(GetLog(LLDBLog::Expressions));
+
+  LLDB_LOGF(log, "GNUstepObjCDeclVendor::FindDecls ('%s', %s, %u, )",
+            (const char *)name.AsCString(), append ? "true" : "false",
+            max_matches);
+
+  if (!append)
+    decls.clear();
+
+  uint32_t ret = 0;
+
+  do {
+    // See if the type is already in our ASTContext.
+    clang::ASTContext &ast_ctx = m_ast_ctx->getASTContext();
+
+    clang::IdentifierInfo &identifier_info =
+        ast_ctx.Idents.get(name.GetStringRef());
+    clang::DeclarationName decl_name =
+        ast_ctx.DeclarationNames.getIdentifier(&identifier_info);
+
+    clang::DeclContext::lookup_result lookup_result =
+        ast_ctx.getTranslationUnitDecl()->lookup(decl_name);
+
+    if (!lookup_result.empty()) {
+      if (clang::ObjCInterfaceDecl *result_iface_decl =
+             llvm::dyn_cast<clang::ObjCInterfaceDecl>(*lookup_result.begin())) {
+        if (log) {
+          clang::QualType result_iface_type =
+              ast_ctx.getObjCInterfaceType(result_iface_decl);
+
+          uint64_t isa_value = LLDB_INVALID_ADDRESS;
+          if (std::optional<ClangASTMetadata> metadata =
+                  m_ast_ctx->GetMetadata(result_iface_decl))
+            isa_value = metadata->GetISAPtr();
+
+          LLDB_LOGF(log,
+                    "GNUstepObjCDeclVendor::FindDecls Found %s (isa 0x%" PRIx64 ") in the ASTContext",
+                    result_iface_type.getAsString().data(), isa_value);
+        }
+
+        decls.push_back(m_ast_ctx->GetCompilerDecl(result_iface_decl));
+        ret++;
+        break;
+      } else {
+        LLDB_LOGF(log, "GNUstepObjCDeclVendor::FindDecls There's something in the ASTContext, but "
+                       "it's not something we know about");
+        break;
+      }
+    } else if (log) {
+      LLDB_LOGF(log, "GNUstepObjCDeclVendor::FindDecls Couldn't find %s in the ASTContext",
+                name.AsCString());
+    }
+
+    // It's not.  If it exists, we have to put it into our ASTContext.
+    ObjCLanguageRuntime::ObjCISA isa = m_runtime.GetISA(name);
+
+    if (!isa) {
+      LLDB_LOGF(log, "GNUstepObjCDeclVendor::FindDecls Couldn't find the isa for class %s",
+                name.AsCString());
+      break;
+    }
+
+    clang::ObjCInterfaceDecl *iface_decl = GetDeclForISA(isa);
+
+    if (!iface_decl) {
+      LLDB_LOGF(log,
+                "GNUstepObjCDeclVendor::FindDecls Couldn't get the Objective-C interface for "
+                "isa 0x%" PRIx64 " (class %s)",
+                (uint64_t)isa, name.AsCString());
+      break;
+    }
+
+    if (log) {
+      clang::QualType new_iface_type = ast_ctx.getObjCInterfaceType(iface_decl);
+
+      LLDB_LOGF(log, "GNUstepObjCDeclVendor::FindDecls Created %s (isa 0x%" PRIx64 ")",
+                new_iface_type.getAsString().c_str(), (uint64_t)isa);
+    }
+
+    decls.push_back(m_ast_ctx->GetCompilerDecl(iface_decl));
+    ret++;
+    break;
+  } while (false);
+
+  return ret;
 }

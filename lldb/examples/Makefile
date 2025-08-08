@@ -25,7 +25,10 @@ LDFLAGS = -L/usr/local/lib \
 LIBS = -lgnustep-base -lobjc -lBlocksRuntime -lpthread -lm
 
 # Source files
-SOURCES = simple_test.m custom_class_test.m foundation_test.m string_test.m
+SOURCES = simple_test.m custom_class_test.m foundation_test.m string_test.m \
+          test_nsstring_formatter.m test_nsnumber_formatter.m array_test.m \
+          simple_array_test.m test_nsnumber_comprehensive.m test_nsarray_comprehensive.m \
+          dictionary_test.m nsset_test.m
 EXECUTABLES = $(SOURCES:.m=)
 
 .PHONY: all clean symbols
@@ -59,6 +62,9 @@ custom_class_test: custom_class_test.m
 foundation_test: foundation_test.m
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $< $(LIBS)
 
+test_nsstring_formatter: test_nsstring_formatter.m
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $< $(LIBS)
+
 # Debug targets for testing our GNUstep runtime plugin
 debug: custom_class_test
 	@echo "Starting LLDB with custom_class_test..."
@@ -77,6 +83,60 @@ debug-custom: custom_class_test
 
 debug-foundation: foundation_test
 	$(LLDB) ./foundation_test
+
+debug-nsstring: test_nsstring_formatter
+	@echo "Starting LLDB with NSString formatter test..."
+	@echo "Commands to test the formatter:"
+	@echo "  (lldb) b test_nsstring_formatter.m:69"
+	@echo "  (lldb) run"
+	@echo "  (lldb) po constantString1"
+	@echo "  (lldb) po mutableString1"
+	@echo "  (lldb) po utf8String"
+	@echo "  (lldb) po unicode"
+	@echo "  (lldb) p constantString1"
+	@echo "  (lldb) frame variable -O"
+	export PATH="$(dir $(LLDB)):$$PATH" && \
+	export LLDB_DEBUGSERVER_PATH="$(dir $(LLDB))lldb-server" && \
+	$(LLDB) ./test_nsstring_formatter
+
+debug-nsnumber: test_nsnumber_formatter
+	@echo "Starting LLDB with NSNumber formatter test..."
+	@echo "Commands to test the formatter:"
+	@echo "  (lldb) b test_nsnumber_formatter.m:49"
+	@echo "  (lldb) run"
+	@echo "  (lldb) po intNumber"
+	@echo "  (lldb) po boolYes"
+	@echo "  (lldb) po boolNo"
+	@echo "  (lldb) po floatNumber"
+	@echo "  (lldb) po doubleNumber"
+	@echo "  (lldb) po longLongNumber"
+	@echo "  (lldb) po unsignedLongLong"
+	@echo "  (lldb) po smallInt1"
+	@echo "  (lldb) frame variable -O"
+	export PATH="$(dir $(LLDB)):$$PATH" && \
+	export LLDB_DEBUGSERVER_PATH="$(dir $(LLDB))lldb-server" && \
+	$(LLDB) ./test_nsnumber_formatter
+
+debug-array: array_test
+	@echo "Starting LLDB with NSArray formatter test..."
+	@echo "Commands to test the formatter:"
+	@echo "  (lldb) b array_test.m:97"
+	@echo "  (lldb) run"
+	@echo "  (lldb) po emptyArray"
+	@echo "  (lldb) po stringArray"
+	@echo "  (lldb) po numberArray"
+	@echo "  (lldb) po objectArray"
+	@echo "  (lldb) po nestedArray"
+	@echo "  (lldb) po mutableArray"
+	@echo "  (lldb) po largeArray"
+	@echo "  (lldb) po mixedArray"
+	@echo "  (lldb) frame variable -O"
+	@echo "  (lldb) frame variable stringArray"
+	@echo "  (lldb) p stringArray[0]"
+	@echo "  (lldb) p stringArray[1]"
+	export PATH="$(dir $(LLDB)):$$PATH" && \
+	export LLDB_DEBUGSERVER_PATH="$(dir $(LLDB))lldb-server" && \
+	$(LLDB) ./array_test
 
 # Test our plugin with a quick debug session
 test-plugin: custom_class_test
@@ -102,17 +162,83 @@ debug-simple: simple_test
 	export LLDB_DEBUGSERVER_PATH="$(dir $(LLDB))lldb-server" && \
 	$(LLDB) simple_test
 
+# Additional test targets
+test_nsnumber_comprehensive: test_nsnumber_comprehensive.m
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $< $(LIBS)
+
+test_nsarray_comprehensive: test_nsarray_comprehensive.m
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $< $(LIBS)
+
+simple_array_test: simple_array_test.m
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $< $(LIBS)
+
+dictionary_test: dictionary_test.m
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $< $(LIBS)
+
+nsset_test: nsset_test.m
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $< $(LIBS)
+
+debug-dictionary: dictionary_test
+	@echo "Starting LLDB with NSDictionary formatter test..."
+	@echo "Commands to test the formatter:"
+	@echo "  (lldb) b dictionary_test.m:53"
+	@echo "  (lldb) run"
+	@echo "  (lldb) po emptyDict"
+	@echo "  (lldb) po singleDict"
+	@echo "  (lldb) po multiDict"
+	@echo "  (lldb) po nestedDict"
+	@echo "  (lldb) po mutableDict"
+	@echo "  (lldb) po mixedDict"
+	@echo "  (lldb) po largeDict"
+	@echo "  (lldb) frame variable -O"
+	@echo "  (lldb) frame variable multiDict"
+	export PATH="$(dir $(LLDB)):$$PATH" && \
+	export LLDB_DEBUGSERVER_PATH="$(dir $(LLDB))lldb-server" && \
+	$(LLDB) ./dictionary_test
+
+debug-set: nsset_test
+	@echo "Starting LLDB with NSSet formatter test..."
+	@echo "Commands to test the formatter:"
+	@echo "  (lldb) b nsset_test.m:115"
+	@echo "  (lldb) run"
+	@echo "  (lldb) po emptySet"
+	@echo "  (lldb) po singleSet"
+	@echo "  (lldb) po stringSet"
+	@echo "  (lldb) po numberSet"
+	@echo "  (lldb) po mixedSet"
+	@echo "  (lldb) po mutableSet"
+	@echo "  (lldb) po customSet"
+	@echo "  (lldb) po largeSet"
+	@echo "  (lldb) po countedSet"
+	@echo "  (lldb) po nestedSet"
+	@echo "  (lldb) frame variable -O"
+	@echo "  (lldb) frame variable stringSet"
+	export PATH="$(dir $(LLDB)):$$PATH" && \
+	export LLDB_DEBUGSERVER_PATH="$(dir $(LLDB))lldb-server" && \
+	$(LLDB) ./nsset_test
+
 # Help target
 help:
 	@echo "Available targets:"
-	@echo "  all              - Build all examples"
-	@echo "  simple_test      - Build simple test example"
-	@echo "  custom_class_test - Build custom class example"
-	@echo "  foundation_test  - Build Foundation types example"
-	@echo "  symbols          - Check symbols in custom_class_test"
-	@echo "  debug-simple     - Debug simple_test with LLDB"
-	@echo "  debug-custom     - Debug custom_class_test with LLDB"
-	@echo "  debug-foundation - Debug foundation_test with LLDB"
-	@echo "  test-plugin      - Test our GNUstep plugin with guided commands"
-	@echo "  clean            - Remove all built executables"
-	@echo "  help             - Show this help message"
+	@echo "  all                    - Build all examples"
+	@echo "  simple_test            - Build simple test example"
+	@echo "  custom_class_test      - Build custom class example"
+	@echo "  foundation_test        - Build Foundation types example"
+	@echo "  test_nsstring_formatter - Build NSString formatter test"
+	@echo "  test_nsnumber_formatter - Build NSNumber formatter test"
+	@echo "  test_nsnumber_comprehensive - Build comprehensive NSNumber test"
+	@echo "  test_nsarray_comprehensive - Build comprehensive NSArray test"
+	@echo "  array_test             - Build NSArray formatter test"
+	@echo "  simple_array_test      - Build simple NSArray test"
+	@echo "  symbols                - Check symbols in custom_class_test"
+	@echo "  debug-simple           - Debug simple_test with LLDB"
+	@echo "  debug-custom           - Debug custom_class_test with LLDB"
+	@echo "  debug-foundation       - Debug foundation_test with LLDB"
+	@echo "  debug-nsstring         - Debug NSString formatter test with LLDB"
+	@echo "  debug-nsnumber         - Debug NSNumber formatter test with LLDB"
+	@echo "  debug-array            - Debug NSArray formatter test with LLDB"
+	@echo "  debug-dictionary       - Debug NSDictionary formatter test with LLDB"
+	@echo "  debug-set              - Debug NSSet formatter test with LLDB"
+	@echo "  test-plugin            - Test our GNUstep plugin with guided commands"
+	@echo "  clean                  - Remove all built executables"
+	@echo "  help                   - Show this help message"

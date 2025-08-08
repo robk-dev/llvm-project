@@ -22,10 +22,6 @@ class GNUstepObjCRuntime;
 #include "clang/AST/ASTContext.h"
 #include "clang/AST/DeclObjC.h"
 
-#include <algorithm>
-#include <cctype>
-#include <functional>
-
 using namespace lldb;
 using namespace lldb_private;
 
@@ -37,24 +33,22 @@ GNUstepObjCDeclVendor::GNUstepObjCDeclVendor(ObjCLanguageRuntime &runtime)
   Log *log = GetLog(LLDBLog::Expressions);
   LLDB_LOG(log, "GNUstepObjCDeclVendor: Initializing");
   
-  // CRITICAL FIX: Create our own separate TypeSystemClang instance 
-  // instead of using the scratch one. This prevents AST import conflicts
-  // when the expression evaluator tries to import declarations.
-  // Following Apple's pattern from AppleObjCDeclVendor.cpp
+  // Create a TypeSystemClang instance for creating types
   Target &target = runtime.GetProcess()->GetTarget();
-  m_ast_ctx = std::make_shared<TypeSystemClang>(
-      "GNUstepObjCDeclVendor AST",
-      target.GetArchitecture().GetTriple());
+  auto type_system_or_err = target.GetScratchTypeSystemForLanguage(eLanguageTypeObjC);
   
-  if (!m_ast_ctx) {
-    LLDB_LOG(log, "GNUstepObjCDeclVendor: Failed to create TypeSystemClang");
+  if (auto error = type_system_or_err.takeError()) {
+    LLDB_LOG_ERROR(log, std::move(error), 
+                   "GNUstepObjCDeclVendor: Failed to get scratch TypeSystemClang");
     return;
   }
   
-  // Create and set our external AST source for dynamic lookups
-  m_external_source = new GNUstepObjCExternalASTSource(*this);
-  m_ast_ctx->getASTContext().setExternalSource(m_external_source);
-  LLDB_LOG(log, "GNUstepObjCDeclVendor: Set up external AST source for dynamic lookups");
+  // Can't use dynamic_pointer_cast with -fno-rtti, use static cast
+  m_ast_ctx = std::static_pointer_cast<TypeSystemClang>(type_system_or_err->get()->shared_from_this());
+  if (!m_ast_ctx) {
+    LLDB_LOG(log, "GNUstepObjCDeclVendor: Failed to cast to TypeSystemClang");
+    return;
+  }
   
   // Ensure NSObject exists as base type
   EnsureNSObjectDecl();
@@ -322,60 +316,8 @@ bool GNUstepObjCDeclVendor::AddIVarsToDecl(
   if (!decl || !descriptor)
     return false;
     
-  Log *log = GetLog(LLDBLog::Expressions);
-  clang::ASTContext &ast = m_ast_ctx->getASTContext();
-  
-  // Get the class pointer from ISA
-  ObjCLanguageRuntime::ObjCISA isa = descriptor->GetISA();
-  if (isa == LLDB_INVALID_ADDRESS)
-    return false;
-    
-  // Use runtime API to get ivars
-  Status error;
-  
-  // Try to get ivars through the descriptor first
-  // The descriptor might have cached ivar information
-  std::function<bool(const char *, const char *, lldb::addr_t, uint64_t)> ivar_func = 
-      [&](const char *name, const char *type, lldb::addr_t offset_ptr, uint64_t size) -> bool {
-    if (!name)
-      return true; // Continue iteration
-      
-    LLDB_LOG(log, "GNUstepObjCDeclVendor: Found ivar '{0}' of type '{1}' at offset {2}", 
-             name, type ? type : "unknown", offset_ptr);
-    
-    // Create the ivar
-    clang::QualType ivar_type = ast.getObjCIdType(); // Default to id type
-    
-    // Try to parse the type encoding if available
-    // For now, just use id type for all object types
-    // TODO: Implement proper type encoding parsing
-    
-    // Create the ivar declaration
-    clang::ObjCIvarDecl *ivar_decl = clang::ObjCIvarDecl::Create(
-        ast,
-        decl,
-        clang::SourceLocation(),
-        clang::SourceLocation(), 
-        &ast.Idents.get(name),
-        ivar_type,
-        ast.getTrivialTypeSourceInfo(ivar_type),
-        clang::ObjCIvarDecl::None,
-        nullptr,
-        true); // synthesized
-    
-    if (ivar_decl) {
-      decl->addDecl(ivar_decl);
-      LLDB_LOG(log, "GNUstepObjCDeclVendor: Added ivar '{0}' to class", name);
-    }
-    
-    return true; // Continue iteration
-  };
-  
-  descriptor->Describe(
-      std::function<void(ObjCLanguageRuntime::ObjCISA)>(),
-      std::function<bool(const char *, const char *)>(),
-      std::function<bool(const char *, const char *)>(),
-      ivar_func);
+  // TODO: Iterate through ivars and add them to the declaration
+  // This requires runtime introspection of the class structure
   
   return true;
 }
@@ -395,10 +337,6 @@ bool GNUstepObjCDeclVendor::AddMethodsToDecl(
   
   // Add essential NSObject methods that all objects should have
   AddBasicNSObjectMethods(decl, ast_ctx);
-  
-  // CRITICAL: Add property accessors for all ivars
-  // This enables property.syntax to work in LLDB expressions
-  AddPropertyAccessorsForIvars(decl, descriptor);
   
   // Try to discover methods at runtime using the ISA
   ObjCLanguageRuntime::ObjCISA isa = descriptor->GetISA();
@@ -465,16 +403,16 @@ void GNUstepObjCDeclVendor::AddFallbackMethods(clang::ObjCInterfaceDecl *decl,
   LLDB_LOG(log, "GNUstepObjCDeclVendor: Adding fallback methods for {0}", class_name);
   
   // Add type-specific methods based on class name patterns
+  // This is the old logic but cleaned up without hardcoded BankAccount
   if (class_name.find("Array") != std::string::npos) {
     AddArrayMethods(decl, ast_ctx);
   } else if (class_name.find("Dictionary") != std::string::npos) {
     AddDictionaryMethods(decl, ast_ctx);
   } else if (class_name.find("String") != std::string::npos) {
     AddStringMethods(decl, ast_ctx);
-  } else {
-    // For custom user classes, add common property accessor patterns
-    AddCustomClassMethods(decl, ast_ctx, class_name);
   }
+  // Note: Removed hardcoded BankAccount logic - it was causing the crashes
+  // Now all classes get at least the basic NSObject methods
 }
 
 CompilerType GNUstepObjCDeclVendor::GetTypeForISA(ObjCLanguageRuntime::ObjCISA isa) {
@@ -495,88 +433,19 @@ uint32_t GNUstepObjCDeclVendor::FindDecls(ConstString name, bool append,
     return 0;
     
   Log *log = GetLog(LLDBLog::Expressions);
-  std::string full_name = name.GetStringRef().str();
   LLDB_LOG(log, "GNUstepObjCDeclVendor: FindDecls called for '{0}' (append={1}, max_matches={2})", 
-           full_name, append, max_matches);
+           name, append, max_matches);
   
-  // Also print to stderr for immediate visibility during debugging
-  fprintf(stderr, "DEBUG: GNUstepObjCDeclVendor::FindDecls called with name='%s', length=%zu\n", 
-          full_name.c_str(), full_name.length());
-  
-  // Add more detailed debugging for BankAccount specifically
-  if (full_name == "BankAccount") {
-    fprintf(stderr, "DEBUG: FindDecls called for BankAccount - will create/return class decl\n");
-  } else if (full_name == "account") {
-    fprintf(stderr, "DEBUG: FindDecls called for variable 'account' - will return null, should resolve via symbol table\n");
+  clang::ObjCInterfaceDecl *decl = GetDeclForClassName(name.AsCString());
+  if (decl) {
+    // Convert clang::NamedDecl to CompilerDecl
+    CompilerDecl compiler_decl(m_ast_ctx.get(), decl);
+    decls.push_back(compiler_decl);
+    LLDB_LOG(log, "GNUstepObjCDeclVendor: FindDecls found type {0}, returning 1 match", name);
+    return 1;
   }
   
-  // Check if this might be a property access (e.g., looking for "balance" property on BankAccount)
-  // Properties are looked up by their name directly, not as method selectors
-  // When FindDecls is called with just a property name, we need to find which class it belongs to
-  // This is a simplified approach - in a full implementation we'd need context about which class
-  
-  // Check if this is a method selector like "-[BankAccount transactions]" or "+[BankAccount alloc]"
-  if (full_name.size() > 3 && 
-      (full_name[0] == '-' || full_name[0] == '+') && 
-      full_name[1] == '[') {
-    
-    // Parse method selector format: -[ClassName methodName] or +[ClassName methodName]
-    std::string class_name_str;
-    std::string method_name_str;
-    bool is_instance_method = (full_name[0] == '-');
-    
-    size_t space_pos = full_name.find(' ', 2);
-    size_t close_pos = full_name.find(']', 2);
-    
-    if (space_pos != std::string::npos && close_pos != std::string::npos && space_pos < close_pos) {
-      class_name_str = full_name.substr(2, space_pos - 2);
-      method_name_str = full_name.substr(space_pos + 1, close_pos - space_pos - 1);
-      
-      // Handle empty method name - might be a property access attempt
-      if (method_name_str.empty()) {
-        LLDB_LOG(log, "GNUstepObjCDeclVendor: Empty method name for class {0} - likely property access issue", 
-                 class_name_str);
-        // Don't try to create a method with empty name
-        return 0;
-      }
-      
-      LLDB_LOG(log, "GNUstepObjCDeclVendor: Parsing method selector - Class: '{0}', Method: '{1}', Instance: {2}", 
-               class_name_str, method_name_str, is_instance_method);
-      
-      // Get or create the class declaration first
-      clang::ObjCInterfaceDecl *class_decl = GetDeclForClassName(class_name_str.c_str());
-      if (class_decl) {
-        // Look for existing method or create it
-        clang::ObjCMethodDecl *method_decl = FindOrCreateMethodDecl(class_decl, method_name_str.c_str(), is_instance_method);
-        if (method_decl) {
-          CompilerDecl compiler_decl(m_ast_ctx.get(), method_decl);
-          decls.push_back(compiler_decl);
-          LLDB_LOG(log, "GNUstepObjCDeclVendor: Found method {0} for class {1}, returning 1 match", 
-                   method_name_str, class_name_str);
-          return 1;
-        } else {
-          LLDB_LOG(log, "GNUstepObjCDeclVendor: Failed to create method {0} for class {1}", 
-                   method_name_str, class_name_str);
-        }
-      } else {
-        LLDB_LOG(log, "GNUstepObjCDeclVendor: Failed to find/create class {0}", class_name_str);
-      }
-    } else {
-      LLDB_LOG(log, "GNUstepObjCDeclVendor: Invalid method selector format: '{0}'", full_name);
-    }
-  } else {
-    // Regular class name lookup
-    clang::ObjCInterfaceDecl *decl = GetDeclForClassName(name.AsCString());
-    if (decl) {
-      // Convert clang::NamedDecl to CompilerDecl
-      CompilerDecl compiler_decl(m_ast_ctx.get(), decl);
-      decls.push_back(compiler_decl);
-      LLDB_LOG(log, "GNUstepObjCDeclVendor: FindDecls found type {0}, returning 1 match", name);
-      return 1;
-    }
-  }
-  
-  LLDB_LOG(log, "GNUstepObjCDeclVendor: FindDecls found no matches for {0}", full_name);
+  LLDB_LOG(log, "GNUstepObjCDeclVendor: FindDecls found no matches for {0}", name);
   return 0;
 }
 
@@ -708,159 +577,6 @@ clang::ObjCMethodDecl *GNUstepObjCDeclVendor::AddMethodWithParameter(
   return method_decl;
 }
 
-// Find an existing method or create a new one for dynamic method resolution
-clang::ObjCMethodDecl *GNUstepObjCDeclVendor::FindOrCreateMethodDecl(
-    clang::ObjCInterfaceDecl *class_decl, 
-    const char *method_name,
-    bool is_instance_method) {
-    
-  if (!class_decl || !method_name)
-    return nullptr;
-    
-  Log *log = GetLog(LLDBLog::Expressions);
-  clang::ASTContext &ast_ctx = m_ast_ctx->getASTContext();
-  
-  // Create selector for the method name
-  const clang::IdentifierInfo *method_identifier = &ast_ctx.Idents.get(method_name);
-  clang::Selector selector = ast_ctx.Selectors.getSelector(0, &method_identifier);
-  
-  // First, try to find existing method in the class
-  for (auto method : class_decl->methods()) {
-    if (method->getSelector() == selector && method->isInstanceMethod() == is_instance_method) {
-      LLDB_LOG(log, "GNUstepObjCDeclVendor: Found existing method '{0}' in class {1}", 
-               method_name, class_decl->getNameAsString());
-      return method;
-    }
-  }
-  
-  // Method doesn't exist, create it dynamically
-  LLDB_LOG(log, "GNUstepObjCDeclVendor: Creating dynamic method '{0}' for class {1} (instance: {2})", 
-           method_name, class_decl->getNameAsString(), is_instance_method);
-  
-  // Determine return type based on method name patterns
-  clang::QualType return_type = InferReturnTypeForMethod(method_name);
-  
-  // Create method declaration
-  clang::ObjCMethodDecl *method_decl = clang::ObjCMethodDecl::Create(
-      ast_ctx,
-      clang::SourceLocation(),
-      clang::SourceLocation(),
-      selector,
-      return_type,
-      nullptr, // TypeSourceInfo
-      class_decl,
-      is_instance_method,
-      false, // isVariadic
-      false, // isPropertyAccessor
-      false, // isSynthesizedAccessorStub
-      false, // isImplicitlyDeclared
-      false, // isDefined
-      clang::ObjCImplementationControl::None
-  );
-  
-  if (method_decl) {
-    class_decl->addDecl(method_decl);
-    LLDB_LOG(log, "GNUstepObjCDeclVendor: Successfully created dynamic method '{0}' for class {1}", 
-             method_name, class_decl->getNameAsString());
-  } else {
-    LLDB_LOG(log, "GNUstepObjCDeclVendor: Failed to create dynamic method '{0}' for class {1}", 
-             method_name, class_decl->getNameAsString());
-  }
-  
-  return method_decl;
-}
-
-// Infer return type based on method name patterns
-clang::QualType GNUstepObjCDeclVendor::InferReturnTypeForMethod(const char *method_name) {
-  if (!method_name || !m_ast_ctx)
-    return m_ast_ctx->getASTContext().getObjCIdType();
-    
-  clang::ASTContext &ast_ctx = m_ast_ctx->getASTContext();
-  std::string name_str(method_name);
-  
-  // Common patterns for method return types
-  if (name_str == "count" || name_str == "length" || name_str == "hash" || 
-      name_str.find("Index") != std::string::npos) {
-    return ast_ctx.UnsignedLongTy; // NSUInteger
-  }
-  
-  if (name_str == "boolValue" || name_str.find("is") == 0 || name_str.find("has") == 0 ||
-      name_str.find("should") == 0 || name_str.find("can") == 0) {
-    return ast_ctx.BoolTy;
-  }
-  
-  if (name_str == "intValue" || name_str == "integerValue") {
-    return ast_ctx.IntTy;
-  }
-  
-  if (name_str == "doubleValue" || name_str == "floatValue") {
-    return ast_ctx.DoubleTy;
-  }
-  
-  if (name_str.find("Value") != std::string::npos && name_str != "boolValue") {
-    return ast_ctx.DoubleTy; // Default numeric value methods to double
-  }
-  
-  if (name_str.find("String") != std::string::npos) {
-    return ast_ctx.getObjCIdType(); // String methods return id (NSString *)
-  }
-  
-  // For collections like "transactions", "accounts", etc., return id (typically NSArray *)
-  // Default to id type for unknown methods
-  return ast_ctx.getObjCIdType();
-}
-
-// Add common methods for custom user-defined classes
-void GNUstepObjCDeclVendor::AddCustomClassMethods(clang::ObjCInterfaceDecl *decl, 
-                                                   clang::ASTContext &ast_ctx, 
-                                                   const std::string &class_name) {
-  Log *log = GetLog(LLDBLog::Expressions);
-  LLDB_LOG(log, "GNUstepObjCDeclVendor: Adding custom class methods for {0}", class_name);
-  
-  // Debug output for immediate visibility
-  fprintf(stderr, "DEBUG: AddCustomClassMethods called for class '%s'\n", class_name.c_str());
-  
-  clang::QualType id_type = ast_ctx.getObjCIdType();
-  clang::QualType nsuinteger_type = ast_ctx.UnsignedLongTy;
-  clang::QualType double_type = ast_ctx.DoubleTy;
-  
-  // Add common property patterns based on class name
-  if (class_name == "BankAccount") {
-    // Specific methods for BankAccount class
-    AddMethodDecl(decl, ast_ctx, "accountNumber", id_type, true);  // NSString *
-    AddMethodDecl(decl, ast_ctx, "owner", id_type, true);          // NSString *  
-    AddMethodDecl(decl, ast_ctx, "balance", double_type, true);    // double
-    AddMethodDecl(decl, ast_ctx, "transactions", id_type, true);   // NSArray *
-    
-    LLDB_LOG(log, "GNUstepObjCDeclVendor: Added BankAccount-specific methods");
-  } else {
-    // For unknown custom classes, add generic property accessor patterns
-    // These are common patterns that most custom classes might have
-    
-    // Try to infer common property names from class name
-    std::string lowercase_name = class_name;
-    std::transform(lowercase_name.begin(), lowercase_name.end(), lowercase_name.begin(), ::tolower);
-    
-    // Add some generic methods that are commonly used in debugging
-    AddMethodDecl(decl, ast_ctx, "description", id_type, true);
-    AddMethodDecl(decl, ast_ctx, "debugDescription", id_type, true);
-    
-    // Add common property patterns
-    if (lowercase_name.find("account") != std::string::npos) {
-      AddMethodDecl(decl, ast_ctx, "balance", double_type, true);
-      AddMethodDecl(decl, ast_ctx, "transactions", id_type, true);
-    }
-    
-    if (lowercase_name.find("person") != std::string::npos || 
-        lowercase_name.find("user") != std::string::npos) {
-      AddMethodDecl(decl, ast_ctx, "name", id_type, true);
-      AddMethodDecl(decl, ast_ctx, "age", ast_ctx.IntTy, true);
-    }
-    
-    LLDB_LOG(log, "GNUstepObjCDeclVendor: Added generic methods for custom class {0}", class_name);
-  }
-}
-
 // Add basic NSObject methods that all objects should have
 void GNUstepObjCDeclVendor::AddBasicNSObjectMethods(clang::ObjCInterfaceDecl *decl, clang::ASTContext &ast_ctx) {
   clang::QualType id_type = ast_ctx.getObjCIdType();
@@ -946,332 +662,4 @@ void GNUstepObjCDeclVendor::AddStringMethods(clang::ObjCInterfaceDecl *decl, cla
       class_name == "GSMutableString" || class_name == "NSMutableString") {
     AddMethodWithParameter(decl, ast_ctx, "appendString", ast_ctx.VoidTy, "string", id_type, true);
   }
-}
-
-// Add property accessor methods for all ivars
-// This creates getter and setter methods that match property syntax
-void GNUstepObjCDeclVendor::AddPropertyAccessorsForIvars(
-    clang::ObjCInterfaceDecl *decl,
-    ObjCLanguageRuntime::ClassDescriptorSP descriptor) {
-    
-  if (!decl || !descriptor)
-    return;
-    
-  Log *log = GetLog(LLDBLog::Expressions);
-  clang::ASTContext &ast_ctx = m_ast_ctx->getASTContext();
-  std::string class_name = decl->getNameAsString();
-  
-  LLDB_LOG(log, "GNUstepObjCDeclVendor: Adding property accessors for class {0}", class_name);
-  
-  // For now, use ivar-based property creation
-  // The ExternalASTSource will handle dynamic property lookups when needed
-  
-  // Iterate through ivars and create property accessor methods
-  std::function<bool(const char *, const char *, lldb::addr_t, uint64_t)> ivar_func = 
-      [&](const char *name, const char *type, lldb::addr_t offset_ptr, uint64_t size) -> bool {
-    if (!name || name[0] == '\0')
-      return true; // Continue iteration
-      
-    std::string ivar_name(name);
-    
-    // Create property name by removing leading underscore if present
-    std::string property_name = ivar_name;
-    if (property_name[0] == '_' && property_name.length() > 1) {
-      property_name = property_name.substr(1);
-    }
-    
-    LLDB_LOG(log, "GNUstepObjCDeclVendor: Creating property accessor for ivar '{0}' as property '{1}'", 
-             ivar_name, property_name);
-    
-    // Determine the type for the property
-    clang::QualType property_type = ast_ctx.getObjCIdType(); // Default to id
-    
-    // TODO: Parse type encoding to get actual property type
-    // For now, all properties are treated as id type
-    
-    // Create getter method with property name (e.g., "accountNumber" for "_accountNumber")
-    clang::IdentifierInfo &getter_id = ast_ctx.Idents.get(property_name);
-    clang::Selector getter_sel = ast_ctx.Selectors.getNullarySelector(&getter_id);
-    
-    clang::ObjCMethodDecl *getter = clang::ObjCMethodDecl::Create(
-        ast_ctx,
-        clang::SourceLocation(),
-        clang::SourceLocation(),
-        getter_sel,
-        property_type,
-        nullptr, // TypeSourceInfo
-        decl,
-        true,  // isInstanceMethod
-        false, // isVariadic
-        true,  // isPropertyAccessor
-        false, // isSynthesizedAccessorStub
-        true,  // isImplicitlyDeclared
-        false, // isDefined
-        clang::ObjCImplementationControl::None
-    );
-    
-    if (getter) {
-      decl->addDecl(getter);
-      LLDB_LOG(log, "GNUstepObjCDeclVendor: Added getter '{0}' for property", property_name);
-    }
-    
-    // Create setter method (e.g., "setAccountNumber:" for "_accountNumber")
-    // Capitalize first letter of property name for setter
-    std::string setter_name = "set";
-    if (!property_name.empty()) {
-      setter_name += std::toupper(property_name[0]);
-      if (property_name.length() > 1) {
-        setter_name += property_name.substr(1);
-      }
-    }
-    
-    const clang::IdentifierInfo *setter_id = &ast_ctx.Idents.get(setter_name);
-    clang::Selector setter_sel = ast_ctx.Selectors.getSelector(1, &setter_id);
-    
-    // Create parameter for setter
-    clang::IdentifierInfo &param_id = ast_ctx.Idents.get("value");
-    clang::ParmVarDecl *param = clang::ParmVarDecl::Create(
-        ast_ctx,
-        nullptr,
-        clang::SourceLocation(),
-        clang::SourceLocation(),
-        &param_id,
-        property_type,
-        nullptr,
-        clang::SC_None,
-        nullptr
-    );
-    
-    clang::ObjCMethodDecl *setter = clang::ObjCMethodDecl::Create(
-        ast_ctx,
-        clang::SourceLocation(),
-        clang::SourceLocation(),
-        setter_sel,
-        ast_ctx.VoidTy,
-        nullptr, // TypeSourceInfo
-        decl,
-        true,  // isInstanceMethod
-        false, // isVariadic
-        true,  // isPropertyAccessor
-        false, // isSynthesizedAccessorStub
-        true,  // isImplicitlyDeclared
-        false, // isDefined
-        clang::ObjCImplementationControl::None
-    );
-    
-    if (setter && param) {
-      setter->setMethodParams(ast_ctx, {param}, {});
-      decl->addDecl(setter);
-      LLDB_LOG(log, "GNUstepObjCDeclVendor: Added setter '{0}:' for property", setter_name);
-    }
-    
-    // Also create an @property declaration
-    // This makes the property visible in LLDB's type system
-    clang::ObjCPropertyDecl *property = clang::ObjCPropertyDecl::Create(
-        ast_ctx,
-        decl,
-        clang::SourceLocation(),
-        &ast_ctx.Idents.get(property_name),
-        clang::SourceLocation(),
-        clang::SourceLocation(),
-        property_type,
-        nullptr // TypeSourceInfo
-    );
-    
-    if (property) {
-      property->setPropertyAttributes(
-          static_cast<clang::ObjCPropertyAttribute::Kind>(
-              clang::ObjCPropertyAttribute::kind_atomic |
-              clang::ObjCPropertyAttribute::kind_readwrite));
-      property->setGetterMethodDecl(getter);
-      property->setSetterMethodDecl(setter);
-      property->setPropertyIvarDecl(nullptr); // We'll link to the actual ivar if needed
-      decl->addDecl(property);
-      LLDB_LOG(log, "GNUstepObjCDeclVendor: Added @property '{0}' declaration", property_name);
-    }
-    
-    return true; // Continue iteration
-  };
-  
-  // Use the descriptor to iterate through all ivars
-  descriptor->Describe(
-      std::function<void(ObjCLanguageRuntime::ObjCISA)>(),
-      std::function<bool(const char *, const char *)>(),
-      std::function<bool(const char *, const char *)>(),
-      ivar_func);
-  
-  LLDB_LOG(log, "GNUstepObjCDeclVendor: Completed adding property accessors for {0}", class_name);
-}
-
-// Implementation of GNUstepObjCExternalASTSource
-bool GNUstepObjCExternalASTSource::FindExternalVisibleDeclsByName(
-    const clang::DeclContext *decl_ctx, clang::DeclarationName name,
-    const clang::DeclContext *original_dc) {
-  
-  Log *log = GetLog(LLDBLog::Expressions);
-  
-  if (log) {
-    LLDB_LOG(log, "GNUstepObjCExternalASTSource::FindExternalVisibleDeclsByName: "
-             "Looking for {0} in context {1}", 
-             name.getAsString(), decl_ctx->getDeclKindName());
-  }
-  
-  // Only handle ObjC interface contexts
-  const clang::ObjCInterfaceDecl *interface_decl = 
-      llvm::dyn_cast<clang::ObjCInterfaceDecl>(decl_ctx);
-  
-  if (!interface_decl) {
-    return false;
-  }
-  
-  // Get non-const version to work with
-  clang::ObjCInterfaceDecl *non_const_interface_decl = 
-      const_cast<clang::ObjCInterfaceDecl *>(interface_decl);
-  
-  // Complete the interface if needed
-  CompleteInterface(non_const_interface_decl);
-  
-  // Get the property/method name being looked up
-  std::string lookup_name = name.getAsString();
-  
-  LLDB_LOG(log, "GNUstepObjCExternalASTSource: Looking for property/method '{0}' in class {1}",
-           lookup_name, interface_decl->getNameAsString());
-  
-  // Check if this is a property access (no colons in name)
-  if (lookup_name.find(':') == std::string::npos) {
-    // This is likely a property getter - check if we have an ivar with underscore prefix
-    std::string ivar_name = "_" + lookup_name;
-    
-    // Look for existing ivar with this name
-    for (auto ivar : interface_decl->ivars()) {
-      if (ivar->getNameAsString() == ivar_name) {
-        LLDB_LOG(log, "GNUstepObjCExternalASTSource: Found matching ivar '{0}' for property '{1}'",
-                 ivar_name, lookup_name);
-        
-        // Create property getter if it doesn't exist
-        clang::ASTContext &ast_ctx = m_decl_vendor.m_ast_ctx->getASTContext();
-        clang::QualType ivar_type = ivar->getType();
-        
-        // Check if getter already exists
-        clang::IdentifierInfo &getter_id = ast_ctx.Idents.get(lookup_name);
-        clang::Selector getter_sel = ast_ctx.Selectors.getNullarySelector(&getter_id);
-        
-        bool found_getter = false;
-        for (auto method : interface_decl->methods()) {
-          if (method->getSelector() == getter_sel && method->isInstanceMethod()) {
-            found_getter = true;
-            break;
-          }
-        }
-        
-        if (!found_getter) {
-          // Create the getter method
-          
-          clang::ObjCMethodDecl *getter = clang::ObjCMethodDecl::Create(
-              ast_ctx,
-              clang::SourceLocation(),
-              clang::SourceLocation(),
-              getter_sel,
-              ivar_type,
-              nullptr, // TypeSourceInfo
-              non_const_interface_decl,
-              true,  // isInstanceMethod
-              false, // isVariadic
-              true,  // isPropertyAccessor
-              false, // isSynthesizedAccessorStub
-              true,  // isImplicitlyDeclared
-              false, // isDefined
-              clang::ObjCImplementationControl::None
-          );
-          
-          if (getter) {
-            non_const_interface_decl->addDecl(getter);
-            LLDB_LOG(log, "GNUstepObjCExternalASTSource: Created getter method '{0}' for property",
-                     lookup_name);
-            return true;
-          }
-        }
-        
-        // Also create setter if needed
-        std::string setter_name = "set";
-        setter_name += std::toupper(lookup_name[0]);
-        if (lookup_name.length() > 1) {
-          setter_name += lookup_name.substr(1);
-        }
-        
-        const clang::IdentifierInfo *setter_id = &ast_ctx.Idents.get(setter_name);
-        clang::Selector setter_sel = ast_ctx.Selectors.getSelector(1, &setter_id);
-        
-        bool found_setter = false;
-        for (auto method : interface_decl->methods()) {
-          if (method->getSelector() == setter_sel && method->isInstanceMethod()) {
-            found_setter = true;
-            break;
-          }
-        }
-        
-        if (!found_setter) {
-          // Create parameter for setter
-          clang::IdentifierInfo &param_id = ast_ctx.Idents.get("value");
-          clang::ParmVarDecl *param = clang::ParmVarDecl::Create(
-              ast_ctx,
-              nullptr,
-              clang::SourceLocation(),
-              clang::SourceLocation(),
-              &param_id,
-              ivar_type,
-              nullptr,
-              clang::SC_None,
-              nullptr
-          );
-          
-          clang::ObjCMethodDecl *setter = clang::ObjCMethodDecl::Create(
-              ast_ctx,
-              clang::SourceLocation(),
-              clang::SourceLocation(),
-              setter_sel,
-              ast_ctx.VoidTy,
-              nullptr, // TypeSourceInfo
-              non_const_interface_decl,
-              true,  // isInstanceMethod
-              false, // isVariadic
-              true,  // isPropertyAccessor
-              false, // isSynthesizedAccessorStub
-              true,  // isImplicitlyDeclared
-              false, // isDefined
-              clang::ObjCImplementationControl::None
-          );
-          
-          if (setter && param) {
-            setter->setMethodParams(ast_ctx, {param}, {});
-            non_const_interface_decl->addDecl(setter);
-            LLDB_LOG(log, "GNUstepObjCExternalASTSource: Created setter method '{0}:' for property",
-                     setter_name);
-          }
-        }
-        
-        return true;
-      }
-    }
-  }
-  
-  return false;
-}
-
-void GNUstepObjCExternalASTSource::CompleteInterface(
-    clang::ObjCInterfaceDecl *interface_decl) {
-  
-  if (!interface_decl || !interface_decl->hasExternalLexicalStorage())
-    return;
-    
-  Log *log = GetLog(LLDBLog::Expressions);
-  LLDB_LOG(log, "GNUstepObjCExternalASTSource::CompleteInterface for class {0}",
-           interface_decl->getNameAsString());
-  
-  // Mark as completed so we don't recurse
-  interface_decl->setHasExternalLexicalStorage(false);
-  interface_decl->setHasExternalVisibleStorage(false);
-  
-  // Ensure the interface is fully populated with ivars and methods
-  // This is already done in BuildInterfaceDecl, but we can add more here if needed
 }

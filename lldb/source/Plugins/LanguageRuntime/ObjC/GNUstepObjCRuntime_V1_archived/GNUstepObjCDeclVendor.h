@@ -18,32 +18,9 @@
 #include <memory>
 #include <set>
 
-#include "clang/AST/ExternalASTSource.h"
-
 class ClangASTImporter;
 
 namespace lldb_private {
-
-// Forward declaration
-class GNUstepObjCDeclVendor;
-
-// External AST source for dynamic property/method lookups
-class GNUstepObjCExternalASTSource : public clang::ExternalASTSource {
-public:
-  GNUstepObjCExternalASTSource(GNUstepObjCDeclVendor &decl_vendor)
-      : m_decl_vendor(decl_vendor) {}
-
-  // Called when Clang needs to find declarations in a context
-  bool FindExternalVisibleDeclsByName(
-      const clang::DeclContext *decl_ctx, clang::DeclarationName name,
-      const clang::DeclContext *original_dc) override;
-
-  // Called to complete an interface
-  void CompleteInterface(clang::ObjCInterfaceDecl *interface_decl);
-
-private:
-  GNUstepObjCDeclVendor &m_decl_vendor;
-};
 
 class GNUstepObjCDeclVendor : public ClangDeclVendor {
 public:
@@ -99,12 +76,6 @@ private:
   void AddArrayMethods(clang::ObjCInterfaceDecl *decl, clang::ASTContext &ast_ctx);
   void AddDictionaryMethods(clang::ObjCInterfaceDecl *decl, clang::ASTContext &ast_ctx);
   void AddStringMethods(clang::ObjCInterfaceDecl *decl, clang::ASTContext &ast_ctx);
-  void AddCustomClassMethods(clang::ObjCInterfaceDecl *decl, clang::ASTContext &ast_ctx, 
-                            const std::string &class_name);
-  
-  // Add property accessor methods for all ivars
-  void AddPropertyAccessorsForIvars(clang::ObjCInterfaceDecl *decl,
-                                   ObjCLanguageRuntime::ClassDescriptorSP descriptor);
   
   // Helper to add a method declaration
   clang::ObjCMethodDecl *AddMethodDecl(clang::ObjCInterfaceDecl *decl, 
@@ -121,21 +92,9 @@ private:
                                                const char *param_name,
                                                clang::QualType param_type,
                                                bool is_instance_method = true);
-  
-  // Find or create a method declaration for dynamic method resolution
-  clang::ObjCMethodDecl *FindOrCreateMethodDecl(clang::ObjCInterfaceDecl *class_decl,
-                                               const char *method_name,
-                                               bool is_instance_method);
-  
-  // Infer return type based on method name patterns  
-  clang::QualType InferReturnTypeForMethod(const char *method_name);
-
-  // Allow external source to access our internals
-  friend class GNUstepObjCExternalASTSource;
 
   ObjCLanguageRuntime &m_runtime;
   std::shared_ptr<TypeSystemClang> m_ast_ctx;
-  llvm::IntrusiveRefCntPtr<GNUstepObjCExternalASTSource> m_external_source;
   
   // Cache of ISA to declaration mappings
   std::map<ObjCLanguageRuntime::ObjCISA, clang::ObjCInterfaceDecl *> m_isa_to_decl;

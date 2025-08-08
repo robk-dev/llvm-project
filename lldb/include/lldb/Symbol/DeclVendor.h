@@ -23,6 +23,7 @@ public:
     eClangDeclVendor,
     eClangModuleDeclVendor,
     eAppleObjCDeclVendor,
+    eGNUstepObjCDeclVendor,
     eLastClangDeclVendor,
   };
   // Constructors and Destructors

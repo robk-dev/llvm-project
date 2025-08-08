@@ -12,7 +12,6 @@
 #include "GNUstepObjCRuntime.h"
 #include "GNUstepCollectionUtilities.h"
 #include "GNUstepUtilities.h"
-#include "GNUstepRuntimeAPI.h"
 #include "Plugins/LanguageRuntime/ObjC/ObjCLanguageRuntime.h"
 #include "Plugins/TypeSystem/Clang/TypeSystemClang.h"
 
@@ -48,6 +47,38 @@ using namespace lldb_private::formatters::gnustep_collection_utils;
 namespace lldb_private {
 namespace formatters {
 
+// Create special NSPair type for dictionary key-value pairs (following Apple's approach)
+// This ensures proper synthetic children and allows nested expansion to work
+static CompilerType GetGNUstepNSPairType(TargetSP target_sp) {
+  CompilerType compiler_type;
+  TypeSystemClangSP scratch_ts_sp = ScratchTypeSystemClang::GetForTarget(*target_sp);
+
+  if (!scratch_ts_sp)
+    return compiler_type;
+
+  static constexpr llvm::StringLiteral g_gnustep_autogen_nspair("__gnustep_autogen_nspair");
+
+  compiler_type = scratch_ts_sp->GetTypeForIdentifier<clang::CXXRecordDecl>(g_gnustep_autogen_nspair);
+
+  if (!compiler_type) {
+    compiler_type = scratch_ts_sp->CreateRecordType(
+        nullptr, OptionalClangModuleID(), lldb::eAccessPublic,
+        g_gnustep_autogen_nspair, llvm::to_underlying(clang::TagTypeKind::Struct),
+        lldb::eLanguageTypeC);
+
+    if (compiler_type) {
+      TypeSystemClang::StartTagDeclarationDefinition(compiler_type);
+      CompilerType id_compiler_type = scratch_ts_sp->GetBasicType(eBasicTypeObjCID);
+      // Create 'key' and 'value' fields - these will become synthetic children
+      TypeSystemClang::AddFieldToRecordType(
+          compiler_type, "key", id_compiler_type, lldb::eAccessPublic, 0);
+      TypeSystemClang::AddFieldToRecordType(
+          compiler_type, "value", id_compiler_type, lldb::eAccessPublic, 0);
+      TypeSystemClang::CompleteTagDeclarationDefinition(compiler_type);
+    }
+  }
+  return compiler_type;
+}
 
 // Helper function to extract key-value pair summaries for preview
 bool ExtractKeyValueSummariesForPreview(addr_t dict_ptr, ProcessSP process_sp, 
@@ -58,67 +89,20 @@ bool ExtractKeyValueSummariesForPreview(addr_t dict_ptr, ProcessSP process_sp,
   
   Status error;
   size_t ptr_size = process_sp->GetAddressByteSize();
-  uint64_t bucket_count = 0;
-  addr_t buckets_ptr = 0;
-  bool success = false;
   
-  // Create temporary runtime API instance for offset discovery
-  auto runtime_api = GNUstepRuntimeAPI::Create(process_sp.get());
+  // Use same GSIMapTable traversal logic as ExtractPairsFromMemoryDirect
+  addr_t map_addr = dict_ptr + ptr_size;
   
-  if (runtime_api) {
-    // Use runtime API to discover offsets dynamically
-    LLDB_LOG(log, "ExtractKeyValueSummariesForPreview: Using runtime API for offset discovery");
-    
-    auto class_info = runtime_api->GetObjectClassInfo(dict_ptr);
-    if (class_info) {
-      // Find the _map ivar in the dictionary class
-      ptrdiff_t map_offset = -1;
-      for (const auto& ivar : class_info.value.ivars) {
-        if (ivar.name == "_map" || ivar.name == "map") {
-          map_offset = ivar.offset;
-          LLDB_LOG(log, "ExtractKeyValueSummariesForPreview: Found _map ivar at offset {0}", map_offset);
-          break;
-        }
-      }
-      
-      if (map_offset >= 0) {
-        addr_t map_addr = dict_ptr + map_offset;
-        
-        // GSIMapTable has well-known layout: nodeCount, bucketCount, buckets
-        bucket_count = process_sp->ReadUnsignedIntegerFromMemory(
-            map_addr + (2 * ptr_size), ptr_size, 0, error);
-        if (!error.Fail() && bucket_count <= 10000) {
-          buckets_ptr = process_sp->ReadPointerFromMemory(
-              map_addr + (3 * ptr_size), error);
-          if (!error.Fail() && buckets_ptr) {
-            LLDB_LOG(log, "ExtractKeyValueSummariesForPreview: Runtime discovery successful");
-            success = true;
-          }
-        }
-      }
-    }
-    
-    if (!success) {
-      LLDB_LOG(log, "ExtractKeyValueSummariesForPreview: Runtime discovery failed, falling back");
-    }
+  uint64_t bucket_count = process_sp->ReadUnsignedIntegerFromMemory(
+      map_addr + (2 * ptr_size), ptr_size, 0, error);
+  if (error.Fail() || bucket_count > 10000) {
+    return false;
   }
-  
-  // Fallback to hardcoded offsets if runtime discovery failed
-  if (!success) {
-    LLDB_LOG(log, "ExtractKeyValueSummariesForPreview: Using hardcoded offsets");
-    addr_t map_addr = dict_ptr + ptr_size;
     
-    bucket_count = process_sp->ReadUnsignedIntegerFromMemory(
-        map_addr + (2 * ptr_size), ptr_size, 0, error);
-    if (error.Fail() || bucket_count > 10000) {
-      return false;
-    }
-      
-    buckets_ptr = process_sp->ReadPointerFromMemory(
-        map_addr + (3 * ptr_size), error);
-    if (error.Fail() || !buckets_ptr) {
-      return false;
-    }
+  addr_t buckets_ptr = process_sp->ReadPointerFromMemory(
+      map_addr + (3 * ptr_size), error);
+  if (error.Fail() || !buckets_ptr) {
+    return false;
   }
   
   // Traverse buckets to extract key-value pair summaries
@@ -206,30 +190,8 @@ bool GNUstepNSDictionarySummaryProvider(ValueObject &valobj, Stream &stream,
   size_t ptr_size = process_sp->GetAddressByteSize();
   Status error;
   
-  // Try to use runtime API for dynamic offset discovery
-  auto runtime_api = GNUstepRuntimeAPI::Create(process_sp.get());
-  addr_t map_addr;
-  ptrdiff_t map_offset = ptr_size; // Default fallback
-  
-  if (runtime_api) {
-    auto class_info = runtime_api->GetObjectClassInfo(valobj_addr);
-    if (class_info) {
-      // Find the _map ivar dynamically
-      for (const auto& ivar : class_info.value.ivars) {
-        if (ivar.name == "_map" || ivar.name == "map") {
-          map_offset = ivar.offset;
-          LLDB_LOG(log, "GNUstepNSDictionarySummaryProvider: Found _map ivar at offset {0}", map_offset);
-          break;
-        }
-      }
-    } else {
-      LLDB_LOG(log, "GNUstepNSDictionarySummaryProvider: Could not get class info, using default offset");
-    }
-  } else {
-    LLDB_LOG(log, "GNUstepNSDictionarySummaryProvider: No runtime API available, using default offset");
-  }
-  
-  map_addr = valobj_addr + map_offset;
+  // GSDictionary layout: GSIMapTable_t map at offset ptr_size
+  addr_t map_addr = valobj_addr + ptr_size;
   addr_t node_count_addr = map_addr + ptr_size;
   
   uint64_t count = process_sp->ReadUnsignedIntegerFromMemory(
@@ -265,7 +227,7 @@ bool GNUstepNSDictionarySummaryProvider(ValueObject &valobj, Stream &stream,
 GNUstepNSDictionarySyntheticProvider::GNUstepNSDictionarySyntheticProvider(
     lldb::ValueObjectSP valobj_sp)
     : SyntheticChildrenFrontEnd(*valobj_sp) {
-  // Initialize ObjCBuiltinIdTy following the working array pattern
+  // Initialize ObjCBuiltinIdTy following Apple's pattern
   if (valobj_sp) {
     TargetSP target_sp = valobj_sp->GetExecutionContextRef().GetTargetSP();
     if (target_sp) {
@@ -276,46 +238,47 @@ GNUstepNSDictionarySyntheticProvider::GNUstepNSDictionarySyntheticProvider(
             scratch_ts_sp->getASTContext().ObjCBuiltinIdTy.getAsOpaquePtr());
       }
     }
-    
-    // Initialize runtime API for dynamic offset discovery
-    ProcessSP process_sp = valobj_sp->GetProcessSP();
-    if (process_sp) {
-      m_runtime_api = GNUstepRuntimeAPI::Create(process_sp.get());
-    }
-    
     Update();
   }
 }
 
 llvm::Expected<uint32_t> 
 GNUstepNSDictionarySyntheticProvider::CalculateNumChildren() {
-  // Return number of key-value pairs * 2 (separate children for keys and values)
-  // This matches the working array pattern: direct access to individual elements
-  return m_key_value_pairs.size() * 2;
+  // Return number of key-value pairs (each pair is one child showing "key" = "value")
+  return m_key_value_pairs.size();
 }
 
 lldb::ValueObjectSP 
 GNUstepNSDictionarySyntheticProvider::GetChildAtIndex(uint32_t idx) {
   Log *log = GetLog(LLDBLog::DataFormatters);
-  LLDB_LOG(log, "GNUstepNSDictionarySyntheticProvider::GetChildAtIndex idx={0}, total_pairs={1}", idx, m_key_value_pairs.size());
+  LLDB_LOG(log, "GNUstepNSDictionarySyntheticProvider::GetChildAtIndex idx={0}, m_key_value_pairs.size()={1}", idx, m_key_value_pairs.size());
   
-  // Calculate pair index and whether this is key (even) or value (odd)
-  uint32_t pair_idx = idx / 2;
-  bool is_key = (idx % 2) == 0;
+  if (idx >= m_key_value_pairs.size())
+    return lldb::ValueObjectSP();
   
-  if (pair_idx >= m_key_value_pairs.size()) {
-    LLDB_LOG(log, "Invalid pair index {0} >= {1}", pair_idx, m_key_value_pairs.size());
+  addr_t key_addr = m_key_value_pairs[idx].first;
+  addr_t value_addr = m_key_value_pairs[idx].second;
+  
+  LLDB_LOG(log, "Getting dictionary pair at index {0}, key_addr=0x{1:x}, value_addr=0x{2:x}", 
+           idx, key_addr, value_addr);
+  
+  // Validate both key and value addresses
+  if (!key_addr || key_addr == LLDB_INVALID_ADDRESS || !value_addr || value_addr == LLDB_INVALID_ADDRESS) {
+    LLDB_LOG(log, "Invalid key or value address at index {0}", idx);
     return lldb::ValueObjectSP();
   }
   
-  addr_t target_addr = is_key ? m_key_value_pairs[pair_idx].first : m_key_value_pairs[pair_idx].second;
+  // Validate addresses are reasonable (not corrupted)
+  if ((key_addr >= 0x8000000000000000ULL && !IsTaggedPointer(key_addr)) ||
+      (value_addr >= 0x8000000000000000ULL && !IsTaggedPointer(value_addr))) {
+    LLDB_LOG(log, "Corrupted key or value address at index {0}", idx);
+    return lldb::ValueObjectSP();
+  }
   
-  LLDB_LOG(log, "Getting dictionary {0} at pair {1}, addr=0x{2:x}", 
-           is_key ? "key" : "value", pair_idx, target_addr);
-  
-  // Validate address using the same checks as the working array implementation
-  if (!target_addr || target_addr == LLDB_INVALID_ADDRESS) {
-    LLDB_LOG(log, "Invalid {0} address at pair {1}", is_key ? "key" : "value", pair_idx);
+  // Check for very low addresses (except tagged pointers)
+  if ((key_addr < 0x1000 && !IsTaggedPointer(key_addr)) || 
+      (value_addr < 0x1000 && !IsTaggedPointer(value_addr))) {
+    LLDB_LOG(log, "Low key or value address at index {0} - likely invalid", idx);
     return lldb::ValueObjectSP();
   }
   
@@ -324,68 +287,49 @@ GNUstepNSDictionarySyntheticProvider::GetChildAtIndex(uint32_t idx) {
   if (!process_sp || !target_sp)
     return lldb::ValueObjectSP();
   
-  // CRITICAL FIX: Use the working array pattern - create ValueObject directly from address
-  // This ensures proper summary provider application, just like arrays do
+  // APPLE'S APPROACH: Create NSPair struct with key and value fields
+  // This allows both key and value to have proper synthetic providers and enables nested expansion
   
-  if (!m_objc_id_type.IsValid()) {
-    LLDB_LOG(log, "GetChildAtIndex: m_objc_id_type is NOT VALID - this is the problem!");
-    return lldb::ValueObjectSP();
+  // Initialize pair type if needed
+  if (!m_pair_type.IsValid()) {
+    m_pair_type = GetGNUstepNSPairType(target_sp);
   }
   
-  // Create child name in dictionary format: [0] key, [0] value, [1] key, [1] value, etc.
-  StreamString child_name;
-  child_name.Printf("[%" PRIu32 "] %s", pair_idx, is_key ? "key" : "value");
-  
-  // Create temporary data buffer containing the object pointer (following array pattern)
-  size_t ptr_size = process_sp->GetAddressByteSize();
-  DataBufferSP data_buffer_sp(new DataBufferHeap(ptr_size, 0));
-  if (!data_buffer_sp) {
-    LLDB_LOG(log, "Failed to create DataBufferHeap");
+  if (!m_pair_type.IsValid()) {
+    LLDB_LOG(log, "Failed to create NSPair type");
     return lldb::ValueObjectSP();
   }
+
+  // Create buffer containing both key and value pointers
+  auto ptr_size = process_sp->GetAddressByteSize();
+  WritableDataBufferSP buffer_sp(new DataBufferHeap(2 * ptr_size, 0));
   
-  uint8_t *data_ptr = const_cast<uint8_t*>(data_buffer_sp->GetBytes());
-  if (!data_ptr) {
-    LLDB_LOG(log, "Failed to get data buffer bytes");
-    return lldb::ValueObjectSP();
-  }
-  
-  // Store the object pointer in our temporary buffer (following array pattern)
-  DataExtractor data_extractor(data_buffer_sp, process_sp->GetByteOrder(), ptr_size);
   if (ptr_size == 8) {
-    *reinterpret_cast<uint64_t*>(data_ptr) = target_addr;
-    LLDB_LOG(log, "Stored 64-bit address 0x{0:x} in buffer for {1}", target_addr, is_key ? "key" : "value");
+    uint64_t *data_ptr = (uint64_t *)buffer_sp->GetBytes();
+    *data_ptr = key_addr;       // First field: key
+    *(data_ptr + 1) = value_addr;  // Second field: value
   } else {
-    *reinterpret_cast<uint32_t*>(data_ptr) = static_cast<uint32_t>(target_addr);
-    LLDB_LOG(log, "Stored 32-bit address 0x{0:x} in buffer for {1}", static_cast<uint32_t>(target_addr), is_key ? "key" : "value");
+    uint32_t *data_ptr = (uint32_t *)buffer_sp->GetBytes();
+    *data_ptr = static_cast<uint32_t>(key_addr);
+    *(data_ptr + 1) = static_cast<uint32_t>(value_addr);
   }
+
+  // Create child name showing index
+  StreamString idx_name;
+  idx_name.Printf("[%" PRIu32 "]", idx);
   
-  // Create ValueObject from our data buffer using objc id type (following array pattern)
-  ValueObjectSP child = ValueObject::CreateValueObjectFromData(
-      child_name.GetString(),
-      data_extractor,
-      m_exe_ctx_ref,
-      m_objc_id_type
-  );
+  // Create ValueObject using the pair type
+  DataExtractor data(buffer_sp, process_sp->GetByteOrder(), ptr_size);
+  ValueObjectSP pair_sp = CreateValueObjectFromData(idx_name.GetString(), data, m_exe_ctx_ref, m_pair_type);
   
-  if (child && child.get()) {
-    LLDB_LOG(log, "SUCCESS - Created ValueObject for {0} at pair {1}", is_key ? "key" : "value", pair_idx);
-    
-    // Force summary provider application (following array pattern)
-    const char* summary = child->GetSummaryAsCString();
-    if (summary) {
-      LLDB_LOG(log, "Dictionary {0} summary: '{1}'", is_key ? "key" : "value", summary);
-    } else {
-      LLDB_LOG(log, "Dictionary {0} has no summary", is_key ? "key" : "value");
-    }
-    
-    child->SetFormat(lldb::eFormatDefault);
-    return child;
+  if (pair_sp) {
+    LLDB_LOG(log, "Created dictionary pair child at index {0} with key=0x{1:x}, value=0x{2:x}", 
+             idx, key_addr, value_addr);
+    return pair_sp;
   } else {
-    LLDB_LOG(log, "FAILED to create ValueObject for {0} at pair {1}", is_key ? "key" : "value", pair_idx);
+    LLDB_LOG(log, "Failed to create pair ValueObject at index {0}", idx);
+    return lldb::ValueObjectSP();
   }
-  
-  return lldb::ValueObjectSP();
 }
 
 lldb::ChildCacheState
@@ -410,12 +354,6 @@ GNUstepNSDictionarySyntheticProvider::Update() {
     
   Log *log = GetLog(LLDBLog::DataFormatters);
   LLDB_LOG(log, "GNUstepNSDictionarySyntheticProvider: Updating for address 0x{0:x}", m_dict_ptr);
-  
-  // Try to discover offsets using runtime API first
-  if (!DiscoverOffsets()) {
-    Log *log = GetLog(LLDBLog::DataFormatters);
-    LLDB_LOG(log, "GNUstepNSDictionarySyntheticProvider::Update: Failed to discover offsets, using fallback");
-  }
   
   // Skip expression evaluation - go directly to memory reading to avoid selector issues
   bool success = ExtractPairsFromMemory();
@@ -511,89 +449,43 @@ GNUstepNSDictionarySyntheticProvider::ExtractPairsUsingExpression(StackFrameSP f
 }
 
 bool
-GNUstepNSDictionarySyntheticProvider::DiscoverOffsets() {
-  if (m_offsets_cached) {
-    return true;
-  }
-  
-  Log *log = GetLog(LLDBLog::DataFormatters);
-  LLDB_LOG(log, "DiscoverOffsets: Starting offset discovery for dictionary at 0x{0:x}", m_dict_ptr);
-  
-  if (!m_runtime_api || !m_dict_ptr) {
-    LLDB_LOG(log, "DiscoverOffsets: No runtime API or invalid dictionary address");
-    return false;
-  }
-  
-  // Get class information for this dictionary object
-  auto class_info = m_runtime_api->GetObjectClassInfo(m_dict_ptr);
-  if (!class_info) {
-    LLDB_LOG(log, "DiscoverOffsets: Failed to get class info: {0}", class_info.error_message);
-    return false;
-  }
-  
-  LLDB_LOG(log, "DiscoverOffsets: Dictionary class is '{0}' with {1} ivars", 
-           class_info.value.name, class_info.value.ivars.size());
-  
-  // Find the _map ivar in the dictionary class
-  for (const auto& ivar : class_info.value.ivars) {
-    LLDB_LOG(log, "DiscoverOffsets: Examining ivar '{0}' at offset {1}", ivar.name, ivar.offset);
-    
-    if (ivar.name == "_map" || ivar.name == "map") {
-      m_map_offset = ivar.offset;
-      LLDB_LOG(log, "DiscoverOffsets: Found _map ivar at offset {0}", m_map_offset);
-      break;
-    }
-  }
-  
-  if (m_map_offset < 0) {
-    LLDB_LOG(log, "DiscoverOffsets: Could not find _map ivar, using default offset");
-    m_map_offset = m_ptr_size; // Default fallback
-  }
-  
-  // GSIMapTable structure offsets are well-defined in the GNUstep source:
-  // struct GSIMapTable {
-  //   NSZone *zone;           // offset 0
-  //   uintptr_t nodeCount;    // offset ptr_size
-  //   uintptr_t bucketCount;  // offset 2*ptr_size  
-  //   GSIMapBucket *buckets;  // offset 3*ptr_size
-  //   // ... other fields
-  // }
-  // These are not dynamic - they're part of the GSIMapTable struct definition
-  m_nodeCount_offset = m_ptr_size;
-  m_bucketCount_offset = 2 * m_ptr_size;
-  m_buckets_offset = 3 * m_ptr_size;
-  
-  m_offsets_cached = true;
-  
-  LLDB_LOG(log, "DiscoverOffsets: Cached offsets - map: {0}, nodeCount: {1}, bucketCount: {2}, buckets: {3}",
-           m_map_offset, m_nodeCount_offset, m_bucketCount_offset, m_buckets_offset);
-  
-  return true;
-}
-
-bool
 GNUstepNSDictionarySyntheticProvider::ExtractPairsFromMemory() {
   ProcessSP process_sp = m_exe_ctx_ref.GetProcessSP();
   if (!process_sp)
     return false;
     
+  Status error;
   Log *log = GetLog(LLDBLog::DataFormatters);
   
-  // Try to use runtime API for class introspection
-  if (m_runtime_api) {
-    auto class_info = m_runtime_api->GetObjectClassInfo(m_dict_ptr);
-    if (class_info) {
-      LLDB_LOG(log, "ExtractPairsFromMemory: Dictionary class is '{0}', proceeding with memory extraction", 
-               class_info.value.name);
-    } else {
-      LLDB_LOG(log, "ExtractPairsFromMemory: Failed to get class info: {0}", class_info.error_message);
-    }
-  } else {
-    LLDB_LOG(log, "ExtractPairsFromMemory: No runtime API available, proceeding with fallback");
+  // Try to use runtime APIs instead of hardcoded memory layouts
+  // First, get the runtime class name to verify we're dealing with a dictionary
+  addr_t isa_ptr = process_sp->ReadPointerFromMemory(m_dict_ptr, error);
+  if (error.Fail() || !isa_ptr) {
+    LLDB_LOG(log, "Failed to read ISA pointer");
+    return false;
   }
   
-  // Always fall back to direct memory reading since it's reliable and we now
-  // have runtime-discovered offsets to make it more robust
+  // Try to call class_getName via runtime symbols
+  TargetSP target_sp = m_exe_ctx_ref.GetTargetSP();
+  if (!target_sp) {
+    LLDB_LOG(log, "No target available");
+    return false;
+  }
+  
+  // Look up class_getName symbol
+  SymbolContextList sc_list;
+  target_sp->GetImages().FindSymbolsWithNameAndType(ConstString("class_getName"), 
+                                                   eSymbolTypeCode, sc_list);
+  if (sc_list.GetSize() == 0) {
+    LLDB_LOG(log, "class_getName symbol not found, falling back to memory reading");
+    return ExtractPairsFromMemoryDirect();
+  }
+  
+  LLDB_LOG(log, "Found class_getName symbol, attempting runtime introspection");
+  
+  // For now, fall back to direct memory reading since expression evaluation 
+  // was causing crashes. In the future, we could implement direct runtime
+  // function calls here using the symbol addresses
   return ExtractPairsFromMemoryDirect();
 }
 
@@ -606,42 +498,35 @@ GNUstepNSDictionarySyntheticProvider::ExtractPairsFromMemoryDirect() {
   Status error;
   Log *log = GetLog(LLDBLog::DataFormatters);
   
-  // Use discovered offsets or fall back to hardcoded ones
-  ptrdiff_t map_offset = (m_map_offset >= 0) ? m_map_offset : m_ptr_size;
-  addr_t map_addr = m_dict_ptr + map_offset;
+  // GSDictionary layout: 
+  // - isa at offset 0
+  // - GSIMapTable_t map at offset m_ptr_size (embedded struct, not pointer)
+  addr_t map_addr = m_dict_ptr + m_ptr_size;
   
-  // GSIMapTable layout - these are part of the GSIMapTable struct itself
-  // and are consistent regardless of the dictionary class layout
-  ptrdiff_t nodeCount_in_map_offset = (m_nodeCount_offset >= 0) ? m_nodeCount_offset : m_ptr_size;
-  ptrdiff_t bucketCount_in_map_offset = (m_bucketCount_offset >= 0) ? m_bucketCount_offset : (2 * m_ptr_size);
-  ptrdiff_t buckets_in_map_offset = (m_buckets_offset >= 0) ? m_buckets_offset : (3 * m_ptr_size);
-  
+  // GSIMapTable layout:
+  // - zone at offset 0
+  // - nodeCount at offset m_ptr_size
+  // - bucketCount at offset 2*m_ptr_size
+  // - buckets pointer at offset 3*m_ptr_size
   uint64_t node_count = process_sp->ReadUnsignedIntegerFromMemory(
-      map_addr + nodeCount_in_map_offset, m_ptr_size, 0, error);
+      map_addr + m_ptr_size, m_ptr_size, 0, error);
   if (error.Fail() || node_count > 100000) {
     LLDB_LOG(log, "Failed to read nodeCount or invalid count: {0}", node_count);
     return false;
   }
     
   uint64_t bucket_count = process_sp->ReadUnsignedIntegerFromMemory(
-      map_addr + bucketCount_in_map_offset, m_ptr_size, 0, error);
+      map_addr + (2 * m_ptr_size), m_ptr_size, 0, error);
   if (error.Fail() || bucket_count > 10000) {
     LLDB_LOG(log, "Failed to read bucketCount or invalid count: {0}", bucket_count);
     return false;
   }
     
   addr_t buckets_ptr = process_sp->ReadPointerFromMemory(
-      map_addr + buckets_in_map_offset, error);
+      map_addr + (3 * m_ptr_size), error);
   if (error.Fail() || !buckets_ptr) {
     LLDB_LOG(log, "Failed to read buckets pointer");
     return false;
-  }
-  
-  if (m_offsets_cached) {
-    LLDB_LOG(log, "ExtractPairsFromMemoryDirect: Using runtime-discovered offsets: map_offset={0}, nodeCount={1}, bucketCount={2}, buckets={3}",
-             map_offset, nodeCount_in_map_offset, bucketCount_in_map_offset, buckets_in_map_offset);
-  } else {
-    LLDB_LOG(log, "ExtractPairsFromMemoryDirect: Using fallback hardcoded offsets");
   }
     
   LLDB_LOG(log, "GSIMapTable: nodeCount={0}, bucketCount={1}, buckets=0x{2:x}",
@@ -740,7 +625,7 @@ GNUstepNSDictionarySyntheticProvider::ExtractPairsFromMemoryDirect() {
 
 size_t 
 GNUstepNSDictionarySyntheticProvider::GetIndexOfChildWithName(ConstString name) {
-  // Handle dictionary index notation [n] key or [n] value  
+  // Handle dictionary index notation [n] key or [n] value
   std::string name_str = name.GetStringRef().str();
   
   // Match patterns like "[0] key" or "[0] value"
@@ -748,17 +633,17 @@ GNUstepNSDictionarySyntheticProvider::GetIndexOfChildWithName(ConstString name) 
     size_t bracket_close = name_str.find(']');
     if (bracket_close != std::string::npos && name_str[0] == '[') {
       std::string index_str = name_str.substr(1, bracket_close - 1);
-      size_t pair_idx = 0;
-      if (sscanf(index_str.c_str(), "%zu", &pair_idx) == 1) {
-        if (pair_idx < m_key_value_pairs.size()) {
+      size_t idx = 0;
+      if (sscanf(index_str.c_str(), "%zu", &idx) == 1) {
+        if (idx < m_key_value_pairs.size()) {
           // Check if it's asking for key or value
           size_t space_pos = name_str.find(' ', bracket_close);
           if (space_pos != std::string::npos) {
             std::string suffix = name_str.substr(space_pos + 1);
             if (suffix == "key") {
-              return pair_idx * 2;     // Key is at even indices: 0, 2, 4...
+              return idx * 2; // Key is at even indices
             } else if (suffix == "value") {
-              return pair_idx * 2 + 1; // Value is at odd indices: 1, 3, 5...
+              return idx * 2 + 1; // Value is at odd indices
             }
           }
         }

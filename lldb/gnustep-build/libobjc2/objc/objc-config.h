@@ -1,0 +1,1 @@
+/* #undef STRICT_APPLE_COMPATIBILITY */

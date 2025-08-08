@@ -54,19 +54,10 @@ private:
   CompilerType m_objc_id_type; // Apple's ObjCBuiltinIdTy for automatic summary provider application
   GNUstepRuntimeAPISP m_runtime_api; // Runtime API for safe method calls
 
-  // Dynamic offset caching for performance
-  ptrdiff_t m_count_offset;      // Offset of _count ivar
-  ptrdiff_t m_contents_offset;   // Offset of _contents_array ivar  
-  bool m_offsets_cached;         // Whether offsets have been discovered
-
   /// Call objectAtIndex: method safely via runtime
   /// @param index The array index to retrieve
   /// @return Object address, or LLDB_INVALID_ADDRESS on failure
   lldb::addr_t CallObjectAtIndex(uint32_t index);
-
-  /// Discover and cache ivar offsets using runtime API
-  /// @return true if offsets were successfully discovered
-  bool DiscoverOffsets();
 };
 
 } // namespace formatters
