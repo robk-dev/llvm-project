@@ -41,8 +41,9 @@ from contextlib import asynccontextmanager
 
 from mcp.server.fastmcp import FastMCP, Context
 
-os.environ["LD_LIBRARY_PATH"] = "/home/robk/code/llvm-project/build/lib:/home/robk/gnustep-install/lib"
-
+os.environ["LD_LIBRARY_PATH"] = "/home/robk/code/llvm-project/lib:/usr/local/lib:/home/robk/code/llvm-project/build/lib:/home/robk/code/llvm-project/build/lib:/home/robk/gnustep-install/lib"
+        # "LD_LIBRARY_PATH": "/home/robk/code/llvm-project/lib:/usr/local/lib:/home/robk/code/llvm-project/build/lib",
+        # "PATH": "/home/robk/code/llvm-project/build/bin:/home/robk/code/llvm-project/bin:${env:PATH}"
 # Global debug flag - set to False by default
 DEBUG = False
 

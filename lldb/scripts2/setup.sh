@@ -10,7 +10,7 @@ set -euo pipefail  # Exit on error, undefined variables, and pipe failures
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE_ROOT="$(dirname "$SCRIPT_DIR")"
 PROJECT_ROOT="$(dirname "$WORKSPACE_ROOT")"
-LLVM_BUILD_DIR="${LLVM_BUILD_DIR:-$HOME/llvm-build}"  # Default: ~/llvm-build
+LLVM_BUILD_DIR="${LLVM_BUILD_DIR:-$PROJECT_ROOT/build}"  # Use our existing build directory
 LLVM_REPO="https://github.com/llvm/llvm-project.git"
 LLVM_BRANCH="llvmorg-20.1.8"
 BUILD_TYPE="RelWithDebInfo"
@@ -21,8 +21,11 @@ PATCH_DIR="$WORKSPACE_ROOT/llvm_patch/GNUstepObjCRuntime"
 # Calculate safe parallel jobs (will be defined in common.sh functions)
 PARALLEL_JOBS=${PARALLEL_JOBS:-$(nproc)}
 
+# GNUstep install directory (for workspace builds)
+GNUSTEP_INSTALL_DIR="${WORKSPACE_ROOT}/gnustep-install"
+
 # Export variables for use in helper scripts
-export SCRIPT_DIR WORKSPACE_ROOT PROJECT_ROOT LLVM_BUILD_DIR LLVM_REPO LLVM_BRANCH BUILD_TYPE PATCH_DIR PARALLEL_JOBS
+export SCRIPT_DIR WORKSPACE_ROOT PROJECT_ROOT LLVM_BUILD_DIR LLVM_REPO LLVM_BRANCH BUILD_TYPE PATCH_DIR PARALLEL_JOBS GNUSTEP_INSTALL_DIR
 
 # Source helper modules
 source "$SCRIPT_DIR/helpers/common.sh"
@@ -209,12 +212,7 @@ main() {
         if [ ! -d "$LLVM_BUILD_DIR/build" ]; then
             print_error "Build directory not found. Run full build first with: $0"
         fi
-        
-        # Apply patch
-        echo -n "Copying patch files... "
-        apply_gnustep_patch >/dev/null 2>&1
-        echo -e "${GREEN}✓${NC}"
-        
+
         # Quick rebuild
         echo -n "Building LLDB... "
         cd "$LLVM_BUILD_DIR/build"
@@ -263,7 +261,6 @@ main() {
         print_success "Using existing LLVM: $COMMIT_HASH ($COMMIT_DATE)"
     fi
     
-    apply_gnustep_patch
     verify_llvm_version
     configure_build
     build_lldb

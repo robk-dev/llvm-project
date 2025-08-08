@@ -10,11 +10,14 @@
 #include "../GNUstepObjCRuntimeIntrospector.h"
 #include "lldb/ValueObject/ValueObjectConstResult.h"
 #include "lldb/ValueObject/ValueObject.h"
+#include "lldb/DataFormatters/DumpValueObjectOptions.h"
 #include "lldb/DataFormatters/FormattersHelpers.h"
 #include "lldb/Symbol/CompilerType.h"
 #include "Plugins/LanguageRuntime/ObjC/ObjCLanguageRuntime.h"
 #include "Plugins/TypeSystem/Clang/TypeSystemClang.h"
+#include "lldb/Target/Language.h"
 #include "lldb/Target/ExecutionContext.h"
+#include "lldb/Target/Target.h"
 #include "lldb/Utility/DataBufferHeap.h"
 #include "lldb/Utility/DataExtractor.h"
 #include "lldb/Utility/Endian.h"
@@ -160,6 +163,17 @@ std::string GNUstepNSArraySummaryProvider::GetInlineElementsPreview(ValueObject 
     
     // Try to get a string representation of the element with recursion protection
     std::string element_summary = GetElementSummary(process, element_addr, context);
+    
+    // Debug: If we got a raw address back, it means formatting failed
+    if (!element_summary.empty() && element_summary.find("0x") == 0) {
+      printf("[GNUstepArray] Element %u failed to format, trying direct string extraction: %s\n", i, element_summary.c_str());
+      // Try direct string extraction as a fallback
+      std::string direct_string = TryExtractStringContent(process, element_addr);
+      if (!direct_string.empty()) {
+        element_summary = "\"" + direct_string + "\"";
+      }
+    }
+    
     printf("[GNUstepArray] Element %u summary: %s\n", i, element_summary.c_str());
     if (element_summary.empty()) {
       result += "<object>";
@@ -190,7 +204,8 @@ std::string GNUstepNSArraySummaryProvider::GetElementSummary(Process *process, l
   // Enter this object in our recursion tracking
   context.EnterObject(element_addr);
   
-  // Try to extract string content first (handles both tagged pointers and regular strings)
+  // Always try to extract string content first (handles both tagged pointers and regular strings)
+  // This includes tagged strings which are the most common case
   std::string string_content = TryExtractStringContent(process, element_addr);
   if (!string_content.empty()) {
     context.ExitObject(element_addr);
@@ -204,24 +219,120 @@ std::string GNUstepNSArraySummaryProvider::GetElementSummary(Process *process, l
   // Check if it's a tagged pointer that couldn't be decoded as string
   GNUstepObjCRuntimeIntrospector introspector(process);
   if (introspector.IsTaggedPointer(element_addr)) {
-    context.ExitObject(element_addr);
-    // For non-string tagged pointers, show the tag type
+    // For non-string tagged pointers, try to get proper formatting
     uint64_t tag = element_addr & 7;
+    
+    // For tagged numbers, try to decode the value
+    if (tag == 1 || tag == 2) {
+      // Create a synthetic ValueObject for the tagged pointer
+      // to use LLDB's existing formatting infrastructure
+      ExecutionContextScope *exe_scope = process->GetTarget().GetProcessSP().get();
+      if (exe_scope) {
+        // Get the ObjC id type from the scratch TypeSystem
+        TypeSystemClangSP scratch_ts_sp = ScratchTypeSystemClang::GetForTarget(
+            process->GetTarget());
+        if (scratch_ts_sp) {
+          CompilerType id_type = scratch_ts_sp->GetType(
+              scratch_ts_sp->getASTContext().ObjCBuiltinIdTy);
+          
+          // Create a ValueObject from the tagged pointer address
+          DataExtractor data;
+          WritableDataBufferSP buffer_sp(new DataBufferHeap(&element_addr, sizeof(element_addr)));
+          data.SetData(buffer_sp, 0, sizeof(element_addr));
+          data.SetByteOrder(process->GetByteOrder());
+          data.SetAddressByteSize(process->GetAddressByteSize());
+          
+          ValueObjectSP valobj_sp = ValueObjectConstResult::Create(
+              exe_scope, id_type, ConstString("element"), data,
+              LLDB_INVALID_ADDRESS);
+          
+          if (valobj_sp) {
+            // Get the summary for this value object
+            StreamString summary_stream;
+            DumpValueObjectOptions options;
+            options.SetHideRootType(true).SetHideName(true).SetHideValue(false);
+            
+            // Try to get the summary using the registered formatters
+            const char *summary = valobj_sp->GetSummaryAsCString();
+            if (summary && strlen(summary) > 0) {
+              context.ExitObject(element_addr);
+              return summary;
+            }
+          }
+        }
+      }
+      
+      // Fallback for tagged pointers if ValueObject creation fails
+      context.ExitObject(element_addr);
+      switch (tag) {
+        case 1: return "<NSNumber>";
+        case 2: return "<NSDate>";
+        default: return "<tagged>";
+      }
+    }
+    
+    context.ExitObject(element_addr);
+    // For other tagged pointers
     switch (tag) {
-      case 1: return "<NSNumber>";
-      case 2: return "<NSDate>";
       case 4: return "<NSString>"; // Fallback if decoding failed
       default: return "<tagged>";
     }
   }
   
-  // REMOVED: Recursive TryExtractCollectionSummary call to prevent infinite loops
-  // This was causing the infinite recursion issue
+  // For regular objects (non-tagged, non-string), create a ValueObject
+  // and use LLDB's formatting system to get the proper summary
+  ExecutionContextScope *exe_scope = process->GetTarget().GetProcessSP().get();
+  if (exe_scope) {
+    // Get the ObjC id type from the scratch TypeSystem
+    TypeSystemClangSP scratch_ts_sp = ScratchTypeSystemClang::GetForTarget(
+        process->GetTarget());
+    if (scratch_ts_sp) {
+      CompilerType id_type = scratch_ts_sp->GetType(
+          scratch_ts_sp->getASTContext().ObjCBuiltinIdTy);
+      
+      // Create a ValueObject from the object address
+      // We need to create it as if we're reading a pointer to the object
+      DataExtractor data;
+      WritableDataBufferSP buffer_sp(new DataBufferHeap(&element_addr, sizeof(element_addr)));
+      data.SetData(buffer_sp, 0, sizeof(element_addr));
+      data.SetByteOrder(process->GetByteOrder());
+      data.SetAddressByteSize(process->GetAddressByteSize());
+      
+      ValueObjectSP valobj_sp = ValueObjectConstResult::Create(
+          exe_scope, id_type, ConstString("element"), data,
+          LLDB_INVALID_ADDRESS);
+      
+      if (valobj_sp) {
+        // Get the summary for this value object
+        const char *summary = valobj_sp->GetSummaryAsCString();
+        if (summary && strlen(summary) > 0) {
+          context.ExitObject(element_addr);
+          return summary;
+        }
+        
+        // If no summary, try to get the value as a string
+        StreamString value_stream;
+        DumpValueObjectOptions options;
+        options.SetHideRootType(true).SetHideName(true).SetHideValue(false);
+        llvm::Error error = valobj_sp->Dump(value_stream, options);
+        if (!error) {
+          std::string result = value_stream.GetString().str();
+          if (!result.empty()) {
+            context.ExitObject(element_addr);
+            return result;
+          }
+        } else {
+          // Consume the error to avoid assertion failures
+          llvm::consumeError(std::move(error));
+        }
+      }
+    }
+  }
   
   // Exit object tracking
   context.ExitObject(element_addr);
   
-  // For non-string objects, just return a generic marker
+  // For non-string objects where we couldn't get a better summary
   return "<object>";
 }
 

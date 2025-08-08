@@ -1,8 +1,8 @@
 # Makefile for LLDB Bridge Examples - Debug Symbol Edition
 
 # Use the LLVM build clang for consistency
-CC = /home/robk/llvm-build/build/bin/clang
-LLDB = /home/robk/llvm-build/build/bin/lldb
+CC = clang
+LLDB = /home/robk/code/llvm-project/build/bin/lldb
 
 # Enhanced compilation flags for better debugging experience
 CFLAGS = -fobjc-runtime=gnustep-2.1 \

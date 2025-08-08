@@ -52,3 +52,8 @@ tags
 # Ignore test trace directories.
 20??-??-??-??_??_??/
 
+gnustep-install
+gnustep-build
+gnustep-build/**
+libs-base
+libobjc2

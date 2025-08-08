@@ -240,6 +240,9 @@ private:
   /// Get cached class info
   llvm::Expected<ClassInfo> GetCachedClassInfo(const std::string &name);
   
+  /// Direct memory reading approach for class enumeration
+  llvm::Expected<std::vector<Class>> GetAllClassesDirect();
+  
 private:
   Process *m_process;
   RuntimeFunctions m_runtime;

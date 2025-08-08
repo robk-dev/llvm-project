@@ -36,8 +36,37 @@ void GNUstepObjCRuntime::Initialize() {
       CreateInstance, nullptr);
   
   Log *log = GetLog(LLDBLog::Process | LLDBLog::Types);
-  LLDB_LOG(log, "GNUstepObjCRuntime::Initialize() called");
-  printf("[GNUstepObjC] Initialize() complete\n");
+  LLDB_LOG(log, "GNUstepObjCRuntime::Initialize() called\n");
+  
+  // Register our formatters with LLDB
+  printf("[DEBUG] GNUstepObjCRuntime: Registering formatters...\n");
+  
+  // Get or create the GNUstep type category
+  TypeCategoryImplSP category_sp;
+  if (DataVisualization::Categories::GetCategory(ConstString("gnustep"), category_sp)) {
+    if (category_sp) {
+      printf("[DEBUG] GNUstepObjCRuntime: Got existing category, registering formatters\n");
+      GNUstepFormattersRegistry::RegisterFormatters(*category_sp);
+      DataVisualization::Categories::Enable(category_sp, TypeCategoryMap::Default);
+      printf("[DEBUG] GNUstepObjCRuntime: Formatters registered and enabled\n");
+    } else {
+      printf("[DEBUG] GNUstepObjCRuntime: Got null category pointer\n");
+    }
+  } else {
+    printf("[DEBUG] GNUstepObjCRuntime: Failed to get category, creating new one\n");
+    // Create the category
+    ConstString category_name("gnustep/libobjc2");
+    DataVisualization::Categories::Add(category_name);
+    
+    // Get the newly created category
+    if (DataVisualization::Categories::GetCategory(category_name, category_sp)) {
+      GNUstepFormattersRegistry::RegisterFormatters(*category_sp);
+      DataVisualization::Categories::Enable(category_name, TypeCategoryMap::Default);
+      printf("[DEBUG] GNUstepObjCRuntime: Created new category and registered formatters\n");
+    } else {
+      printf("[DEBUG] GNUstepObjCRuntime: Failed to create category\n");
+    }
+  }
 }
 
 void GNUstepObjCRuntime::Terminate() {
@@ -486,17 +515,10 @@ void GNUstepObjCRuntime::InitializeRuntimeAPI() {
     
     // Log runtime version
     if (m_runtime_api_up) {
-      // TEMP: Skip runtime version call to isolate crash
-      printf("[GNUstepObjC] Runtime V2 API created successfully (skipping version check)\n");
-      /*
       std::string version = m_runtime_api_up->GetRuntimeVersion();
       LLDB_LOG(log, "Runtime version: {0}", version);
       printf("[GNUstepObjC] Runtime version: %s\n", version.c_str());
-      */
       
-      // TEMP: Skip Foundation classes enumeration to isolate the crash
-      printf("[GNUstepObjC] Skipping Foundation classes enumeration (debugging)\n");
-      /*
       // Enumerate and log Foundation classes
       auto foundation_classes = m_runtime_api_up->GetAllFoundationClasses();
       if (foundation_classes) {
@@ -514,18 +536,20 @@ void GNUstepObjCRuntime::InitializeRuntimeAPI() {
           }
         }
       } else {
-        // Handle foundation_classes error
-        auto classes_error = foundation_classes.takeError();
-        LLDB_LOG(log, "Failed to get Foundation classes: {0}", toString(std::move(classes_error)));
-        printf("[GNUstepObjC] Failed to get Foundation classes\n");
+        // Consume the error from GetAllFoundationClasses
+        llvm::consumeError(foundation_classes.takeError());
+        // This is not critical - formatters will still work through other mechanisms
+        LLDB_LOG(log, "[GNUstepObjC] Note: Runtime class enumeration not available, using fallback mechanisms");
       }
-      */
     }
   } else {
-    // Handle the error case
-    LLDB_LOG(log, "Failed to initialize Runtime V2 API: {0}", 
-             llvm::toString(api_or_error.takeError()));
-    printf("[GNUstepObjC] Failed to initialize Runtime V2 API\n");
+    llvm::handleAllErrors(api_or_error.takeError(),
+                          [&](const llvm::StringError &SE) {
+                            LLDB_LOG(log, "Failed to initialize runtime API: {0}", 
+                                     SE.getMessage());
+                            printf("[GNUstepObjC] Failed to initialize runtime API: %s\n",
+                                   SE.getMessage().c_str());
+                          });
   }
 }
 

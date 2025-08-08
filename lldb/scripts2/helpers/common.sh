@@ -15,9 +15,9 @@ NC='\033[0m' # No Color
 if [ -z "${WORKSPACE_ROOT:-}" ]; then
     # Determine paths relative to this script
     HELPERS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    SCRIPT_DIR="$(dirname "$HELPERS_DIR")"
-    WORKSPACE_ROOT="$SCRIPT_DIR"
-    PROJECT_ROOT="$(dirname "$WORKSPACE_ROOT")"
+    SCRIPT_DIR="$(dirname "$HELPERS_DIR")"           # .../scripts2
+    PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"           # repo root containing examples/, gnustep-install/
+    WORKSPACE_ROOT="$PROJECT_ROOT"                     # Treat workspace root as repo root
 fi
 
 # Calculate safe parallel jobs based on available memory

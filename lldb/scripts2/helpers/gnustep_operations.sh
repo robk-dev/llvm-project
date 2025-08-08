@@ -12,9 +12,9 @@ if [ -f "$HELPERS_DIR/common.sh" ]; then
     source "$HELPERS_DIR/common.sh"
 else
     # Fallback if common.sh doesn't exist
-    SCRIPT_DIR="$(dirname "$HELPERS_DIR")"
-    WORKSPACE_ROOT="$SCRIPT_DIR"
-    PROJECT_ROOT="$(dirname "$WORKSPACE_ROOT")"
+    SCRIPT_DIR="$(dirname "$HELPERS_DIR")"           # .../scripts2
+    WORKSPACE_ROOT="$(dirname "$SCRIPT_DIR")"        # repo root containing examples/, gnustep-install/
+    PROJECT_ROOT="$WORKSPACE_ROOT"
     
     # Color codes
     RED='\033[0;31m'
@@ -34,17 +34,18 @@ else
     PARALLEL_JOBS=$(nproc)
 fi
 
-# GNUstep build configuration
-GNUSTEP_BUILD_DIR="${GNUSTEP_BUILD_DIR:-$PROJECT_ROOT/gnustep_build}"
-LIBOBJC2_BUILD_DIR="${LIBOBJC2_BUILD_DIR:-$PROJECT_ROOT/libobjc2_build}"
-LIBS_BASE_SOURCE_DIR="$PROJECT_ROOT/libs-base"
-LIBOBJC2_SOURCE_DIR="$PROJECT_ROOT/libobjc2"
+# GNUstep build configuration - updated for local workspace
+GNUSTEP_BUILD_DIR="${GNUSTEP_BUILD_DIR:-$WORKSPACE_ROOT/gnustep-build}"
+GNUSTEP_INSTALL_DIR="${GNUSTEP_INSTALL_DIR:-$WORKSPACE_ROOT/gnustep-install}"
+LIBOBJC2_BUILD_DIR="${LIBOBJC2_BUILD_DIR:-$WORKSPACE_ROOT/gnustep-build/libobjc2}"
+LIBS_BASE_SOURCE_DIR="$WORKSPACE_ROOT/libs-base"
+LIBOBJC2_SOURCE_DIR="$WORKSPACE_ROOT/libobjc2"
 
 # Build settings for debugging and symbol generation WITHOUT NEW STRING ABI
-# Use gnustep-2.2 runtime (latest version)
+# Use gnustep-2.1 runtime to match examples and avoid ABI mismatches
 export GNUSTEP_CFLAGS="-g -gdwarf-5 -O0 -fno-omit-frame-pointer -DDEBUG=1"
 export GNUSTEP_CXXFLAGS="-g -gdwarf-5 -O0 -fno-omit-frame-pointer -DDEBUG=1"
-export GNUSTEP_OBJCFLAGS="-g -gdwarf-5 -O0 -fno-omit-frame-pointer -DDEBUG=1 -fobjc-runtime=gnustep-2.2 -fconstant-string-class=NSConstantString"
+export GNUSTEP_OBJCFLAGS="-g -gdwarf-5 -O0 -fno-omit-frame-pointer -DDEBUG=1 -fobjc-runtime=gnustep-2.1 -fconstant-string-class=NSConstantString -fno-objc-arc"
 export GNUSTEP_LDFLAGS="-g"
 
 # Critical: DO NOT enable new string ABI
@@ -141,7 +142,7 @@ build_libobjc2_with_debug() {
     # Check if source exists
     if [ ! -d "$LIBOBJC2_SOURCE_DIR" ]; then
         print_progress "Cloning libobjc2 source..."
-        cd "$PROJECT_ROOT"
+        cd "$WORKSPACE_ROOT"
         git clone https://github.com/gnustep/libobjc2.git
     fi
     
@@ -164,11 +165,11 @@ build_libobjc2_with_debug() {
         -DCMAKE_C_FLAGS="$GNUSTEP_CFLAGS -ffunction-sections -fdata-sections" \
         -DCMAKE_CXX_FLAGS="$GNUSTEP_CXXFLAGS -ffunction-sections -fdata-sections" \
         -DCMAKE_SHARED_LINKER_FLAGS="-lstdc++" \
-        -DCMAKE_INSTALL_PREFIX=/usr/local \
-        -DCMAKE_C_COMPILER=/usr/bin/clang-18 \
-        -DCMAKE_CXX_COMPILER=/usr/bin/clang++-18 \
+        -DCMAKE_INSTALL_PREFIX="$GNUSTEP_INSTALL_DIR" \
+        -DCMAKE_C_COMPILER="$LLVM_BUILD_DIR/bin/clang" \
+        -DCMAKE_CXX_COMPILER="$LLVM_BUILD_DIR/bin/clang++" \
         -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY \
-        -DGNUSTEP_INSTALL_TYPE=SYSTEM \
+        -DGNUSTEP_INSTALL_TYPE=NONE \
         -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
         -GNinja
     
@@ -183,14 +184,13 @@ build_libobjc2_with_debug() {
     
     # Install
     print_progress "Installing libobjc2..."
-    sudo ninja install
-    sudo ldconfig
+    ninja install
     
     print_success "libobjc2 built and installed successfully in ${BUILD_TIME} minutes"
     
     # Verify installation
-    if [ -f "/usr/local/lib/libobjc.so" ]; then
-        OBJC_VERSION=$(strings /usr/local/lib/libobjc.so | grep -E "libobjc.*[0-9]+" | head -1 || echo "Version unknown")
+    if [ -f "$GNUSTEP_INSTALL_DIR/lib/libobjc.so" ]; then
+        OBJC_VERSION=$(strings "$GNUSTEP_INSTALL_DIR/lib/libobjc.so" | grep -E "libobjc.*[0-9]+" | head -1 || echo "Version unknown")
         print_success "✅ libobjc2 installed: $OBJC_VERSION"
     else
         print_error "❌ libobjc2 installation verification failed"
@@ -202,10 +202,60 @@ build_libobjc2_with_debug() {
 build_gnustep_base_with_debug() {
     print_section "Step: Building libgnustep-base with Debug Symbols"
     
+    # Ensure gnustep-make is installed into our workspace prefix so we don't rely on /usr/share
+    ensure_gnustep_make_installed() {
+        local MAKEFILES_DIR="$GNUSTEP_INSTALL_DIR/share/GNUstep/Makefiles"
+        if [ -d "$MAKEFILES_DIR" ] && [ -f "$MAKEFILES_DIR/aggregate.make" ]; then
+            print_progress "Found gnustep-make in $MAKEFILES_DIR"
+            export GNUSTEP_MAKEFILES="$MAKEFILES_DIR"
+            return 0
+        fi
+
+        print_progress "gnustep-make not found in workspace; building and installing into $GNUSTEP_INSTALL_DIR ..."
+        local TOOLS_MAKE_DIR="$WORKSPACE_ROOT/gnustep-build/tools-make"
+        local TOOLS_MAKE_SRC="$WORKSPACE_ROOT/tools-make"
+
+        # Clone or update tools-make (gnustep-make)
+        if [ ! -d "$TOOLS_MAKE_SRC" ]; then
+            print_progress "Cloning gnustep/tools-make ..."
+            cd "$WORKSPACE_ROOT"
+            git clone https://github.com/gnustep/tools-make.git
+        else
+            cd "$TOOLS_MAKE_SRC"
+            print_progress "Updating gnustep/tools-make ..."
+            git fetch origin
+            git checkout master
+            git pull --ff-only origin master || true
+        fi
+
+        mkdir -p "$TOOLS_MAKE_DIR"
+        cd "$TOOLS_MAKE_SRC"
+        print_progress "Configuring gnustep-make with prefix $GNUSTEP_INSTALL_DIR ..."
+        ./configure --prefix="$GNUSTEP_INSTALL_DIR"
+        print_progress "Building gnustep-make ..."
+        make -j${PARALLEL_JOBS:-1}
+        print_progress "Installing gnustep-make ..."
+        make install
+
+        if [ -d "$MAKEFILES_DIR" ] && [ -f "$MAKEFILES_DIR/aggregate.make" ]; then
+            export GNUSTEP_MAKEFILES="$MAKEFILES_DIR"
+            # Ensure the new gnustep-make binaries and configs are preferred
+            export PATH="$GNUSTEP_INSTALL_DIR/bin:${PATH:-}"
+            print_success "gnustep-make installed at $MAKEFILES_DIR"
+        else
+            print_error "Failed to install gnustep-make into $GNUSTEP_INSTALL_DIR"
+            return 1
+        fi
+    }
+
+    # After ensure, return to libs-base source dir to proceed with configure/build
+    # (ensure_gnustep_make_installed changes directories internally)
+    cd "$LIBS_BASE_SOURCE_DIR"
+
     # Clone or update libs-base from official GNUstep repository
     if [ ! -d "$LIBS_BASE_SOURCE_DIR" ]; then
         print_progress "Cloning libs-base from official GNUstep repository..."
-        cd "$PROJECT_ROOT"
+        cd "$WORKSPACE_ROOT"
         git clone https://github.com/gnustep/libs-base.git
     else
         cd "$LIBS_BASE_SOURCE_DIR"
@@ -226,28 +276,38 @@ build_gnustep_base_with_debug() {
     # Configure environment for GNUstep build
     print_progress "Setting up GNUstep build environment..."
     
+    # Ensure GNUstep Makefiles are available in our workspace and set env
+    ensure_gnustep_make_installed
+
     # Set GNUstep environment variables for debugging builds with clang
-    export GNUSTEP_MAKEFILES="/usr/share/GNUstep/Makefiles"
     # export GNUSTEP_NEW_STRING_ABI=1  # DISABLED
-    export ADDITIONAL_OBJCFLAGS="$GNUSTEP_OBJCFLAGS"
-    export ADDITIONAL_CFLAGS="$GNUSTEP_CFLAGS"
-    export ADDITIONAL_CPPFLAGS=""
-    export ADDITIONAL_LDFLAGS="$GNUSTEP_LDFLAGS"
+    export ADDITIONAL_OBJCFLAGS="$GNUSTEP_OBJCFLAGS -I$GNUSTEP_INSTALL_DIR/include"
+    export ADDITIONAL_CFLAGS="$GNUSTEP_CFLAGS -I$GNUSTEP_INSTALL_DIR/include"
+    export ADDITIONAL_CPPFLAGS="-I$GNUSTEP_INSTALL_DIR/include"
+    export ADDITIONAL_LDFLAGS="$GNUSTEP_LDFLAGS -L$GNUSTEP_INSTALL_DIR/lib -Wl,-rpath,$GNUSTEP_INSTALL_DIR/lib -lobjc"
     export debug=yes
     export strip=no
     export shared=yes
     
-    # CRITICAL: Force clang-18 usage instead of gcc
-    export CC=/usr/bin/clang-18
-    export CXX=/usr/bin/clang++-18
-    export OBJC=/usr/bin/clang-18
-    export OBJCXX=/usr/bin/clang++-18
-    export LDCC=/usr/bin/clang-18
+    # Prefer the workspace LLVM toolchain when available, else fall back to system clang
+    if [ -n "${LLVM_BUILD_DIR:-}" ] && [ -x "$LLVM_BUILD_DIR/bin/clang" ]; then
+        export CC="$LLVM_BUILD_DIR/bin/clang"
+        export CXX="$LLVM_BUILD_DIR/bin/clang++"
+        export OBJC="$LLVM_BUILD_DIR/bin/clang"
+        export OBJCXX="$LLVM_BUILD_DIR/bin/clang++"
+        export LDCC="$LLVM_BUILD_DIR/bin/clang"
+    else
+        export CC="clang"
+        export CXX="clang++"
+        export OBJC="clang"
+        export OBJCXX="clang++"
+        export LDCC="clang"
+    fi
     
-    # Override GNUstep makefiles to use clang with gnustep-2.2 runtime
-    export ADDITIONAL_OBJCFLAGS="$GNUSTEP_OBJCFLAGS -fobjc-runtime=gnustep-2.2 -fconstant-string-class=NSConstantString"
-    export ADDITIONAL_CFLAGS="$GNUSTEP_CFLAGS"
-    export CPPFLAGS=""
+    # Ensure our custom libobjc is found first by pkg-config and the linker
+    export PKG_CONFIG_PATH="$GNUSTEP_INSTALL_DIR/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+    export LD_LIBRARY_PATH="$GNUSTEP_INSTALL_DIR/lib:${LD_LIBRARY_PATH:-}"
+    export PATH="$GNUSTEP_INSTALL_DIR/bin:${PATH:-}"
     
     # Configure gnustep-base if needed
     print_progress "Configuring gnustep-base..."
@@ -258,63 +318,73 @@ build_gnustep_base_with_debug() {
     
     if [ ! -f "GNUmakefile" ]; then
         # Configure with debug settings and non-fragile ABI
-        # Need to ensure libobjc2 is found
-        export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
-        export LD_LIBRARY_PATH="/usr/local/lib:${LD_LIBRARY_PATH:-}"
-        
-        CFLAGS="$GNUSTEP_CFLAGS -I/usr/local/include" \
-        CXXFLAGS="$GNUSTEP_CXXFLAGS -I/usr/local/include" \
-        OBJCFLAGS="-g -gdwarf-5 -O0 -fno-omit-frame-pointer -fobjc-runtime=gnustep-2.2 -fconstant-string-class=NSConstantString -I/usr/local/include" \
-        CPPFLAGS="-I/usr/local/include" \
-        LDFLAGS="-L/usr/local/lib -Wl,-rpath,/usr/local/lib -lobjc" \
-        RUNTIME_VERSION="gnustep-2.2" \
+        CFLAGS="$GNUSTEP_CFLAGS -I$GNUSTEP_INSTALL_DIR/include" \
+        CXXFLAGS="$GNUSTEP_CXXFLAGS -I$GNUSTEP_INSTALL_DIR/include" \
+        OBJCFLAGS="$GNUSTEP_OBJCFLAGS -I$GNUSTEP_INSTALL_DIR/include" \
+        CPPFLAGS="-I$GNUSTEP_INSTALL_DIR/include" \
+        LDFLAGS="-L$GNUSTEP_INSTALL_DIR/lib -Wl,-rpath,$GNUSTEP_INSTALL_DIR/lib -lobjc" \
+        RUNTIME_VERSION="gnustep-2.1" \
         ./configure \
+            --prefix="$GNUSTEP_INSTALL_DIR" \
             --enable-debug \
             --disable-strip \
             --enable-objc-nonfragile-abi \
             --disable-mixedabi \
             --with-installation-domain=SYSTEM \
             --with-library-combo=ng-gnu-gnu \
-            --with-config-file=/usr/share/GNUstep/GNUstep.conf \
             --enable-libffi \
             --enable-static=no \
-            --enable-shared=yes \
-            --prefix=/usr/local \
-            CC=/usr/bin/clang-18 \
-            CXX=/usr/bin/clang++-18 \
-            OBJC=/usr/bin/clang-18 \
-            OBJCXX=/usr/bin/clang++-18
+            --enable-shared=yes
     fi
     
     # Build with DWARF-5 debug symbols
     print_progress "Building gnustep-base with DWARF-5 debug symbols (this may take 20-30 minutes)..."
     START_TIME=$(date +%s)
     
-    make -j$PARALLEL_JOBS debug=yes strip=no
+    # Add explicit -fno-objc-arc to prevent ARC feature detection issues
+    make -j$PARALLEL_JOBS debug=yes strip=no ADDITIONAL_OBJCFLAGS="-fno-objc-arc"
     
     END_TIME=$(date +%s)
     BUILD_TIME=$(( (END_TIME - START_TIME) / 60 ))
     
     # Install
     print_progress "Installing gnustep-base..."
-    sudo -E make install debug=yes strip=no
-    sudo ldconfig
+    make install debug=yes strip=no ADDITIONAL_OBJCFLAGS="-fno-objc-arc"
     
     print_success "gnustep-base built and installed successfully in ${BUILD_TIME} minutes"
     
-    # Verify installation
-    if [ -f "/usr/local/lib/libgnustep-base.so" ]; then
-        BASE_VERSION=$(strings /usr/local/lib/libgnustep-base.so | grep -E "gnustep-base.*[0-9]+" | head -1 || echo "Version unknown")
-        print_success "✅ gnustep-base installed: $BASE_VERSION"
-        
+    # Verify installation (support both flattened and classic GNUstep layouts)
+    print_progress "Verifying gnustep-base installation under $GNUSTEP_INSTALL_DIR"
+    BASE_LIB=""
+    # Candidate locations
+    for pattern in \
+        "$GNUSTEP_INSTALL_DIR/lib/libgnustep-base.so" \
+        "$GNUSTEP_INSTALL_DIR/lib/libgnustep-base.so."* \
+        "$GNUSTEP_INSTALL_DIR/System/Library/Libraries/libgnustep-base.so" \
+        "$GNUSTEP_INSTALL_DIR/System/Library/Libraries/libgnustep-base.so."* \
+        "$GNUSTEP_INSTALL_DIR/Library/Libraries/libgnustep-base.so" \
+        "$GNUSTEP_INSTALL_DIR/Library/Libraries/libgnustep-base.so."* \
+        "$GNUSTEP_INSTALL_DIR/lib/libgnustep-base.dylib" \
+        "$GNUSTEP_INSTALL_DIR/System/Library/Libraries/libgnustep-base.dylib" \
+        "$GNUSTEP_INSTALL_DIR/Library/Libraries/libgnustep-base.dylib"; do
+        for f in $pattern; do
+            if [ -f "$f" ]; then BASE_LIB="$f"; break 2; fi
+        done
+    done
+
+    if [ -n "$BASE_LIB" ]; then
+        BASE_VERSION=$(strings "$BASE_LIB" | grep -E "gnustep-base.*[0-9]+" | head -1 || echo "Version unknown")
+        print_success "✅ gnustep-base installed: $BASE_LIB ($BASE_VERSION)"
         # Check for debug symbols
-        if objdump -h /usr/local/lib/libgnustep-base.so | grep -q debug; then
+        if objdump -h "$BASE_LIB" | grep -q debug; then
             print_success "✅ Debug symbols present in gnustep-base"
         else
             print_warning "⚠️  Debug symbols may not be present in gnustep-base"
         fi
     else
-        print_error "❌ gnustep-base installation verification failed"
+        print_error "❌ gnustep-base installation verification failed (no library under $GNUSTEP_INSTALL_DIR)"
+        print_progress "Diagnostics: listing lib* directories under prefix"
+        find "$GNUSTEP_INSTALL_DIR" -maxdepth 4 -type d -iname 'lib*' -print | sed -n '1,120p'
         return 1
     fi
 }
@@ -332,7 +402,7 @@ verify_gnustep_symbol_generation() {
 # Makefile for LLDB Bridge Examples - Debug Symbol Edition
 
 CC = /usr/bin/clang-18
-CFLAGS = -fobjc-runtime=gnustep-2.2 -fblocks -g -gdwarf-5 -O0 -fno-omit-frame-pointer \
+CFLAGS = -fobjc-runtime=gnustep-2.1 -fblocks -g -gdwarf-5 -O0 -fno-omit-frame-pointer \
          -I/usr/local/include/GNUstep -I/usr/include/GNUstep \
          -fconstant-string-class=NSConstantString \
          -DGNUSTEP -DGNUSTEP_BASE_LIBRARY=1 -DDEBUG=1
@@ -444,12 +514,14 @@ update_gnustep_environment_config() {
 # GNUstep Debug Environment Setup
 # Source this script to set up the environment for debugging
 
-# Library paths
-export LD_LIBRARY_PATH="/usr/local/lib:\$LD_LIBRARY_PATH"
-export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:\$PKG_CONFIG_PATH"
+# Library paths (prefer workspace prefix)
+export LD_LIBRARY_PATH="$GNUSTEP_INSTALL_DIR/lib:\$LD_LIBRARY_PATH"
+export PKG_CONFIG_PATH="$GNUSTEP_INSTALL_DIR/lib/pkgconfig:\$PKG_CONFIG_PATH"
 
-# GNUstep environment
-export GNUSTEP_MAKEFILES="/usr/share/GNUstep/Makefiles"
+# GNUstep environment (use local makefiles)
+export GNUSTEP_MAKEFILES="$GNUSTEP_INSTALL_DIR/share/GNUstep/Makefiles"
+export GNUSTEP_SYSTEM_ROOT="$GNUSTEP_INSTALL_DIR"
+export GNUSTEP_INSTALLATION_DIR="$GNUSTEP_INSTALL_DIR"
 export GNUSTEP_FLATTENED=yes
 
 # Debugging flags for compilation

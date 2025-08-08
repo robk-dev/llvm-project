@@ -45,69 +45,6 @@ download_llvm() {
     cd ..
 }
 
-# Function to apply GNUstep patch
-apply_gnustep_patch() {
-    print_section "Step 4: Applying GNUstep Runtime Patch"
-    
-    # Verify patch directory exists
-    if [ ! -d "$PATCH_DIR" ]; then
-        print_error "Patch directory not found: $PATCH_DIR"
-    fi
-    
-    print_progress "Patch source: $PATCH_DIR"
-    
-    # Create plugin directory
-    PLUGIN_DIR="$LLVM_BUILD_DIR/llvm-project/lldb/source/Plugins/LanguageRuntime/ObjC/GNUstepObjCRuntime"
-    print_progress "Creating plugin directory..."
-    mkdir -p "$PLUGIN_DIR"
-    
-    # Copy patch files
-    print_progress "Copying patch files..."
-    cp -a "$PATCH_DIR/." "$PLUGIN_DIR/"
-    
-    # Apply Apple Pattern Integration (ObjCLanguage.cpp)
-    apply_apple_pattern_integration
-    # cp "$PATCH_DIR/CMakeLists.txt" "$PLUGIN_DIR/"
-    # cp "$PATCH_DIR/GNUstepObjCRuntime.h" "$PLUGIN_DIR/"
-    # cp "$PATCH_DIR/GNUstepObjCRuntime.cpp" "$PLUGIN_DIR/"
-    # cp "$PATCH_DIR/GNUstepSyntheticProvider.h" "$PLUGIN_DIR/"
-    # cp "$PATCH_DIR/GNUstepSyntheticProvider.cpp" "$PLUGIN_DIR/"
-    # cp "$PATCH_DIR/GNUstepStringSummaryProvider.h" "$PLUGIN_DIR/"
-    # cp "$PATCH_DIR/GNUstepStringSummaryProvider.cpp" "$PLUGIN_DIR/"
-    # cp "$PATCH_DIR/GNUstepUtilities.h" "$PLUGIN_DIR/"
-    # cp "$PATCH_DIR/GNUstepUtilities.cpp" "$PLUGIN_DIR/"
-    # cp "$PATCH_DIR/ISAResolver.cpp" "$PLUGIN_DIR/"
-    # cp "$PATCH_DIR/ISAResolver.h" "$PLUGIN_DIR/"
-    
-    print_success "Patch files copied"
-    
-    # Update parent CMakeLists.txt
-    PARENT_CMAKE="$LLVM_BUILD_DIR/llvm-project/lldb/source/Plugins/LanguageRuntime/ObjC/CMakeLists.txt"
-    
-    if [ ! -f "$PARENT_CMAKE" ]; then
-        print_error "Parent CMakeLists.txt not found: $PARENT_CMAKE"
-    fi
-    
-    if ! grep -q "GNUstepObjCRuntime" "$PARENT_CMAKE"; then
-        print_progress "Updating parent CMakeLists.txt..."
-        
-        # Backup original
-        cp "$PARENT_CMAKE" "$PARENT_CMAKE.backup"
-        
-        # Add our subdirectory
-        if grep -q "add_subdirectory(AppleObjCRuntime)" "$PARENT_CMAKE"; then
-            sed -i '/add_subdirectory(AppleObjCRuntime)/a add_subdirectory(GNUstepObjCRuntime)' "$PARENT_CMAKE"
-        else
-            echo "add_subdirectory(GNUstepObjCRuntime)" >> "$PARENT_CMAKE"
-        fi
-        
-        print_success "Parent CMakeLists.txt updated"
-    else
-        print_success "Parent CMakeLists.txt already includes GNUstepObjCRuntime"
-    fi
-    
-    print_success "GNUstep runtime patch applied successfully"
-}
 
 # Function to verify LLVM 20+ API compatibility
 verify_llvm_version() {
@@ -207,30 +144,4 @@ configure_build() {
           ../llvm-project/llvm
     
     print_success "CMake configuration completed"
-}
-
-# Function to apply Apple Pattern Integration (ObjCLanguage.cpp replacement)
-apply_apple_pattern_integration() {
-    print_progress "Applying Apple Pattern Integration..."
-    
-    local OBJC_LANGUAGE_PATCH_DIR="$WORKSPACE_ROOT/llvm_patch/ObjCLanguage"
-    local OBJC_LANGUAGE_TARGET="$LLVM_BUILD_DIR/llvm-project/lldb/source/Plugins/Language/ObjC/ObjCLanguage.cpp"
-    
-    # Verify our modified ObjCLanguage.cpp exists
-    if [ ! -f "$OBJC_LANGUAGE_PATCH_DIR/ObjCLanguage.cpp" ]; then
-        print_error "Modified ObjCLanguage.cpp not found: $OBJC_LANGUAGE_PATCH_DIR/ObjCLanguage.cpp"
-        return 1
-    fi
-    
-    # Backup original
-    if [ -f "$OBJC_LANGUAGE_TARGET" ] && [ ! -f "$OBJC_LANGUAGE_TARGET.backup" ]; then
-        print_progress "Backing up original ObjCLanguage.cpp..."
-        cp "$OBJC_LANGUAGE_TARGET" "$OBJC_LANGUAGE_TARGET.backup"
-    fi
-    
-    # Deploy our modified version
-    print_progress "Deploying Apple Pattern integrated ObjCLanguage.cpp..."
-    cp "$OBJC_LANGUAGE_PATCH_DIR/ObjCLanguage.cpp" "$OBJC_LANGUAGE_TARGET"
-    
-    print_success "Apple Pattern Integration applied successfully"
 }
