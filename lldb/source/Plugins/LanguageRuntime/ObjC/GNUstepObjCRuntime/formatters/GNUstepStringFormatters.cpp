@@ -129,7 +129,7 @@ std::string GNUstepNSStringSummaryProvider::ExtractMutableString(ValueObject &va
 }
 
 // Function wrapper for LLDB registration
-bool GNUstepNSStringFormatterFunction(ValueObject &valobj, Stream &stream, 
+bool lldb_private::formatters::GNUstepNSStringFormatterFunction(ValueObject &valobj, Stream &stream, 
                                      const TypeSummaryOptions &options) {
   GNUstepNSStringSummaryProvider provider_instance;
   return provider_instance.FormatObject(valobj, stream, options);

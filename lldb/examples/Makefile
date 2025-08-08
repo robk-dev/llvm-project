@@ -28,7 +28,7 @@ LIBS = -lgnustep-base -lobjc -lBlocksRuntime -lpthread -lm
 SOURCES = simple_test.m custom_class_test.m foundation_test.m string_test.m \
           test_nsstring_formatter.m test_nsnumber_formatter.m array_test.m \
           simple_array_test.m test_nsnumber_comprehensive.m test_nsarray_comprehensive.m \
-          dictionary_test.m nsset_test.m
+          dictionary_test.m nsset_test.m test_collections_formatter.m test_method_enum.m
 EXECUTABLES = $(SOURCES:.m=)
 
 .PHONY: all clean symbols
@@ -178,6 +178,9 @@ dictionary_test: dictionary_test.m
 nsset_test: nsset_test.m
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $< $(LIBS)
 
+test_collections_formatter: test_collections_formatter.m
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $< $(LIBS)
+
 debug-dictionary: dictionary_test
 	@echo "Starting LLDB with NSDictionary formatter test..."
 	@echo "Commands to test the formatter:"
@@ -217,6 +220,65 @@ debug-set: nsset_test
 	export LLDB_DEBUGSERVER_PATH="$(dir $(LLDB))lldb-server" && \
 	$(LLDB) ./nsset_test
 
+debug-collections: test_collections_formatter
+	@echo "Starting LLDB with comprehensive collections formatter test..."
+	@echo "This test validates NSDictionary and NSSet formatters"
+	@echo ""
+	@echo "Key breakpoints and tests:"
+	@echo "  (lldb) b test_collections_formatter.m:51   # Empty dictionary"
+	@echo "  (lldb) b test_collections_formatter.m:56   # Single element dict"
+	@echo "  (lldb) b test_collections_formatter.m:65   # Multi-element dict"
+	@echo "  (lldb) b test_collections_formatter.m:80   # Mixed types dict"
+	@echo "  (lldb) b test_collections_formatter.m:90   # Nested dict"
+	@echo "  (lldb) b test_collections_formatter.m:100  # Custom objects dict"
+	@echo "  (lldb) b test_collections_formatter.m:110  # Large dict (100 items)"
+	@echo "  (lldb) b test_collections_formatter.m:121  # Mutable dict"
+	@echo "  (lldb) b test_collections_formatter.m:129  # Empty set"
+	@echo "  (lldb) b test_collections_formatter.m:134  # Single element set"
+	@echo "  (lldb) b test_collections_formatter.m:139  # Multi-element set"
+	@echo "  (lldb) b test_collections_formatter.m:151  # Mixed types set"
+	@echo "  (lldb) b test_collections_formatter.m:159  # Set with collections"
+	@echo "  (lldb) b test_collections_formatter.m:167  # Custom objects set"
+	@echo "  (lldb) b test_collections_formatter.m:176  # Large set (150 items)"
+	@echo "  (lldb) b test_collections_formatter.m:187  # Mutable set"
+	@echo "  (lldb) b test_collections_formatter.m:218  # Complex nested structure"
+	@echo "  (lldb) b test_collections_formatter.m:223  # Nil dictionary"
+	@echo "  (lldb) b test_collections_formatter.m:227  # Nil set"
+	@echo "  (lldb) b test_collections_formatter.m:236  # Long strings dict"
+	@echo "  (lldb) b test_collections_formatter.m:241  # Final inspection"
+	@echo ""
+	@echo "Quick test sequence:"
+	@echo "  (lldb) b main"
+	@echo "  (lldb) run"
+	@echo "  (lldb) continue   # Multiple times to step through tests"
+	@echo "  (lldb) po emptyDict"
+	@echo "  (lldb) po multiDict"
+	@echo "  (lldb) po complexStructure"
+	@echo ""
+	export PATH="$(dir $(LLDB)):$$PATH" && \
+	export LLDB_DEBUGSERVER_PATH="$(dir $(LLDB))lldb-server" && \
+	$(LLDB) ./test_collections_formatter
+
+test_method_enum: test_method_enum.m
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $< $(LIBS)
+
+debug-method-enum: test_method_enum
+	@echo "Starting LLDB with method enumeration test..."
+	@echo "Commands to test method introspection:"
+	@echo "  (lldb) b test_method_enum.m:110"
+	@echo "  (lldb) run"
+	@echo "  (lldb) script"
+	@echo "  >>> import lldb"
+	@echo "  >>> obj = lldb.frame.FindVariable('testObj')"
+	@echo "  >>> cls = obj.GetChildMemberWithName('isa')"
+	@echo "  >>> # Method introspection will be available here"
+	@echo "  (lldb) po testObj"
+	@echo "  (lldb) po subObj"
+	@echo "  (lldb) frame variable -O"
+	export PATH="$(dir $(LLDB)):$$PATH" && \
+	export LLDB_DEBUGSERVER_PATH="$(dir $(LLDB))lldb-server" && \
+	$(LLDB) ./test_method_enum
+
 # Help target
 help:
 	@echo "Available targets:"
@@ -230,6 +292,7 @@ help:
 	@echo "  test_nsarray_comprehensive - Build comprehensive NSArray test"
 	@echo "  array_test             - Build NSArray formatter test"
 	@echo "  simple_array_test      - Build simple NSArray test"
+	@echo "  test_collections_formatter - Build comprehensive collections formatter test"
 	@echo "  symbols                - Check symbols in custom_class_test"
 	@echo "  debug-simple           - Debug simple_test with LLDB"
 	@echo "  debug-custom           - Debug custom_class_test with LLDB"
@@ -239,6 +302,7 @@ help:
 	@echo "  debug-array            - Debug NSArray formatter test with LLDB"
 	@echo "  debug-dictionary       - Debug NSDictionary formatter test with LLDB"
 	@echo "  debug-set              - Debug NSSet formatter test with LLDB"
+	@echo "  debug-collections      - Debug comprehensive collections formatter test with LLDB"
 	@echo "  test-plugin            - Test our GNUstep plugin with guided commands"
 	@echo "  clean                  - Remove all built executables"
 	@echo "  help                   - Show this help message"

@@ -43,9 +43,9 @@ LIBOBJC2_SOURCE_DIR="$WORKSPACE_ROOT/libobjc2"
 
 # Build settings for debugging and symbol generation WITHOUT NEW STRING ABI
 # Use gnustep-2.1 runtime to match examples and avoid ABI mismatches
-export GNUSTEP_CFLAGS="-g -gdwarf-5 -O0 -fno-omit-frame-pointer -DDEBUG=1"
-export GNUSTEP_CXXFLAGS="-g -gdwarf-5 -O0 -fno-omit-frame-pointer -DDEBUG=1"
-export GNUSTEP_OBJCFLAGS="-g -gdwarf-5 -O0 -fno-omit-frame-pointer -DDEBUG=1 -fobjc-runtime=gnustep-2.1 -fconstant-string-class=NSConstantString -fno-objc-arc"
+export GNUSTEP_CFLAGS="-g -O0 -fno-omit-frame-pointer -DDEBUG=1"
+export GNUSTEP_CXXFLAGS="-g -O0 -fno-omit-frame-pointer -DDEBUG=1"
+export GNUSTEP_OBJCFLAGS="-g -O0 -fno-omit-frame-pointer -DDEBUG=1 -fobjc-runtime=gnustep-2.1 -fconstant-string-class=NSConstantString -fno-objc-arc"
 export GNUSTEP_LDFLAGS="-g"
 
 # Critical: DO NOT enable new string ABI
@@ -402,7 +402,7 @@ verify_gnustep_symbol_generation() {
 # Makefile for LLDB Bridge Examples - Debug Symbol Edition
 
 CC = /usr/bin/clang-18
-CFLAGS = -fobjc-runtime=gnustep-2.1 -fblocks -g -gdwarf-5 -O0 -fno-omit-frame-pointer \
+CFLAGS = -fobjc-runtime=gnustep-2.1 -fblocks -g -O0 -fno-omit-frame-pointer \
          -I/usr/local/include/GNUstep -I/usr/include/GNUstep \
          -fconstant-string-class=NSConstantString \
          -DGNUSTEP -DGNUSTEP_BASE_LIBRARY=1 -DDEBUG=1

@@ -63,7 +63,7 @@ private:
                                       std::vector<KeyValuePair> &pairs, uint32_t max_pairs);
   
   /// Get summary for a single element (key or value)
-  std::string GetElementSummary(Process *process, lldb::addr_t element_addr);
+  std::string GetElementSummary(Process *process, lldb::addr_t element_addr, FormatterContext &context);
   
   /// Check if address is a GNUstep tagged pointer
   static bool IsGNUstepTaggedPointer(lldb::addr_t addr);
@@ -117,8 +117,15 @@ private:
   std::vector<KeyValuePair> m_pairs;
   bool m_is_mutable;
   
+  // Execution context and type information for creating child ValueObjects
+  ExecutionContextRef m_exe_ctx_ref;
+  CompilerType m_id_type;
+  
   bool ReadMapTableInfo(Process *process, lldb::addr_t obj_addr);
   bool ExtractKeyValuePairs(Process *process);
+  
+  /// Get the concrete type for an object address
+  CompilerType GetConcreteTypeForObject(lldb::addr_t obj_addr);
 };
 
 /// Function wrappers for LLDB registration

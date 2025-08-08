@@ -147,7 +147,7 @@ std::string GNUstepNSErrorSummaryProvider::ExtractStringFromAddress(Process *pro
   return GNUstepRuntimeHelper::ReadUTF8String(process, string_data_addr, 256);
 }
 
-bool GNUstepNSErrorFormatterFunction(ValueObject &valobj, Stream &stream,
+bool lldb_private::formatters::GNUstepNSErrorFormatterFunction(ValueObject &valobj, Stream &stream,
                                     const TypeSummaryOptions &options) {
   GNUstepNSErrorSummaryProvider formatter;
   return formatter.FormatObject(valobj, stream, options);

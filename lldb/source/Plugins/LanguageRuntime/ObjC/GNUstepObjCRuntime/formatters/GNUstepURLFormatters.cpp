@@ -90,7 +90,7 @@ std::string GNUstepNSURLSummaryProvider::ExtractURLStringIvar(ValueObject &valob
   return result;
 }
 
-bool GNUstepNSURLFormatterFunction(ValueObject &valobj, Stream &stream,
+bool lldb_private::formatters::GNUstepNSURLFormatterFunction(ValueObject &valobj, Stream &stream,
                                   const TypeSummaryOptions &options) {
   GNUstepNSURLSummaryProvider formatter;
   return formatter.FormatObject(valobj, stream, options);

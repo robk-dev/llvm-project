@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "GNUstepObjCRuntime.h"
+#include "GNUstepClassDescriptor.h"
 #include "formatters/GNUstepFormattersRegistry.h"
 #include "lldb/Core/PluginManager.h"
 #include "lldb/DataFormatters/DataVisualization.h"
@@ -30,7 +31,6 @@ using namespace lldb_private;
 using namespace lldb_private::formatters;
 
 void GNUstepObjCRuntime::Initialize() {
-  printf("[GNUstepObjC] Initialize() called, registering plugin\n");
   PluginManager::RegisterPlugin(
       "gnu-objc-v2", "GNUstep Objective-C V2 Runtime",
       CreateInstance, nullptr);
@@ -39,21 +39,17 @@ void GNUstepObjCRuntime::Initialize() {
   LLDB_LOG(log, "GNUstepObjCRuntime::Initialize() called\n");
   
   // Register our formatters with LLDB
-  printf("[DEBUG] GNUstepObjCRuntime: Registering formatters...\n");
-  
   // Get or create the GNUstep type category
   TypeCategoryImplSP category_sp;
   if (DataVisualization::Categories::GetCategory(ConstString("gnustep"), category_sp)) {
     if (category_sp) {
-      printf("[DEBUG] GNUstepObjCRuntime: Got existing category, registering formatters\n");
       GNUstepFormattersRegistry::RegisterFormatters(*category_sp);
       DataVisualization::Categories::Enable(category_sp, TypeCategoryMap::Default);
-      printf("[DEBUG] GNUstepObjCRuntime: Formatters registered and enabled\n");
+      LLDB_LOG(log, "GNUstepObjCRuntime: Formatters registered and enabled");
     } else {
-      printf("[DEBUG] GNUstepObjCRuntime: Got null category pointer\n");
+      LLDB_LOG(log, "GNUstepObjCRuntime: Got null category pointer");
     }
   } else {
-    printf("[DEBUG] GNUstepObjCRuntime: Failed to get category, creating new one\n");
     // Create the category
     ConstString category_name("gnustep/libobjc2");
     DataVisualization::Categories::Add(category_name);
@@ -62,9 +58,9 @@ void GNUstepObjCRuntime::Initialize() {
     if (DataVisualization::Categories::GetCategory(category_name, category_sp)) {
       GNUstepFormattersRegistry::RegisterFormatters(*category_sp);
       DataVisualization::Categories::Enable(category_name, TypeCategoryMap::Default);
-      printf("[DEBUG] GNUstepObjCRuntime: Created new category and registered formatters\n");
+      LLDB_LOG(log, "GNUstepObjCRuntime: Created new category and registered formatters");
     } else {
-      printf("[DEBUG] GNUstepObjCRuntime: Failed to create category\n");
+      LLDB_LOG(log, "GNUstepObjCRuntime: Failed to create category");
     }
   }
 }
@@ -76,22 +72,17 @@ void GNUstepObjCRuntime::Terminate() {
 LanguageRuntime *
 GNUstepObjCRuntime::CreateInstance(Process *process,
                                      lldb::LanguageType language) {
-  printf("[GNUstepObjC] CreateInstance called, language=%d\n", (int)language);
   Log *log = GetLog(LLDBLog::Process | LLDBLog::Types);
   LLDB_LOG(log, "GNUstepObjCRuntime::CreateInstance() called for language {0}", language);
   
   if (language != eLanguageTypeObjC && language != eLanguageTypeObjC_plus_plus) {
-    printf("[GNUstepObjC] Wrong language (%d), need ObjC (%d) or ObjC++ (%d), returning nullptr\n", 
-           (int)language, (int)eLanguageTypeObjC, (int)eLanguageTypeObjC_plus_plus);
     return nullptr;
   }
   
   if (!process) {
-    printf("[GNUstepObjC] No process, returning nullptr\n");
     return nullptr;
   }
 
-  printf("[GNUstepObjC] Checking for GNUstep runtime libraries...\n");
   // First check if GNUstep runtime libraries are already loaded
   // This happens when attaching to a running process
   Target &target = process->GetTarget();
@@ -104,15 +95,11 @@ GNUstepObjCRuntime::CreateInstance(Process *process,
     ModuleSP module_sp = modules.GetModuleAtIndex(i);
     if (module_sp) {
       const char *module_name = module_sp->GetFileSpec().GetFilename().GetCString();
-      if (module_name) {
-        printf("[GNUstepObjC] Checking module: %s\n", module_name);
-      }
       if (module_name && 
           (strstr(module_name, "libobjc.so") || 
            strstr(module_name, "libgnustep-base.so") ||
            strstr(module_name, "libobjc2"))) {
         found_gnustep_runtime = true;
-        printf("[GNUstepObjC] Found GNUstep runtime module: %s\n", module_name);
         LLDB_LOG(log, "GNUstepObjCRuntime: Found GNUstep runtime module: {0}", module_name);
         break;
       }
@@ -120,12 +107,10 @@ GNUstepObjCRuntime::CreateInstance(Process *process,
   }
   
   if (found_gnustep_runtime) {
-    printf("[GNUstepObjC] Found GNUstep runtime libraries, creating instance\n");
     LLDB_LOG(log, "GNUstepObjCRuntime: Creating instance for GNUstep runtime (libraries already loaded)");
     return new GNUstepObjCRuntime(process);
   }
   
-  printf("[GNUstepObjC] Libraries not found, checking executable for .objc_ symbols\n");
   // If libraries aren't loaded yet, check if the main executable has Objective-C code
   // This is needed when launching a process (libraries haven't loaded yet)
   ModuleSP exe_module_sp = target.GetExecutableModule();
@@ -143,7 +128,6 @@ GNUstepObjCRuntime::CreateInstance(Process *process,
           if (symbol) {
             const char *name = symbol->GetName().GetCString();
             if (name && strstr(name, ".objc_")) {
-              printf("[GNUstepObjC] Found .objc_ symbol '%s', creating runtime\n", name);
               LLDB_LOG(log, "GNUstepObjCRuntime: Found .objc_ symbol '{0}' in executable, assuming GNUstep", name);
               return new GNUstepObjCRuntime(process);
             }
@@ -153,14 +137,12 @@ GNUstepObjCRuntime::CreateInstance(Process *process,
     }
   }
   
-  printf("[GNUstepObjC] No GNUstep runtime or Objective-C symbols found\n");
   LLDB_LOG(log, "GNUstepObjCRuntime: No GNUstep runtime or Objective-C symbols found");
   return nullptr;
 }
 
 GNUstepObjCRuntime::GNUstepObjCRuntime(Process *process)
     : ObjCLanguageRuntime(process), m_formatters_registered(false), m_gnustep_library_loaded(false) {
-  printf("[GNUstepObjC] Runtime constructor called\n");
   Log *log = GetLog(LLDBLog::Process | LLDBLog::Types);
   LLDB_LOG(log, "GNUstepObjCRuntime constructor called");
   if (process) {
@@ -437,6 +419,67 @@ void GNUstepObjCRuntime::UpdateISAToDescriptorMapIfNeeded() {
   LLDB_LOG(log, "GNUstepObjCRuntime::UpdateISAToDescriptorMapIfNeeded called");
 }
 
+ObjCLanguageRuntime::ClassDescriptorSP
+GNUstepObjCRuntime::GetClassDescriptorFromISA(ObjCISA isa) {
+  Log *log = GetLog(LLDBLog::Process | LLDBLog::Types);
+  LLDB_LOG(log, "GNUstepObjCRuntime::GetClassDescriptorFromISA called with ISA {0:x}", isa);
+  
+  if (!isa)
+    return ClassDescriptorSP();
+  
+  // First check the base class cache
+  UpdateISAToDescriptorMap();
+  ClassDescriptorSP descriptor_sp = ObjCLanguageRuntime::GetClassDescriptorFromISA(isa);
+  if (descriptor_sp)
+    return descriptor_sp;
+  
+  // If not in cache, create a new GNUstepClassDescriptor
+  descriptor_sp = ClassDescriptorSP(new GNUstepClassDescriptor(*this, isa, nullptr));
+  
+  // Add to cache if valid
+  if (descriptor_sp && descriptor_sp->IsValid()) {
+    AddClass(isa, descriptor_sp);
+    return descriptor_sp;
+  }
+  
+  return ClassDescriptorSP();
+}
+
+ObjCLanguageRuntime::ClassDescriptorSP
+GNUstepObjCRuntime::GetClassDescriptor(ValueObject &valobj) {
+  Log *log = GetLog(LLDBLog::Process | LLDBLog::Types);
+  LLDB_LOG(log, "GNUstepObjCRuntime::GetClassDescriptor called for ValueObject");
+  
+  // Handle base class case (like Apple's implementation)
+  if (valobj.IsBaseClass()) {
+    ValueObject *parent = valobj.GetParent();
+    if (parent && parent != &valobj) {
+      ClassDescriptorSP parent_descriptor_sp = GetClassDescriptor(*parent);
+      if (parent_descriptor_sp)
+        return parent_descriptor_sp->GetSuperclass();
+    }
+    return nullptr;
+  }
+  
+  // Get the ISA pointer from the object
+  addr_t isa_pointer = valobj.GetPointerValue();
+  if (!isa_pointer)
+    return ClassDescriptorSP();
+  
+  // Read the ISA from the object's first field
+  ExecutionContext exe_ctx(valobj.GetExecutionContextRef());
+  Process *process = exe_ctx.GetProcessPtr();
+  if (!process)
+    return ClassDescriptorSP();
+  
+  Status error;
+  ObjCISA isa = process->ReadPointerFromMemory(isa_pointer, error);
+  if (error.Fail())
+    return ClassDescriptorSP();
+  
+  return GetClassDescriptorFromISA(isa);
+}
+
 void GNUstepObjCRuntime::ModulesDidLoad(const ModuleList &module_list) {
   // CRITICAL FIX: Add guards to prevent infinite recursion
   static thread_local int recursion_depth = 0;
@@ -453,7 +496,7 @@ void GNUstepObjCRuntime::ModulesDidLoad(const ModuleList &module_list) {
   in_modules_did_load = true;
   recursion_depth++;
   
-  printf("[GNUstepObjC] ModulesDidLoad called with %zu modules\n", module_list.GetSize());
+  // Reduce debug spam - only log when we find GNUstep libraries
   Log *log = GetLog(LLDBLog::Process | LLDBLog::Types);
   LLDB_LOG(log, "GNUstepObjCRuntime::ModulesDidLoad called with {0} modules", 
            module_list.GetSize());
@@ -466,8 +509,6 @@ void GNUstepObjCRuntime::ModulesDidLoad(const ModuleList &module_list) {
   for (size_t i = 0; i < module_list.GetSize(); ++i) {
     ModuleSP module_sp = module_list.GetModuleAtIndex(i);
     if (IsModuleObjCLibrary(module_sp)) {
-      printf("[GNUstepObjC] Found GNUstep library: %s\n", 
-             module_sp->GetFileSpec().GetFilename().GetCString());
       found_gnustep = true;
       m_gnustep_library_loaded = true;
       ReadObjCLibrary(module_sp);
@@ -479,7 +520,6 @@ void GNUstepObjCRuntime::ModulesDidLoad(const ModuleList &module_list) {
   // Register formatters when we confirm GNUstep libraries are loaded
   if (found_gnustep) {
     if (!m_formatters_registered) {
-      printf("[GNUstepObjC] GNUstep libraries detected, registering formatters\n");
       LLDB_LOG(log, "GNUstepObjCRuntime: GNUstep libraries detected, registering formatters");
       RegisterFormatters();
     }
@@ -488,8 +528,6 @@ void GNUstepObjCRuntime::ModulesDidLoad(const ModuleList &module_list) {
     if (!m_runtime_api_up) {
       InitializeRuntimeAPI();
     }
-  } else {
-    printf("[GNUstepObjC] No GNUstep libraries found in this module load\n");
   }
   
   // Clear guards
@@ -500,7 +538,6 @@ void GNUstepObjCRuntime::ModulesDidLoad(const ModuleList &module_list) {
 void GNUstepObjCRuntime::InitializeRuntimeAPI() {
   Log *log = GetLog(LLDBLog::Process | LLDBLog::Types);
   LLDB_LOG(log, "GNUstepObjCRuntime::InitializeRuntimeAPI - Initializing runtime API");
-  printf("[GNUstepObjC] Initializing Runtime V2 API\n");
   
   if (!m_process) {
     LLDB_LOG(log, "No process available for runtime API");
@@ -511,19 +548,16 @@ void GNUstepObjCRuntime::InitializeRuntimeAPI() {
   if (api_or_error) {
     m_runtime_api_up = std::move(*api_or_error);
     LLDB_LOG(log, "Runtime V2 API initialized successfully");
-    printf("[GNUstepObjC] Runtime V2 API initialized successfully\n");
     
     // Log runtime version
     if (m_runtime_api_up) {
       std::string version = m_runtime_api_up->GetRuntimeVersion();
       LLDB_LOG(log, "Runtime version: {0}", version);
-      printf("[GNUstepObjC] Runtime version: %s\n", version.c_str());
       
       // Enumerate and log Foundation classes
       auto foundation_classes = m_runtime_api_up->GetAllFoundationClasses();
       if (foundation_classes) {
         LLDB_LOG(log, "Found {0} Foundation classes", foundation_classes->size());
-        printf("[GNUstepObjC] Found %zu Foundation classes\n", foundation_classes->size());
         
         // Log first few Foundation classes for debugging
         size_t count = 0;
@@ -531,8 +565,6 @@ void GNUstepObjCRuntime::InitializeRuntimeAPI() {
           if (count++ < 10) {
             LLDB_LOG(log, "  Foundation class: {0} (superclass: {1})", 
                      cls.name, cls.superclass_name);
-            printf("[GNUstepObjC]   Foundation class: %s (superclass: %s)\n",
-                   cls.name.c_str(), cls.superclass_name.c_str());
           }
         }
       } else {
@@ -547,19 +579,15 @@ void GNUstepObjCRuntime::InitializeRuntimeAPI() {
                           [&](const llvm::StringError &SE) {
                             LLDB_LOG(log, "Failed to initialize runtime API: {0}", 
                                      SE.getMessage());
-                            printf("[GNUstepObjC] Failed to initialize runtime API: %s\n",
-                                   SE.getMessage().c_str());
                           });
   }
 }
 
 void GNUstepObjCRuntime::RegisterFormatters() {
   if (m_formatters_registered) {
-    printf("[GNUstepObjC] Formatters already registered, skipping\n");
     return;
   }
     
-  printf("[GNUstepObjC] RegisterFormatters - Registering GNUstep formatters\n");
   Log *log = GetLog(LLDBLog::Process | LLDBLog::Types);
   LLDB_LOG(log, "GNUstepObjCRuntime::RegisterFormatters - Registering GNUstep formatters");
   

@@ -99,7 +99,7 @@ std::string GNUstepNSUUIDSummaryProvider::FormatUUIDString(const uint8_t uuid_by
   return oss.str();
 }
 
-bool GNUstepNSUUIDFormatterFunction(ValueObject &valobj, Stream &stream,
+bool lldb_private::formatters::GNUstepNSUUIDFormatterFunction(ValueObject &valobj, Stream &stream,
                                    const TypeSummaryOptions &options) {
   GNUstepNSUUIDSummaryProvider formatter;
   return formatter.FormatObject(valobj, stream, options);

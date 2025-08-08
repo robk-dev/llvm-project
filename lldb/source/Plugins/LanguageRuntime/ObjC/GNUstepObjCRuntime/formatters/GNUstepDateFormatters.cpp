@@ -11,6 +11,7 @@
 #include "lldb/Utility/DataExtractor.h"
 #include "lldb/Utility/Endian.h"
 #include "lldb/Utility/Status.h"
+#include <cstring>
 #include <ctime>
 #include <iomanip>
 #include <sstream>
@@ -59,6 +60,57 @@ double GNUstepNSDateSummaryProvider::ExtractTimeInterval(ValueObject &valobj) {
   if (object_addr == LLDB_INVALID_ADDRESS)
     return 0.0;
 
+  // Check if this is a tagged pointer NSDate (tag 6)
+  if ((object_addr & 0x7) == 6) {
+    // Tagged NSDate uses compressed double format based on libs-base/Source/NSDate.m
+    // The format is:
+    // bits 0-2: tag (6)
+    // bits 3-54: 52-bit mantissa/fraction  
+    // bits 55-62: 8-bit signed exponent (biased by -0x3EF from standard bias)
+    // bit 63: sign bit
+    
+    // Extract components using bit manipulation (avoiding bitfields for portability)
+    uint64_t compressed = object_addr;
+    
+    // Extract fraction (bits 3-54, which is 52 bits)
+    uint64_t fraction = (compressed >> 3) & 0xFFFFFFFFFFFFFULL;
+    
+    // Extract exponent (bits 55-62, which is 8 bits)
+    uint64_t exp_bits = (compressed >> 55) & 0xFF;
+    
+    // Extract sign (bit 63)
+    uint64_t sign = (compressed >> 63) & 0x1;
+    
+    // Sign extend the 8-bit exponent to 64-bit
+    int64_t signed_exp = static_cast<int64_t>(exp_bits);
+    if (signed_exp & 0x80) {
+      signed_exp |= 0xFFFFFFFFFFFFFF00ULL;
+    }
+    
+    // Add back the bias (0x3EF) to get the standard IEEE 754 exponent
+    int64_t biased_exponent = signed_exp + 0x3EF;
+    
+    // Clamp to valid IEEE 754 double exponent range [0, 0x7FF]
+    if (biased_exponent < 0) {
+      biased_exponent = 0;
+    } else if (biased_exponent > 0x7FF) {
+      biased_exponent = 0x7FF;
+    }
+    
+    // Reconstruct the IEEE 754 double
+    uint64_t ieee_bits = 0;
+    ieee_bits |= fraction;                                    // bits 0-51: fraction
+    ieee_bits |= (static_cast<uint64_t>(biased_exponent) << 52);  // bits 52-62: exponent
+    ieee_bits |= (sign << 63);                               // bit 63: sign
+    
+    // Interpret as double
+    double result;
+    memcpy(&result, &ieee_bits, sizeof(double));
+    
+    return result;
+  }
+
+  // Non-tagged NSDate: read from memory
   uint32_t addr_size = GNUstepRuntimeHelper::GetAddressByteSize(process);
   
   // NSDate stores its time interval as a double immediately after the isa pointer
@@ -124,7 +176,7 @@ std::string GNUstepNSDateSummaryProvider::ExtractCalendarDate(ValueObject &valob
   return FormatTimestamp(time_interval);
 }
 
-bool GNUstepNSDateFormatterFunction(ValueObject &valobj, Stream &stream,
+bool lldb_private::formatters::GNUstepNSDateFormatterFunction(ValueObject &valobj, Stream &stream,
                                    const TypeSummaryOptions &options) {
   GNUstepNSDateSummaryProvider formatter;
   return formatter.FormatObject(valobj, stream, options);

@@ -552,8 +552,156 @@ double GNUstepGenericFormatter::ReadFloatingPoint(Process *process,
   return 0.0;
 }
 
-bool GNUstepGenericFormatterFunction(ValueObject &valobj, Stream &stream,
+bool lldb_private::formatters::GNUstepGenericFormatterFunction(ValueObject &valobj, Stream &stream,
                                      const TypeSummaryOptions &options) {
   GNUstepGenericFormatter formatter;
   return formatter.FormatObject(valobj, stream, options);
+}
+
+// ===== GNUstepGenericObjectSyntheticProvider Implementation =====
+
+GNUstepGenericObjectSyntheticProvider::GNUstepGenericObjectSyntheticProvider(
+    lldb::ValueObjectSP valobj_sp)
+    : GNUstepSyntheticProvider(valobj_sp), m_obj_addr(LLDB_INVALID_ADDRESS) {
+}
+
+bool GNUstepGenericObjectSyntheticProvider::UpdateImpl() {
+  m_ivars.clear();
+  
+  if (!m_process)
+    return false;
+    
+  m_obj_addr = m_backend.GetPointerValue();
+  if (m_obj_addr == 0 || m_obj_addr == LLDB_INVALID_ADDRESS)
+    return false;
+  
+  // Create a temporary formatter to reuse its ivar collection logic
+  GNUstepGenericFormatter formatter;
+  std::vector<IvarInfo> all_ivars = formatter.CollectAllIvars(m_process, m_obj_addr);
+  
+  // Debug: Print number of ivars collected
+  printf("GNUstepGenericObjectSyntheticProvider: Collected %zu ivars for object at 0x%llx\n", 
+         all_ivars.size(), (unsigned long long)m_obj_addr);
+  
+  // Filter out the isa pointer and any other runtime-internal ivars
+  for (const auto& ivar : all_ivars) {
+    // Debug: Print each ivar
+    printf("  Ivar: name='%s', type='%s', offset=%d\n", 
+           ivar.name.c_str(), ivar.type_encoding.c_str(), ivar.offset);
+    
+    // Skip isa pointer - it's always the first ivar at offset 0 with type "@"
+    if (ivar.name == "isa")
+      continue;
+      
+    // Optionally skip other runtime internals (uncomment if needed)
+    // if (ivar.name.starts_with("_"))
+    //   continue;
+      
+    m_ivars.push_back(ivar);
+  }
+  
+  printf("GNUstepGenericObjectSyntheticProvider: After filtering, %zu ivars remain\n", m_ivars.size());
+  
+  return true;
+}
+
+llvm::Expected<uint32_t> GNUstepGenericObjectSyntheticProvider::CalculateNumChildren() {
+  if (!m_update_called)
+    return 0;
+  return static_cast<uint32_t>(m_ivars.size());
+}
+
+lldb::ValueObjectSP GNUstepGenericObjectSyntheticProvider::GetChildAtIndex(uint32_t idx) {
+  if (!m_update_called || idx >= m_ivars.size())
+    return nullptr;
+    
+  const IvarInfo& ivar = m_ivars[idx];
+  
+  // Determine the type for the ivar
+  CompilerType ivar_type;
+  ExecutionContext exe_ctx(m_backend.GetExecutionContextRef());
+  
+  // For object types, use 'id'
+  if (ivar.type_encoding[0] == '@') {
+    auto type_system = m_backend.GetCompilerType().GetTypeSystem();
+    if (type_system) {
+      ivar_type = type_system->GetBasicTypeFromAST(eBasicTypeObjCID);
+    }
+  } else {
+    // For primitive types, try to get the appropriate type
+    // This is simplified - a full implementation would parse the type encoding
+    auto type_system = m_backend.GetCompilerType().GetTypeSystem();
+    if (type_system) {
+      switch (ivar.type_encoding[0]) {
+        case 'i':
+          ivar_type = type_system->GetBasicTypeFromAST(eBasicTypeInt);
+          break;
+        case 'l':
+          ivar_type = type_system->GetBasicTypeFromAST(eBasicTypeLong);
+          break;
+        case 'q':
+          ivar_type = type_system->GetBasicTypeFromAST(eBasicTypeLongLong);
+          break;
+        case 'I':
+          ivar_type = type_system->GetBasicTypeFromAST(eBasicTypeUnsignedInt);
+          break;
+        case 'L':
+          ivar_type = type_system->GetBasicTypeFromAST(eBasicTypeUnsignedLong);
+          break;
+        case 'Q':
+          ivar_type = type_system->GetBasicTypeFromAST(eBasicTypeUnsignedLongLong);
+          break;
+        case 'f':
+          ivar_type = type_system->GetBasicTypeFromAST(eBasicTypeFloat);
+          break;
+        case 'd':
+          ivar_type = type_system->GetBasicTypeFromAST(eBasicTypeDouble);
+          break;
+        case 'c':
+          ivar_type = type_system->GetBasicTypeFromAST(eBasicTypeChar);
+          break;
+        case 'C':
+          ivar_type = type_system->GetBasicTypeFromAST(eBasicTypeUnsignedChar);
+          break;
+        case '*':
+          ivar_type = type_system->GetBasicTypeFromAST(eBasicTypeChar).GetPointerType();
+          break;
+        default:
+          // For unknown types, use void*
+          ivar_type = type_system->GetBasicTypeFromAST(eBasicTypeVoid).GetPointerType();
+          break;
+      }
+    }
+  }
+  
+  if (!ivar_type.IsValid()) {
+    return nullptr;
+  }
+  
+  // Create a value object for this ivar
+  DataExtractor data;
+  if (ivar.type_encoding[0] == '@' || ivar.type_encoding[0] == '^' || ivar.type_encoding[0] == '*') {
+    // For pointer types, read the pointer value
+    Status error;
+    lldb::addr_t ptr_value = GNUstepRuntimeHelper::ReadPointer(m_process, ivar.value_addr, error);
+    if (error.Success()) {
+      return CreateValueObjectFromAddress(ivar.name, ptr_value, ivar_type);
+    }
+  } else {
+    // For primitive types, read the value directly
+    std::vector<uint8_t> buffer(ivar.size);
+    if (GNUstepRuntimeHelper::ReadMemory(m_process, ivar.value_addr, buffer.data(), ivar.size)) {
+      DataBufferSP data_buffer = std::make_shared<DataBufferHeap>(buffer.data(), buffer.size());
+      data.SetData(data_buffer, m_process->GetByteOrder(), m_process->GetAddressByteSize());
+      return CreateValueObjectFromData(ivar.name, data, ivar_type);
+    }
+  }
+  
+  return nullptr;
+}
+
+SyntheticChildrenFrontEnd *
+lldb_private::formatters::GNUstepGenericObjectSyntheticFrontEndCreator(
+    CXXSyntheticChildren *synth, lldb::ValueObjectSP valobj_sp) {
+  return new GNUstepGenericObjectSyntheticProvider(valobj_sp);
 }

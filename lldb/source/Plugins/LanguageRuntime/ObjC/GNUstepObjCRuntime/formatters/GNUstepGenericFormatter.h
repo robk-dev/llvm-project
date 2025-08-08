@@ -53,6 +53,7 @@ private:
                                               lldb::addr_t class_addr,
                                               lldb::addr_t obj_addr);
   
+public:  // Make this method public so the synthetic provider can use it
   /// Walk the superclass hierarchy and collect all ivars
   std::vector<IvarInfo> CollectAllIvars(Process *process, 
                                         lldb::addr_t obj_addr);
@@ -101,6 +102,29 @@ private:
 /// Formatter function for generic objects
 bool GNUstepGenericFormatterFunction(ValueObject &valobj, Stream &stream,
                                      const TypeSummaryOptions &options);
+
+/// Synthetic children provider for generic Objective-C objects
+/// This provider filters out the isa pointer and shows only user-defined ivars
+class GNUstepGenericObjectSyntheticProvider : public GNUstepSyntheticProvider {
+public:
+  GNUstepGenericObjectSyntheticProvider(lldb::ValueObjectSP valobj_sp);
+  ~GNUstepGenericObjectSyntheticProvider() override = default;
+  
+  llvm::Expected<uint32_t> CalculateNumChildren() override;
+  lldb::ValueObjectSP GetChildAtIndex(uint32_t idx) override;
+  
+protected:
+  bool UpdateImpl() override;
+  
+private:
+  std::vector<IvarInfo> m_ivars; // List of ivars excluding isa
+  lldb::addr_t m_obj_addr;
+};
+
+/// Creator function for generic object synthetic provider
+SyntheticChildrenFrontEnd *
+GNUstepGenericObjectSyntheticFrontEndCreator(CXXSyntheticChildren *synth,
+                                              lldb::ValueObjectSP valobj_sp);
 
 } // namespace formatters
 } // namespace lldb_private

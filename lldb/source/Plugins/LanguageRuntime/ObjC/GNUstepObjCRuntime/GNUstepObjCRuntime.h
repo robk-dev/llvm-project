@@ -68,11 +68,18 @@ public:
 
   void UpdateISAToDescriptorMapIfNeeded() override;
   
+  // ClassDescriptor support
+  ClassDescriptorSP GetClassDescriptorFromISA(ObjCISA isa) override;
+  ClassDescriptorSP GetClassDescriptor(ValueObject &valobj) override;
+  
   // LanguageRuntime overrides
   void ModulesDidLoad(const ModuleList &module_list) override;
 
   // Constructor (public for make_unique)
   GNUstepObjCRuntime(Process *process);
+  
+  // Get the runtime API (for GNUstepClassDescriptor)
+  GNUstepRuntimeV2API *GetRuntimeAPI() { return m_runtime_api_up.get(); }
 
 private:
   std::unique_ptr<GNUstepObjCRuntimeIntrospector> m_introspector_up;

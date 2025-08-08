@@ -11,6 +11,8 @@
 
 #include "GNUstepFormattersBase.h"
 #include <vector>
+#include <memory>
+#include "lldb/Utility/DataBufferHeap.h"
 
 namespace lldb_private {
 
@@ -69,12 +71,23 @@ private:
   
   /// Get object at specific index
   lldb::addr_t GetElementAtIndex(uint32_t idx);
+  
+  /// Get the concrete type for an object address
+  CompilerType GetConcreteTypeForObject(lldb::addr_t obj_addr);
 
   // Cached set information
   lldb::addr_t m_map_ptr;              // Pointer to GSIMapTable
   uint32_t m_count;                    // Number of elements
   std::vector<lldb::addr_t> m_elements; // Cached element addresses
   bool m_is_mutable;                   // Whether this is NSMutableSet
+  
+  // Execution context and type information for creating child ValueObjects
+  ExecutionContextRef m_exe_ctx_ref;
+  CompilerType m_id_type;
+  
+  // Synthetic storage for non-tagged pointer elements 
+  // (needed because set elements aren't in contiguous memory like arrays)
+  std::unique_ptr<DataBufferHeap> m_synthetic_storage;
 };
 
 /// Function wrappers for LLDB registration

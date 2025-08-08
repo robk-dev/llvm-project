@@ -214,73 +214,88 @@ bool GNUstepObjCRuntimeIntrospector::IsTaggedPointer(lldb::addr_t obj_addr) {
     return false;
   }
   
-  // IMPORTANT: GNUstep does NOT use tagged pointers like Apple does!
-  // String literals like @"Apple" create actual NSConstantString instances
-  // stored in the data segment, not tagged pointers.
+  // GNUstep uses tagged pointers for small objects to avoid allocations.
+  // The tag is in the lower 3 bits:
+  // - Tag 4: Tiny strings (up to 8 characters)
+  // - Tag 1: Small integers (NSNumber)
+  // - Tag 2: Dates or other small objects
   // 
-  // What we were seeing as "tagged pointers" are actually regular object pointers
-  // to NSConstantString instances. The confusion arose from misinterpreting
-  // the memory layout.
-  // 
-  // GNUstep tagged pointers are rare and mostly used for small integers,
-  // not for string literals.
+  // Check if any of the lower 3 bits are set (indicating a tagged pointer)
+  uint64_t tag = obj_addr & 0x7;
   
-  // For now, disable tagged pointer detection entirely for strings
-  // This will force all string objects to be treated as regular NSConstantString instances
+  // Valid tags are 1, 2, 4 (not 0, 3, 5, 6, 7)
+  if (tag == 1 || tag == 2 || tag == 4) {
+    return true;
+  }
+  
   return false;
-  
-  // TODO: If we need to support tagged integers later, we can add:
-  // // GNUstep uses bit 0 for tagging on some platforms
-  // if (m_address_size == 8) {
-  //   return (obj_addr & 0x1) != 0;
-  // } else {
-  //   return (obj_addr & 0x1) != 0;
-  // }
 }
 
 std::string GNUstepObjCRuntimeIntrospector::DecodeTaggedString(lldb::addr_t obj_addr) {
-  // GNUstep DOES use tagged strings for short compile-time constants!
-  // The tag value 4 (100b) indicates a tagged string.
-  // 
-  // For short strings (up to ~6-7 characters on 64-bit), GNUstep encodes
-  // the string data directly in the pointer value to avoid allocations.
-  // 
-  // The encoding appears to pack ASCII characters into the upper bits
-  // of the pointer, with the low 3 bits used for the tag.
+  // GNUstep uses "tiny strings" with tag value 4 for short compile-time constants.
+  // Based on analysis of GNUstep source code (GSString.m):
+  //
+  // Bit layout for 64-bit systems:
+  // - Bits 0-2: Tag (must be 4 for tiny strings)
+  // - Bits 3-7: Length (5 bits, can store 0-31 but max is 9 characters)
+  // - Bits 8-56: Unused/padding
+  // - Bits 57-63, 50-56, 43-49, etc: Characters stored from high bits down
+  //   Each character uses 7 bits, stored at bit position (57 - i*7)
+  //
+  // The macro from GNUstep source:
+  // #define TINY_STRING_CHAR(s, x) ((s & (0xFE00000000000000 >> (x*7))) >> (57-(x*7)))
+  // #define TINY_STRING_LENGTH_SHIFT 3
+  // #define TINY_STRING_LENGTH_MASK 0x1f
+  //
+  // Note: The runtime may set additional high bits (e.g., 0xc instead of 0x8 prefix)
+  // for metadata. We mask these off when decoding.
   
   // Verify this is a tagged string (tag = 4)
   if ((obj_addr & 0x7) != 4) {
     return "";
   }
   
-  // Extract the string data from the tagged pointer
-  // The characters are packed in the upper bits
-  uint64_t data = obj_addr >> 3;  // Remove tag bits
+  // Don't mask the address - the character extraction already handles the right bits
+  // Extract length from bits 3-7 (after the tag)
+  int length = (obj_addr >> 3) & 0x1f;
   
-  // Decode the packed string
-  // GNUstep appears to pack characters in a specific encoding
-  // Based on the observed values:
-  // 0xc3c386cca000002c -> "Apple"
-  // 0xc587761dd8400034 -> "Banana" 
-  // 0xc7a32f2e5e400034 -> "Cherry"
-  // 0xc987a65000000024 -> "Date"
+  // Sanity check - tiny strings can't be longer than 9 characters
+  if (length > 9 || length == 0) {
+    return "";
+  }
   
-  // The encoding seems to be a variant where characters are packed
-  // with some form of compression or special encoding
+  // Decode characters - each uses 7 bits, stored from bit 57 downward
+  std::string result;
+  result.reserve(length);
   
-  // For now, use a simple heuristic - these are known test strings
-  // A proper implementation would need to understand GNUstep's exact encoding
-  if (obj_addr == 0xc3c386cca000002c) return "Apple";
-  if (obj_addr == 0xc587761dd8400034) return "Banana";
-  if (obj_addr == 0xc7a32f2e5e400034) return "Cherry";
-  if (obj_addr == 0xc987a65000000024) return "Date";
+  for (int i = 0; i < length; i++) {
+    // Extract character at position i using the GNUstep formula
+    // Characters are stored at bits (57 - i*7) for 7 bits each
+    // The mask 0xFE means 7 bits (1111110 in binary), shifted to the right position
+    uint64_t mask = 0xFE00000000000000ULL >> (i * 7);
+    char c = (obj_addr & mask) >> (57 - (i * 7));
+    
+    // Validate it's a printable ASCII character
+    if (c >= 0x20 && c <= 0x7e) {
+      result += c;
+    } else if (c == 0) {
+      // Unexpected null in the middle - stop
+      break;
+    } else {
+      // Non-printable character - this shouldn't happen with valid tiny strings
+      // Return what we have so far or indicate error
+      if (result.empty()) {
+        char buffer[32];
+        snprintf(buffer, sizeof(buffer), "<tagged_%llx...>", 
+                 (unsigned long long)(obj_addr & 0xffffffffffff));
+        return buffer;
+      }
+      break;
+    }
+  }
   
-  // For unknown tagged strings, return a placeholder
-  // TODO: Implement proper decoding algorithm once GNUstep's
-  // tagged string encoding is fully understood
-  char buffer[32];
-  snprintf(buffer, sizeof(buffer), "<tagged_str_%llx>", (unsigned long long)data);
-  return buffer;
+  // Return the decoded string
+  return result;
 }
 
 bool GNUstepObjCRuntimeIntrospector::IsValidObjectPointer(lldb::addr_t obj_addr) {

@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "GNUstepFormattersRegistry.h"
+#include "GNUstepIdDispatcher.h"
 #include "GNUstepStringFormatters.h"
 #include "GNUstepNumberFormatters.h"
 #include "GNUstepArrayFormatters.h"
@@ -28,28 +29,21 @@ using namespace lldb_private;
 using namespace lldb_private::formatters;
 
 void GNUstepFormattersRegistry::RegisterFormatters(TypeCategoryImpl &category) {
-  printf("[GNUstep] RegisterFormatters called\n");
   
   // Add safety checks to prevent crashes during formatter registration
   // Note: LLDB builds with exceptions disabled, so we use simpler checks
-  printf("[GNUstep] Registering string formatters...\n");
   RegisterStringFormatters(category);
   
-  printf("[GNUstep] Registering number formatters...\n");
   RegisterNumberFormatters(category);
   
-  printf("[GNUstep] Registering collection formatters...\n");
   RegisterCollectionFormatters(category);
   
-  printf("[GNUstep] Registering foundation formatters...\n");
   RegisterFoundationFormatters(category);
   
   // Register generic formatter as fallback for all other Objective-C objects
   // TODO: Fix linker issue with GNUstepGenericFormatterFunction
-  // printf("[GNUstep] Registering generic formatter...\n");
   // RegisterGenericFormatter(category);
   
-  printf("[GNUstep] RegisterFormatters complete - all formatters registered successfully\n");
 }
 
 void GNUstepFormattersRegistry::RegisterStringFormatters(TypeCategoryImpl &category) {
@@ -81,10 +75,36 @@ void GNUstepFormattersRegistry::RegisterStringFormatters(TypeCategoryImpl &categ
   category.AddTypeSummary("NSConstantString *", eFormatterMatchExact, string_summary);
   category.AddTypeSummary("__NSConstantString *", eFormatterMatchExact, string_summary);
   
-  // Register a smart id formatter that checks runtime type
+  // Register the comprehensive id dispatcher that handles all GNUstep types
   auto id_summary = std::make_shared<CXXFunctionSummaryFormat>(
-      string_flags, GNUstepIdFormatterFunction, "GNUstep id summary provider");
+      string_flags, GNUstepIdDispatcherFunction, "GNUstep id dispatcher");
   category.AddTypeSummary("id", eFormatterMatchExact, id_summary);
+  
+  // Also register synthetic children provider for id
+  SyntheticChildren::Flags id_synth_flags;
+  id_synth_flags.SetCascades(true)
+                .SetSkipPointers(false)
+                .SetSkipReferences(false)
+                .SetNonCacheable(false);
+                
+  auto id_synth = std::make_shared<CXXSyntheticChildren>(
+      id_synth_flags, "id synthetic children", 
+      GNUstepIdSyntheticFrontEndCreator);
+      
+  category.AddTypeSynthetic("id", eFormatterMatchExact, id_synth);
+  
+  // Register generic synthetic provider for all Objective-C classes
+  // This will filter out the isa pointer for any ObjC object
+  auto generic_synth = std::make_shared<CXXSyntheticChildren>(
+      id_synth_flags, "Generic ObjC synthetic children", 
+      GNUstepIdSyntheticFrontEndCreator);
+  
+  // Match any class that starts with a capital letter (typical ObjC pattern)
+  // This includes NSObject, TestClass, etc.
+  category.AddTypeSynthetic("^[A-Z][A-Za-z0-9_]+$", eFormatterMatchRegex, generic_synth);
+  
+  // Also register for pointer types
+  category.AddTypeSynthetic("^[A-Z][A-Za-z0-9_]+ \\*$", eFormatterMatchRegex, generic_synth);
   
 }
 
@@ -309,8 +329,10 @@ void GNUstepFormattersRegistry::RegisterSetFormatters(TypeCategoryImpl &category
 }
 
 void GNUstepFormattersRegistry::RegisterFoundationFormatters(TypeCategoryImpl &category) {
+  // Enable NSDate formatter - it's implemented
+  RegisterDateFormatters(category);
+  
   // TODO: Uncomment when these formatters are implemented
-  // RegisterDateFormatters(category);
   // RegisterURLFormatters(category);
   // RegisterErrorFormatters(category);
   // RegisterDataFormatters(category);
@@ -468,5 +490,4 @@ void GNUstepFormattersRegistry::RegisterGenericFormatter(TypeCategoryImpl &categ
   // Also register for common base class patterns
   category.AddTypeSummary("NSObject *", eFormatterMatchExact, generic_summary);
   
-  printf("[GNUstep] Generic formatter registered\n");
 }

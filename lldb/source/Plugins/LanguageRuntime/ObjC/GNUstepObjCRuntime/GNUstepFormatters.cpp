@@ -66,13 +66,7 @@ GNUstepArraySyntheticFrontEndCreator(CXXSyntheticChildren *synth,
   return new GNUstepArraySyntheticFrontEnd(valobj_sp);
 }
 
-// Forward to our refactored NSString formatter in the formatters/ subdirectory
-bool GNUstepNSStringFormatterFunction(ValueObject &valobj, Stream &stream,
-                                     const TypeSummaryOptions &options) {
-  // Create an instance of our string provider and use it
-  GNUstepNSStringSummaryProvider provider;
-  return provider.FormatObject(valobj, stream, options);
-}
+// NSString formatter is now defined in formatters/GNUstepStringFormatters.cpp
 
 } // namespace formatters
 } // namespace lldb_private

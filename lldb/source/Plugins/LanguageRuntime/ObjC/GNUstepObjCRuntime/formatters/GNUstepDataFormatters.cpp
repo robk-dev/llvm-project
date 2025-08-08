@@ -153,7 +153,7 @@ std::string GNUstepNSDataSummaryProvider::FormatLength(size_t length) {
   return oss.str();
 }
 
-bool GNUstepNSDataFormatterFunction(ValueObject &valobj, Stream &stream,
+bool lldb_private::formatters::GNUstepNSDataFormatterFunction(ValueObject &valobj, Stream &stream,
                                    const TypeSummaryOptions &options) {
   GNUstepNSDataSummaryProvider formatter;
   return formatter.FormatObject(valobj, stream, options);

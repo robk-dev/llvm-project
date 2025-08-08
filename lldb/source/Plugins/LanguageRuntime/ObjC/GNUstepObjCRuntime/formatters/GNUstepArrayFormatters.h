@@ -64,6 +64,9 @@ private:
   
   /// Get object at specific index
   lldb::addr_t GetElementAtIndex(uint32_t idx);
+  
+  /// Get the concrete type for an object address
+  CompilerType GetConcreteTypeForObject(lldb::addr_t obj_addr);
 
   // Cached array information
   lldb::addr_t m_contents_array_ptr;  // Pointer to _contents_array
