@@ -42,9 +42,6 @@ bool GNUstepNSNumberSummaryProvider::FormatObject(
   // We need to delegate to the NSDecimalNumber formatter instead
   std::string class_name = GetNumberClassName(valobj);
   
-  // DEBUG: Show what class name we're getting
-  stream.Printf("DEBUG: class_name='%s' ", class_name.c_str());
-  
   if (class_name.find("DecimalNumber") != std::string::npos) {
     // This is actually an NSDecimalNumber - delegate to our specific formatter
     return FormatNSDecimalNumber(valobj, stream, options);
