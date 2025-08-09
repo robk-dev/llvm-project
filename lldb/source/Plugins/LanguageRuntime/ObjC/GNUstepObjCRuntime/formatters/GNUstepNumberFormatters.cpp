@@ -7,6 +7,8 @@
 //===----------------------------------------------------------------------===//
 
 #include "GNUstepNumberFormatters.h"
+#include "GNUstepFormattersBase.h"
+#include "../GNUstepObjCRuntimeIntrospector.h"
 #include "lldb/ValueObject/ValueObject.h"
 #include "lldb/ValueObject/ValueObjectConstResult.h"
 #include "lldb/DataFormatters/FormattersHelpers.h"
@@ -24,7 +26,6 @@ using namespace lldb_private::formatters;
 bool GNUstepNSNumberSummaryProvider::FormatObject(
     ValueObject &valobj, Stream &stream, const TypeSummaryOptions &options) {
   
-  printf("[GNUstepNSNumber] FormatObject called\n");
   ProcessSP process_sp = valobj.GetProcessSP();
   if (!process_sp)
     return false;
@@ -103,8 +104,6 @@ bool GNUstepNSNumberSummaryProvider::FormatObject(
   
   // Check if the type name contains Bool (for cases where it's explicitly typed)
   const char* type_name = valobj.GetTypeName().AsCString();
-  printf("[GNUstepNSNumber] Type name: '%s', Class name: '%s'\n", 
-         type_name ? type_name : "null", class_name.c_str());
   bool is_bool = (class_name.find("BoolNumber") != std::string::npos) ||
                  (type_name && strstr(type_name, "BoolNumber") != nullptr);
   
@@ -144,7 +143,21 @@ std::string GNUstepNSNumberSummaryProvider::GetNumberClassName(
   if (number_ptr == 0 || number_ptr == LLDB_INVALID_ADDRESS)
     return "";
     
-  // Get the runtime to determine the exact NSNumber subclass
+  // CRITICAL FIX: First try the introspector directly for more reliable class name extraction
+  // This works better in nested contexts where GetClassDescriptor may fail
+  GNUstepObjCRuntimeIntrospector introspector(process_sp.get());
+  
+  // Read the ISA pointer
+  Status error;
+  lldb::addr_t isa_addr = GNUstepRuntimeHelper::ReadPointer(process_sp.get(), number_ptr, error);
+  if (error.Success() && isa_addr != 0) {
+    std::string class_name = introspector.GetClassName(isa_addr);
+    if (!class_name.empty()) {
+      return class_name;
+    }
+  }
+    
+  // Fallback to runtime method if introspector fails
   ObjCLanguageRuntime *runtime = ObjCLanguageRuntime::Get(*process_sp);
   if (!runtime)
     return "";
@@ -220,12 +233,15 @@ bool GNUstepNSNumberSummaryProvider::TryExtractInteger(ValueObject &valobj, int6
       return true;
     }
   } else if (class_name.find("IntNumber") != std::string::npos) {
-    // Int value is stored at offset 8 as 32-bit int
+    // CRITICAL FIX: NSIntNumber stores a 64-bit integer at offset 8
+    // We were reading only 32 bits which could miss data or read wrong values
     Status error;
-    uint32_t int_val = process_sp->ReadUnsignedIntegerFromMemory(
-        number_ptr + 8, sizeof(uint32_t), 0, error);
+    uint64_t int_val = process_sp->ReadUnsignedIntegerFromMemory(
+        number_ptr + 8, sizeof(uint64_t), 0, error);
     if (!error.Fail()) {
-      value = static_cast<int32_t>(int_val);  // Sign extend
+      // For NSIntNumber, the value is a standard int (32-bit) stored in 64-bit field
+      // Cast to int32_t first to handle sign extension properly
+      value = static_cast<int32_t>(int_val);
       return true;
     }
   } else if (class_name.find("LongLongNumber") != std::string::npos) {

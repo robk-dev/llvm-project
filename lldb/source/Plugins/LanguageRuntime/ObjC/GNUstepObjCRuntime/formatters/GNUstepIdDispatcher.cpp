@@ -110,9 +110,19 @@ bool lldb_private::formatters::GNUstepIdDispatcherFunction(ValueObject &valobj, 
   }
   
   // Dispatch to the appropriate formatter based on runtime type
-  // Check for NSString and variants
-  if (class_name.find("String") != std::string::npos || 
-      class_name.find("ConstantString") != std::string::npos) {
+  // Check for NSString and variants - ENHANCED for better NSConstantString detection
+  if (class_name == "NSConstantString" || 
+      class_name == "__NSConstantString" ||
+      class_name == "NSCFConstantString" ||
+      class_name.find("NSString") != std::string::npos ||
+      class_name.find("NSCFString") != std::string::npos ||
+      class_name.find("NSMutableString") != std::string::npos ||
+      class_name.find("GSString") != std::string::npos ||
+      class_name.find("GSCString") != std::string::npos ||
+      class_name.find("GSMutableString") != std::string::npos ||
+      (class_name.find("String") != std::string::npos && 
+       (class_name.find("Constant") != std::string::npos || 
+        class_name.find("Immutable") != std::string::npos))) {
     return GNUstepNSStringFormatterFunction(valobj, stream, options);
   }
   
@@ -182,6 +192,7 @@ bool lldb_private::formatters::GNUstepIdDispatcherFunction(ValueObject &valobj, 
   
   // For custom classes and other Objective-C objects, use the generic formatter
   // This provides a reasonable default display
+  // Fixed crash issues in generic formatter - now safe to enable
   if (class_name[0] >= 'A' && class_name[0] <= 'Z') { // Likely an Objective-C class
     return GNUstepGenericFormatterFunction(valobj, stream, options);
   }
@@ -213,6 +224,19 @@ SyntheticChildrenFrontEnd *lldb_private::formatters::GNUstepIdSyntheticFrontEndC
   if (class_name.find("Set") != std::string::npos &&
       class_name.find("IndexSet") == std::string::npos) {
     return GNUstepNSSetSyntheticFrontEndCreator(synth, valobj_sp);
+  }
+  
+  // NSNumber, NSString, NSDate and other value types should NOT have synthetic children
+  // They are simple value objects and showing internal structure is confusing
+  if (class_name.find("Number") != std::string::npos ||
+      class_name.find("String") != std::string::npos ||
+      class_name.find("Date") != std::string::npos ||
+      class_name.find("URL") != std::string::npos ||
+      class_name.find("Data") != std::string::npos ||
+      class_name.find("UUID") != std::string::npos ||
+      class_name.find("Error") != std::string::npos) {
+    // Return nullptr to indicate no synthetic children should be shown
+    return nullptr;
   }
   
   // For other Objective-C objects, use the generic synthetic provider

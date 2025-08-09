@@ -41,8 +41,8 @@ void GNUstepFormattersRegistry::RegisterFormatters(TypeCategoryImpl &category) {
   RegisterFoundationFormatters(category);
   
   // Register generic formatter as fallback for all other Objective-C objects
-  // TODO: Fix linker issue with GNUstepGenericFormatterFunction
-  // RegisterGenericFormatter(category);
+  // Fixed crash issues in generic formatter - now safe to enable
+  RegisterGenericFormatter(category);
   
 }
 
@@ -103,8 +103,8 @@ void GNUstepFormattersRegistry::RegisterStringFormatters(TypeCategoryImpl &categ
   // This includes NSObject, TestClass, etc.
   category.AddTypeSynthetic("^[A-Z][A-Za-z0-9_]+$", eFormatterMatchRegex, generic_synth);
   
-  // Also register for pointer types
-  category.AddTypeSynthetic("^[A-Z][A-Za-z0-9_]+ \\*$", eFormatterMatchRegex, generic_synth);
+  // Also register for pointer types (with or without space before *)
+  category.AddTypeSynthetic("^[A-Z][A-Za-z0-9_]+\\s*\\*$", eFormatterMatchRegex, generic_synth);
   
 }
 

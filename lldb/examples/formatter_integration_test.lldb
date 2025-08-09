@@ -1,0 +1,229 @@
+# formatter_integration_test.lldb
+# LLDB test script for validating GNUstep formatter fixes
+#
+# Usage: 
+#   lldb formatter_integration_test
+#   (lldb) command source formatter_integration_test.lldb
+#
+# This script will run through all test cases and validate formatter output
+
+# Enable command echo to see what's being executed
+settings set interpreter.echo-commands true
+settings set interpreter.echo-comment-commands true
+
+# Set up logging for debugging
+log enable lldb process
+log enable lldb types
+
+# Set initial breakpoint at first test
+b formatter_integration_test.m:126
+run
+
+# ================================================================================
+# TEST 1: NSNumber in NSDictionary shows actual value, not hex
+# ================================================================================
+print "\n=== TEST 1: NSNumber Values in Dictionary ==="
+po numberDict
+# Expected: { age = 30; height = 5.9; isActive = 1; pi = 3.14159 }
+frame variable numberDict
+
+po taggedNumberDict  
+# Expected: { small = 1; negative = -42; zero = 0 }
+frame variable taggedNumberDict
+
+# Check individual number extraction
+po [numberDict objectForKey:@"age"]
+# Expected: 30 (not 0x1e or hex representation)
+
+continue
+
+# ================================================================================
+# TEST 2: NSArray elements are expandable and show proper values
+# ================================================================================
+print "\n=== TEST 2: NSArray Element Display ==="
+po mixedArray
+# Expected: ("First", "Second", 30, 3.14, <Person: 0x...>)
+frame variable mixedArray
+
+# Test array element access
+po [mixedArray objectAtIndex:2]
+# Expected: 30 (the NSNumber value, not hex)
+
+po nestedArray
+# Expected: ("Level1", ("Level2A", "Level2B", 42), {key = value})
+frame variable nestedArray
+
+continue
+
+# ================================================================================
+# TEST 3: NSDictionary shows both keys AND values properly
+# ================================================================================
+print "\n=== TEST 3: Dictionary Key-Value Display ==="
+po personInfo
+# Expected: { name = "John Doe"; age = 30; occupation = "Developer" }
+frame variable personInfo
+
+po complexDict
+# Expected: All keys and values visible, including nested structures
+frame variable complexDict
+
+# Test accessing dictionary values
+po [personInfo objectForKey:@"age"]
+# Expected: 30
+
+continue
+
+# ================================================================================
+# TEST 4: NSSet shows actual element values in summary
+# ================================================================================
+print "\n=== TEST 4: NSSet Element Values ==="
+po mixedSet
+# Expected: Elements shown with actual values, not just addresses
+frame variable mixedSet
+
+po numberSet
+# Expected: (1, 2, 3, 42, 100, -50) - actual numbers not hex
+frame variable numberSet
+
+continue
+
+# ================================================================================
+# TEST 5: Custom objects don't show infinite ISA recursion
+# ================================================================================
+print "\n=== TEST 5: Custom Object ISA Recursion ==="
+po person1
+# Expected: Person(Alice, 25, Engineer) - no infinite isa chain
+
+po person2
+# Expected: Person(Bob, 30, Manager)
+
+po company
+# Expected: Company description without isa recursion
+frame variable company
+
+# Check that employees array shows properly
+po company.employees
+frame variable company.employees
+
+continue
+
+# ================================================================================
+# TEST 6: Tagged pointer handling
+# ================================================================================
+print "\n=== TEST 6: Tagged Pointer Decoding ==="
+po tagged1
+# Expected: 1
+
+po tagged2  
+# Expected: 42
+
+po tagged3
+# Expected: -100
+
+po taggedArray
+# Expected: (1, 42, -100, "Hi", "1")
+
+po taggedDict
+# Expected: { one = 1; fortytwo = 42; negative = -100; short = "Hi" }
+frame variable taggedDict
+
+continue
+
+# ================================================================================
+# TEST 7: Deeply nested collections format properly
+# ================================================================================
+print "\n=== TEST 7: Nested Collection Formatting ==="
+po deeplyNested
+# Expected: Properly formatted with all levels visible
+frame variable deeplyNested
+
+# Test drilling into nested structure
+po [deeplyNested objectForKey:@"theSet"]
+po [deeplyNested objectForKey:@"metadata"]
+
+continue
+
+# ================================================================================
+# TEST 8: Collection with nil and NSNull handling
+# ================================================================================
+print "\n=== TEST 8: NSNull Handling ==="
+po nullDict
+# Expected: { null = <null>; string = "not null"; number = 42 }
+
+po nullArray
+# Expected: ("first", <null>, "third", 0)
+
+po nullSet
+# Expected: Set with NSNull displayed properly
+frame variable nullSet
+
+continue
+
+# ================================================================================
+# TEST 9: Large collections (performance and truncation)
+# ================================================================================
+print "\n=== TEST 9: Large Collection Performance ==="
+# These should format quickly without hanging
+po largeArray
+# Expected: Large array with truncation if needed
+
+po largeDict
+# Expected: Large dictionary, possibly truncated
+
+po largeSet
+# Expected: Large set, possibly truncated
+
+continue
+
+# ================================================================================
+# TEST 10: Mutable vs Immutable collections
+# ================================================================================
+print "\n=== TEST 10: Mutable vs Immutable ==="
+po immutableArray
+po mutableArray
+# Both should format identically despite different classes
+
+po immutableDict
+po mutableDict
+
+po immutableSet
+po mutableSet
+
+frame variable immutableArray mutableArray
+
+continue
+
+# ================================================================================
+# FINAL: Comprehensive validation structure
+# ================================================================================
+print "\n=== FINAL: Comprehensive Validation ==="
+po finalTest
+# Expected: Complex structure with all formatters working together
+
+# Test specific paths through the structure
+po [finalTest objectForKey:@"company"]
+po [finalTest objectForKey:@"statistics"]
+po [finalTest objectForKey:@"locations"]
+po [finalTest objectForKey:@"partners"]
+
+frame variable finalTest
+
+# Summary
+print "\n=========================================="
+print "FORMATTER INTEGRATION TEST COMPLETE"
+print "=========================================="
+print "All formatters should have displayed:"
+print "1. NSNumber values (not hex) in collections"
+print "2. Expandable array elements with proper values"
+print "3. Dictionary keys AND values"
+print "4. Set element values in summary"
+print "5. Custom objects without ISA recursion"
+print "6. Decoded tagged pointers"
+print "7. Properly formatted nested collections"
+print "8. Correct NSNull handling"
+print "9. Efficient large collection display"
+print "10. Consistent mutable/immutable formatting"
+print "=========================================="
+
+# Exit
+quit

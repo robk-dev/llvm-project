@@ -1,0 +1,71 @@
+# LLDB test script for comprehensive variable testing
+# Tests ALL variables created in custom_class_test.m
+#
+# Usage: lldb custom_class_test -s test_all_custom_variables.lldb
+
+# Set breakpoint after all variables are created but before NSLog output
+b custom_class_test.m:127
+run
+
+# Test basic objects
+script print("=== BASIC OBJECTS ===")
+print greeting2
+po greeting2
+print magicNumber  
+po magicNumber
+print currentTime
+po currentTime
+
+# Test collections
+script print("=== COLLECTIONS ===")
+print fruits
+po fruits
+print colors
+po colors
+print personInfo
+po personInfo
+
+# Test individual dictionary elements 
+script print("=== DICTIONARY ELEMENTS ===")
+po [personInfo objectForKey:@"name"]
+po [personInfo objectForKey:@"namerr"] 
+po [personInfo objectForKey:@"age"]
+po [personInfo objectForKey:@"occupation"]
+po [personInfo objectForKey:@"skills"]
+
+# Test array elements from skills
+script print("=== SKILLS ARRAY ELEMENTS ===")
+expression NSArray *skills = [personInfo objectForKey:@"skills"]
+po [skills objectAtIndex:0]
+po [skills objectAtIndex:1] 
+po [skills objectAtIndex:2]
+
+# Test sets
+script print("=== SETS ===")
+print availableLanguages
+po availableLanguages
+print preferences
+po preferences
+
+# Test custom objects
+script print("=== CUSTOM OBJECTS ===")
+print account
+po account
+print accountSummary
+po accountSummary
+
+# Test complex nested access
+script print("=== NESTED ACCESS ===")
+po account.accountNumber
+po account.owner
+po account.balance
+po account.transactions
+po [account.transactions objectAtIndex:0]
+
+script print("=== SYNTHETIC CHILDREN TESTING ===")
+# Test if synthetic children work
+expression -l objc -O -- account.transactions
+expression -l objc -O -- personInfo
+expression -l objc -O -- [personInfo objectForKey:@"skills"]
+
+quit

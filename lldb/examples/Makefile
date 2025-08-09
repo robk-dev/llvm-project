@@ -12,13 +12,18 @@ CFLAGS = -fobjc-runtime=gnustep-2.1 \
          -fobjc-exceptions \
          -g -gdwarf-5 -O0 \
          -fno-omit-frame-pointer \
+         -I/home/robk/code/llvm-project/lldb/gnustep-install/include \
+         -I/home/robk/code/llvm-project/lldb/gnustep-install/include/GNUstepBase \
+         -I/home/robk/code/llvm-project/lldb/gnustep-install/include/Foundation \
          -I/usr/local/include/GNUstep \
          -I/usr/include/GNUstep \
          -fconstant-string-class=NSConstantString \
          -DGNUSTEP -DGNUSTEP_BASE_LIBRARY=1 -DDEBUG=1 \
          -Wno-error=int-conversion
 
-LDFLAGS = -L/usr/local/lib \
+LDFLAGS = -L/home/robk/code/llvm-project/lldb/gnustep-install/lib \
+          -Wl,-rpath,/home/robk/code/llvm-project/lldb/gnustep-install/lib \
+          -L/usr/local/lib \
           -Wl,-rpath,/usr/local/lib \
           -g
 

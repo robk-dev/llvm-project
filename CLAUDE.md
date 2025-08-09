@@ -183,12 +183,33 @@ Enable debug output by checking for printf statements in the code (currently pre
 - NSNumber formatter (including tagged pointers)
 - NSValue formatter (generic value wrapper)
 - NSArray/NSMutableArray formatters (element count and display)
-- NSDictionary/NSMutableDictionary formatters (key/value pairs)
+- NSDictionary/NSMutableDictionary formatters (key/value pairs) - *Display format needs refinement*
 - NSSet/NSMutableSet formatters (object count and enumeration)
 - Comprehensive test framework
 - Build system integration
 - Formatter activation bug fixes
 - Performance optimizations (sub-50ms response times)
+
+### 🔧 Active Issues (As of 2025-08-08)
+
+#### Issue 1: Dictionary Display Format
+- **Problem**: Shows verbose `[0].key` and `[0].value` instead of concise `key = value`
+- **Location**: `GNUstepDictionaryFormatters.cpp` lines 1047-1050
+- **Fix**: Modify child naming in `GetChildAtIndex()` method
+- **Priority**: High (UX impact)
+
+#### Issue 2: Custom Class ISA Lookup
+- **Problem**: BankAccount and other custom classes not showing properties
+- **Location**: `GNUstepObjCRuntimeIntrospector.cpp` ISA resolution
+- **Root Cause**: `CallRuntimeFunction()` returns LLDB_INVALID_ADDRESS (stub implementation)
+- **Fix**: Implement proper runtime function calling via expression evaluator
+- **Priority**: Critical (core functionality)
+
+#### Issue 3: Runtime Symbol Resolution
+- **Problem**: Some runtime functions may not resolve correctly
+- **Location**: `GNUstepRuntimeV2API.cpp` line 193
+- **Fix**: Enhance symbol resolution with multiple strategies
+- **Priority**: Medium
 
 ### 🔄 In Progress (Phase 4 - Advanced Features)
 - NSDate/NSCalendarDate formatters
@@ -196,12 +217,13 @@ Enable debug output by checking for printf statements in the code (currently pre
 - NSData/NSMutableData formatter
 - NSUUID formatter
 - NSError formatter
+- **Custom class introspection** - Blocked by ISA lookup issue
 
 ### 📋 Planned (Phase 5)
-- Custom class introspection
 - Dynamic method listing
 - Memory management debugging
 - Advanced performance profiling
+- Expression evaluation (`po`, `expr` commands)
 
 ## Important Notes
 

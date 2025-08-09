@@ -534,17 +534,21 @@ std::string GNUstepNSSetSummaryProvider::TryExtractStringContent(Process *proces
     // NSConstantString layout (compile-time constant strings that aren't tagged):
     // struct {
     //   Class isa;          // offset 0
-    //   char *bytes;        // offset 8
-    //   unsigned int length;// offset 16
+    //   char *cString;      // offset 8 - pointer to null-terminated C string
+    //   unsigned int length;// offset 16 (may not be reliable)
     // }
-    lldb::addr_t bytes_ptr_addr = obj_addr + 8;
-    lldb::addr_t bytes_ptr = GNUstepRuntimeHelper::ReadPointer(process, bytes_ptr_addr, error);
-    if (error.Success() && bytes_ptr != 0) {
-      lldb::addr_t len_addr = obj_addr + 16;
-      uint32_t length = 0;
-      if (GNUstepRuntimeHelper::ReadMemory(process, len_addr, &length, sizeof(length))) {
-        if (length > 0 && length < 10000) {  // Sanity check
-          return GNUstepRuntimeHelper::ReadUTF8String(process, bytes_ptr, length);
+    lldb::addr_t cstring_ptr_addr = obj_addr + 8;
+    lldb::addr_t cstring_ptr = GNUstepRuntimeHelper::ReadPointer(process, cstring_ptr_addr, error);
+    if (error.Success() && cstring_ptr != 0 && cstring_ptr != LLDB_INVALID_ADDRESS) {
+      // Read the C string (null-terminated)
+      char buffer[1024] = {0};
+      size_t bytes_read = process->ReadMemory(cstring_ptr, buffer, sizeof(buffer) - 1, error);
+      if (error.Success() && bytes_read > 0) {
+        buffer[bytes_read] = '\0';
+        // Find actual string length (might be shorter than buffer)
+        size_t len = strnlen(buffer, bytes_read);
+        if (len > 0) {
+          return std::string(buffer, len);
         }
       }
     }

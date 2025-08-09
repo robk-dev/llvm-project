@@ -1,0 +1,28 @@
+# Debug script to understand dictionary string issues
+# Focus on examining what types of strings we have
+
+b custom_class_test.m:127
+run
+
+# Examine the dictionary structure
+print personInfo
+
+# Enable verbose expression logging to see what's happening
+settings set target.expr-prefix true
+
+# Try to get the actual class names of the problematic strings
+expression -l objc -O -- [personInfo allKeys]
+expression -l objc -O -- [personInfo allValues]
+
+# Check specific keys that show as <object>
+expression -l objc -- id key_namerr = @"namerr"
+expression -l objc -- NSLog(@"key_namerr class: %@", [key_namerr class])
+
+expression -l objc -- id key_occupation = @"occupation"  
+expression -l objc -- NSLog(@"key_occupation class: %@", [key_occupation class])
+
+# Check working keys for comparison
+expression -l objc -- id key_name = @"name"
+expression -l objc -- NSLog(@"key_name class: %@", [key_name class])
+
+quit

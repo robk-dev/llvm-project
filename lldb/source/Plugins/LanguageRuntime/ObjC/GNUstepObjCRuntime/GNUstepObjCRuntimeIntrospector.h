@@ -11,8 +11,17 @@
 
 #include "lldb/lldb-private.h"
 #include "lldb/Target/Process.h"
+#include "lldb/Expression/FunctionCaller.h"
+#include <memory>
+#include <unordered_map>
 
 namespace lldb_private {
+
+// Forward declarations
+class ExecutionContext;
+class CompilerType;
+class ValueList;
+class Status;
 
 class GNUstepObjCRuntimeIntrospector {
 public:
@@ -48,9 +57,42 @@ private:
   uint32_t m_address_size;
   lldb::ByteOrder m_byte_order;
   
-  // Helper method to call functions in the target process
+  // Cache for function callers to avoid repeated compilation
+  struct FunctionCallerCache {
+    std::unique_ptr<FunctionCaller> objc_lookup_class_caller;
+    std::unique_ptr<FunctionCaller> class_getName_caller;
+    std::unique_ptr<FunctionCaller> object_getClass_caller;
+    std::unique_ptr<FunctionCaller> class_getSuperclass_caller;
+    // Generic cache for other functions
+    std::unordered_map<std::string, std::unique_ptr<FunctionCaller>> generic_callers;
+  };
+  
+  mutable FunctionCallerCache m_function_cache;
+  
+  // Helper method to call functions in the target process (existing interface)
   lldb::addr_t CallRuntimeFunction(const std::string &function_name,
                                    const std::vector<lldb::addr_t> &args);
+  
+  // New implementation methods for function calling
+  lldb::addr_t CallRuntimeFunctionImpl(
+      const char *function_name,
+      const CompilerType &return_type,
+      const ValueList &args,
+      ExecutionContext &exe_ctx,
+      Status &error) const;
+      
+  std::unique_ptr<FunctionCaller>& GetOrCreateFunctionCaller(
+      const char *function_name,
+      const CompilerType &return_type,
+      const ValueList &arg_types,
+      ExecutionContext &exe_ctx,
+      Status &error) const;
+      
+  bool SetupExecutionContext(ExecutionContext &exe_ctx) const;
+  
+  // Helper to get modules
+  lldb::ModuleSP GetObjCModule() const;
+  lldb::ModuleSP GetFoundationModule() const;
 };
 
 } // namespace lldb_private

@@ -36,6 +36,9 @@ public:
   bool FormatObject(ValueObject &valobj, 
                     Stream &stream,
                     const TypeSummaryOptions &options) override;
+  
+  /// Get summary for a single element (key or value) - made public for sharing
+  std::string GetElementSummary(Process *process, lldb::addr_t element_addr, FormatterContext &context);
 
 private:
   // Structures for key-value pairs and map table info (shared with synthetic provider)
@@ -61,9 +64,6 @@ private:
   /// Extract key-value pairs for preview (limited number)
   bool ExtractKeyValuePairsForPreview(Process *process, const MapTableInfo &map_info,
                                       std::vector<KeyValuePair> &pairs, uint32_t max_pairs);
-  
-  /// Get summary for a single element (key or value)
-  std::string GetElementSummary(Process *process, lldb::addr_t element_addr, FormatterContext &context);
   
   /// Check if address is a GNUstep tagged pointer
   static bool IsGNUstepTaggedPointer(lldb::addr_t addr);
@@ -126,6 +126,12 @@ private:
   
   /// Get the concrete type for an object address
   CompilerType GetConcreteTypeForObject(lldb::addr_t obj_addr);
+  
+  /// Get summary for a single element (key or value)
+  std::string GetElementSummary(Process *process, lldb::addr_t element_addr, FormatterContext &context);
+  
+  /// Extract string content from an object (for use as child name)
+  std::string ExtractStringFromObject(lldb::addr_t obj_addr);
 };
 
 /// Function wrappers for LLDB registration

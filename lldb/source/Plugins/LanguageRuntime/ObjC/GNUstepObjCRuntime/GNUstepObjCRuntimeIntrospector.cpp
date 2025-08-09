@@ -9,10 +9,25 @@
 #include "GNUstepObjCRuntimeIntrospector.h"
 #include "lldb/Target/Process.h"
 #include "lldb/Target/Target.h"
+#include "lldb/Target/Thread.h"
+#include "lldb/Target/ThreadList.h"
+#include "lldb/Target/ExecutionContext.h"
+#include "lldb/Target/StackFrame.h"
+#include "lldb/Expression/FunctionCaller.h"
+#include "lldb/Expression/DiagnosticManager.h"
+#include "lldb/Expression/UtilityFunction.h"
+#include "lldb/Core/Module.h"
+#include "lldb/Core/ModuleList.h"
+#include "lldb/Core/Value.h"
+#include "lldb/Symbol/Symbol.h"
+#include "lldb/Symbol/SymbolContext.h"
 #include "lldb/Utility/DataExtractor.h"
 #include "lldb/Utility/ConstString.h"
-#include "lldb/Core/Module.h"
+#include "lldb/Utility/LLDBLog.h"
+#include "lldb/Utility/Log.h"
+#include "lldb/Utility/Status.h"
 #include "lldb/ValueObject/ValueObject.h"
+#include "Plugins/TypeSystem/Clang/TypeSystemClang.h"
 
 using namespace lldb;
 using namespace lldb_private;
@@ -60,8 +75,11 @@ lldb::addr_t GNUstepObjCRuntimeIntrospector::GetISAFromObject(ValueObject &valob
 
 std::string GNUstepObjCRuntimeIntrospector::GetClassName(lldb::addr_t isa_addr) {
   if (!m_process || isa_addr == LLDB_INVALID_ADDRESS) {
+    // printf("[DEBUG] GetClassName: Invalid process or ISA address\n");
     return "";
   }
+  
+  // printf("[DEBUG] GetClassName: Looking up class name for ISA 0x%llx\n", (unsigned long long)isa_addr);
   
   // Check if this is a tagged pointer
   if (IsTaggedPointer(isa_addr)) {
@@ -94,21 +112,28 @@ std::string GNUstepObjCRuntimeIntrospector::GetClassName(lldb::addr_t isa_addr) 
   // The 'name' field is at an offset of 2 * address_size from the start of the
   // class structure.
   const lldb::addr_t name_ptr_addr = isa_addr + (2 * m_address_size);
+  
+  // printf("[DEBUG] GetClassName: Reading name pointer from address 0x%llx\n", (unsigned long long)name_ptr_addr);
 
   const lldb::addr_t name_addr = m_process->ReadPointerFromMemory(name_ptr_addr, error);
 
   if (error.Fail() || name_addr == LLDB_INVALID_ADDRESS) {
+    // printf("[DEBUG] GetClassName: Failed to read name pointer: %s\n", error.AsCString());
     return "";
   }
 
   // Now read the C-string from the 'name' pointer.
+  // printf("[DEBUG] GetClassName: Reading C-string from address 0x%llx\n", (unsigned long long)name_addr);
+  
   std::string class_name;
   m_process->ReadCStringFromMemory(name_addr, class_name, error);
 
   if (error.Fail()) {
+    // printf("[DEBUG] GetClassName: Failed to read class name string: %s\n", error.AsCString());
     return "";
   }
 
+  // printf("[DEBUG] GetClassName: Found class name: %s\n", class_name.c_str());
   return class_name;
 }
 
@@ -172,41 +197,66 @@ bool GNUstepObjCRuntimeIntrospector::IsValidGNUstepRuntime() {
 lldb::addr_t GNUstepObjCRuntimeIntrospector::CallRuntimeFunction(
     const std::string &function_name, const std::vector<lldb::addr_t> &args) {
   
-  if (!m_process) {
+  if (!m_process || function_name.empty()) {
     return LLDB_INVALID_ADDRESS;
   }
-
-  Target &target = m_process->GetTarget();
   
-  // Find the function symbol
-  SymbolContextList sc_list;
-  target.GetImages().FindSymbolsWithNameAndType(ConstString(function_name),
-                                               lldb::eSymbolTypeCode, sc_list);
-  
-  if (sc_list.GetSize() == 0) {
+  // Setup execution context
+  ExecutionContext exe_ctx;
+  if (!SetupExecutionContext(exe_ctx)) {
+    Log *log = GetLog(LLDBLog::Language);
+    LLDB_LOG(log, "[GNUstep] Failed to setup execution context for {0}",
+             function_name);
     return LLDB_INVALID_ADDRESS;
   }
-
-  SymbolContext sc;
-  sc_list.GetContextAtIndex(0, sc);
   
-  if (!sc.symbol) {
+  // Get scratch type system for argument and return types
+  TypeSystemClangSP scratch_ts_sp = 
+      ScratchTypeSystemClang::GetForTarget(exe_ctx.GetTargetRef());
+  if (!scratch_ts_sp) {
     return LLDB_INVALID_ADDRESS;
   }
-
-  lldb::addr_t func_addr = sc.symbol->GetLoadAddress(&target);
-  if (func_addr == LLDB_INVALID_ADDRESS) {
+  
+  // Build argument list
+  ValueList arg_values;
+  for (lldb::addr_t arg : args) {
+    Value arg_value;
+    
+    // Determine argument type based on function name
+    if (function_name == "objc_lookup_class") {
+      // Argument is a const char* (C string)
+      CompilerType char_ptr_type = scratch_ts_sp->GetCStringType(true);
+      arg_value.SetValueType(Value::ValueType::HostAddress);
+      arg_value.SetCompilerType(char_ptr_type);
+    } else {
+      // Argument is a pointer (void* or id)
+      CompilerType void_ptr_type = 
+          scratch_ts_sp->GetBasicType(eBasicTypeVoid).GetPointerType();
+      arg_value.SetValueType(Value::ValueType::Scalar);
+      arg_value.SetCompilerType(void_ptr_type);
+    }
+    
+    arg_value.GetScalar() = arg;
+    arg_values.PushValue(arg_value);
+  }
+  
+  // Return type is typically a pointer
+  CompilerType return_type = 
+      scratch_ts_sp->GetBasicType(eBasicTypeVoid).GetPointerType();
+  
+  // Call the implementation
+  Status error;
+  lldb::addr_t result = CallRuntimeFunctionImpl(
+      function_name.c_str(), return_type, arg_values, exe_ctx, error);
+      
+  if (error.Fail()) {
+    Log *log = GetLog(LLDBLog::Language);
+    LLDB_LOG(log, "[GNUstep] Failed to call {0}: {1}",
+             function_name, error.AsCString());
     return LLDB_INVALID_ADDRESS;
   }
-
-  // For now, return the function address. In a full implementation,
-  // we would use the process's thread to actually call the function.
-  // This requires more complex setup with the expression evaluator.
   
-  // TODO: Implement actual function calling using ExecutionContext
-  // and ThreadPlanCallFunction
-  
-  return LLDB_INVALID_ADDRESS; // Stub for now
+  return result;
 }
 
 bool GNUstepObjCRuntimeIntrospector::IsTaggedPointer(lldb::addr_t obj_addr) {
@@ -338,4 +388,273 @@ bool GNUstepObjCRuntimeIntrospector::IsValidObjectPointer(lldb::addr_t obj_addr)
   }
   
   return true;
+}
+
+// Implementation of CallRuntimeFunctionImpl
+lldb::addr_t GNUstepObjCRuntimeIntrospector::CallRuntimeFunctionImpl(
+    const char *function_name,
+    const CompilerType &return_type,
+    const ValueList &args,
+    ExecutionContext &exe_ctx,
+    Status &error) const {
+    
+  // Get or create the function caller
+  std::unique_ptr<FunctionCaller> &caller = 
+      GetOrCreateFunctionCaller(function_name, return_type, args, 
+                                exe_ctx, error);
+  if (!caller || error.Fail()) {
+    return LLDB_INVALID_ADDRESS;
+  }
+  
+  // Prepare for execution
+  DiagnosticManager diagnostics;
+  lldb::addr_t wrapper_struct_addr = LLDB_INVALID_ADDRESS;
+  
+  // Make a mutable copy of args for WriteFunctionArguments
+  ValueList mutable_args(args);
+  
+  // Insert function arguments
+  if (!caller->WriteFunctionArguments(exe_ctx, wrapper_struct_addr, 
+                                      mutable_args, diagnostics)) {
+    error = Status::FromError(diagnostics.GetAsError(
+        lldb::eExpressionSetupError,
+        "Failed to write function arguments"));
+    return LLDB_INVALID_ADDRESS;
+  }
+  
+  // Setup execution options
+  EvaluateExpressionOptions options;
+  options.SetUnwindOnError(true);
+  options.SetTryAllThreads(false); // Use current thread
+  options.SetStopOthers(true);
+  options.SetIgnoreBreakpoints(true);
+  options.SetTimeout(std::chrono::milliseconds(1000)); // 1 second timeout
+  options.SetIsForUtilityExpr(true);
+  
+  // Execute the function
+  Value result_value;
+  ExpressionResults results = caller->ExecuteFunction(
+      exe_ctx, &wrapper_struct_addr, options, diagnostics, result_value);
+      
+  // Clean up arguments
+  if (wrapper_struct_addr != LLDB_INVALID_ADDRESS) {
+    caller->DeallocateFunctionResults(exe_ctx, wrapper_struct_addr);
+  }
+  
+  // Check execution results
+  if (results != eExpressionCompleted) {
+    error = Status::FromError(diagnostics.GetAsError(
+        lldb::eExpressionParseError,
+        "Function execution failed"));
+    return LLDB_INVALID_ADDRESS;
+  }
+  
+  // Extract return value
+  lldb::addr_t return_addr = result_value.GetScalar().ULongLong(
+      LLDB_INVALID_ADDRESS);
+      
+  Log *log = GetLog(LLDBLog::Language);
+  LLDB_LOG(log, "[GNUstep] Called {0}({1:x}) = {2:x}",
+           function_name, 
+           mutable_args.GetSize() > 0 ? mutable_args.GetValueAtIndex(0)->GetScalar().ULongLong() : 0,
+           return_addr);
+           
+  return return_addr;
+}
+
+// Implementation of GetOrCreateFunctionCaller
+std::unique_ptr<FunctionCaller>& 
+GNUstepObjCRuntimeIntrospector::GetOrCreateFunctionCaller(
+    const char *function_name,
+    const CompilerType &return_type,
+    const ValueList &arg_types,
+    ExecutionContext &exe_ctx,
+    Status &error) const {
+    
+  // Check cache first
+  std::unique_ptr<FunctionCaller> *cached_caller = nullptr;
+  
+  if (strcmp(function_name, "objc_lookup_class") == 0) {
+    cached_caller = &m_function_cache.objc_lookup_class_caller;
+  } else if (strcmp(function_name, "class_getName") == 0) {
+    cached_caller = &m_function_cache.class_getName_caller;
+  } else if (strcmp(function_name, "object_getClass") == 0) {
+    cached_caller = &m_function_cache.object_getClass_caller;
+  } else if (strcmp(function_name, "class_getSuperclass") == 0) {
+    cached_caller = &m_function_cache.class_getSuperclass_caller;
+  } else {
+    // Use generic cache for other functions
+    auto it = m_function_cache.generic_callers.find(function_name);
+    if (it != m_function_cache.generic_callers.end()) {
+      return it->second;
+    }
+  }
+  
+  // Return cached caller if available
+  if (cached_caller && *cached_caller) {
+    return *cached_caller;
+  }
+  
+  // Resolve function address
+  Address function_address;
+  const Symbol *symbol = nullptr;
+  
+  // Try libobjc2 first
+  ModuleSP objc_module = GetObjCModule();
+  if (objc_module) {
+    symbol = objc_module->FindFirstSymbolWithNameAndType(
+        ConstString(function_name), eSymbolTypeCode);
+  }
+  
+  // Fallback to Foundation if not found
+  if (!symbol) {
+    ModuleSP foundation_module = GetFoundationModule();
+    if (foundation_module) {
+      symbol = foundation_module->FindFirstSymbolWithNameAndType(
+          ConstString(function_name), eSymbolTypeCode);
+    }
+  }
+  
+  if (!symbol) {
+    error = Status::FromErrorStringWithFormat(
+        "Could not find symbol for function '%s'", function_name);
+    static std::unique_ptr<FunctionCaller> empty_ptr;
+    return empty_ptr;
+  }
+  
+  function_address = symbol->GetAddress();
+  
+  // Create the function caller
+  std::string caller_name = std::string(function_name) + "_caller";
+  std::unique_ptr<FunctionCaller> new_caller(
+      exe_ctx.GetTargetRef().GetFunctionCallerForLanguage(
+          eLanguageTypeC, return_type, function_address,
+          arg_types, caller_name.c_str(), error));
+          
+  if (error.Fail() || !new_caller) {
+    static std::unique_ptr<FunctionCaller> empty_ptr;
+    return empty_ptr;
+  }
+  
+  // Compile the wrapper function
+  DiagnosticManager diagnostics;
+  ThreadSP thread_sp = exe_ctx.GetThreadSP();
+  
+  unsigned num_errors = new_caller->CompileFunction(thread_sp, diagnostics);
+  if (num_errors > 0) {
+    error = Status::FromError(diagnostics.GetAsError(
+        lldb::eExpressionParseError,
+        "Failed to compile function wrapper"));
+    static std::unique_ptr<FunctionCaller> empty_ptr;
+    return empty_ptr;
+  }
+  
+  // Insert the wrapper into the target
+  if (!new_caller->WriteFunctionWrapper(exe_ctx, diagnostics)) {
+    error = Status::FromError(diagnostics.GetAsError(
+        lldb::eExpressionSetupError,
+        "Failed to insert function wrapper"));
+    static std::unique_ptr<FunctionCaller> empty_ptr;
+    return empty_ptr;
+  }
+  
+  // Cache and return
+  if (cached_caller) {
+    *cached_caller = std::move(new_caller);
+    return *cached_caller;
+  } else {
+    // Store in generic cache
+    auto result = m_function_cache.generic_callers.emplace(
+        function_name, std::move(new_caller));
+    return result.first->second;
+  }
+}
+
+// Implementation of SetupExecutionContext
+bool GNUstepObjCRuntimeIntrospector::SetupExecutionContext(
+    ExecutionContext &exe_ctx) const {
+    
+  if (!m_process) {
+    return false;
+  }
+  
+  // Get a thread suitable for expression execution
+  ThreadSP thread_sp = m_process->GetThreadList()
+      .GetExpressionExecutionThread();
+  if (!thread_sp) {
+    // Fallback to selected thread
+    thread_sp = m_process->GetThreadList().GetSelectedThread();
+  }
+  
+  if (!thread_sp) {
+    return false;
+  }
+  
+  // Ensure thread is stopped and safe for function calls
+  if (!thread_sp->SafeToCallFunctions()) {
+    Log *log = GetLog(LLDBLog::Language);
+    LLDB_LOG(log, "[GNUstep] Thread not safe for function calls");
+    return false;
+  }
+  
+  // Build execution context
+  thread_sp->CalculateExecutionContext(exe_ctx);
+  
+  // Ensure we have a frame
+  if (!exe_ctx.GetFramePtr()) {
+    StackFrameSP frame_sp = thread_sp->GetSelectedFrame(
+        DoNoSelectMostRelevantFrame);
+    if (!frame_sp) {
+      frame_sp = thread_sp->GetStackFrameAtIndex(0);
+    }
+    exe_ctx.SetFrameSP(frame_sp);
+  }
+  
+  return exe_ctx.HasThreadScope() && exe_ctx.HasProcessScope();
+}
+
+// Implementation of GetObjCModule
+lldb::ModuleSP GNUstepObjCRuntimeIntrospector::GetObjCModule() const {
+  if (!m_process) {
+    return ModuleSP();
+  }
+  
+  Target &target = m_process->GetTarget();
+  const ModuleList &modules = target.GetImages();
+  
+  for (uint32_t idx = 0; idx < modules.GetSize(); idx++) {
+    ModuleSP module_sp = modules.GetModuleAtIndex(idx);
+    if (module_sp) {
+      const char *module_name = module_sp->GetFileSpec().GetFilename().GetCString();
+      if (module_name && 
+          (strstr(module_name, "libobjc.so") || 
+           strstr(module_name, "libobjc2"))) {
+        return module_sp;
+      }
+    }
+  }
+  
+  return ModuleSP();
+}
+
+// Implementation of GetFoundationModule
+lldb::ModuleSP GNUstepObjCRuntimeIntrospector::GetFoundationModule() const {
+  if (!m_process) {
+    return ModuleSP();
+  }
+  
+  Target &target = m_process->GetTarget();
+  const ModuleList &modules = target.GetImages();
+  
+  for (uint32_t idx = 0; idx < modules.GetSize(); idx++) {
+    ModuleSP module_sp = modules.GetModuleAtIndex(idx);
+    if (module_sp) {
+      const char *module_name = module_sp->GetFileSpec().GetFilename().GetCString();
+      if (module_name && strstr(module_name, "libgnustep-base.so")) {
+        return module_sp;
+      }
+    }
+  }
+  
+  return ModuleSP();
 }

@@ -7,46 +7,33 @@
 //===----------------------------------------------------------------------===//
 
 #include "GNUstepGenericFormatter.h"
+#include "GNUstepStringFormatters.h"
+#include "../GNUstepObjCRuntimeIntrospector.h"
 #include "lldb/Utility/DataBufferHeap.h"
 #include "lldb/Utility/DataExtractor.h"
 #include "lldb/Utility/Endian.h"
 #include "lldb/Utility/Status.h"
 #include <sstream>
 #include <iomanip>
+#include <cstring>
 
 using namespace lldb;
 using namespace lldb_private;
 using namespace lldb_private::formatters;
 
-// GNUstep runtime structures based on libobjc2
-struct objc_class {
-  lldb::addr_t isa;           // Metaclass pointer
-  lldb::addr_t super_class;   // Superclass pointer
-  lldb::addr_t name;          // Class name (char*)
-  long version;
-  unsigned long info;
-  long instance_size;
-  lldb::addr_t ivars;         // struct objc_ivar_list*
-  lldb::addr_t methods;       // struct objc_method_list*
-  lldb::addr_t dtable;        // Dispatch table
-  lldb::addr_t subclass_list; // Subclasses
-  lldb::addr_t sibling_list;  // Sibling classes
-  lldb::addr_t protocols;     // Protocol list
-  lldb::addr_t gc_layout;     // GC layout
-  lldb::addr_t ext;           // Extended info
-};
-
+// Correct struct definitions for GNUstep/libobjc2 runtime
 struct objc_ivar {
-  lldb::addr_t name;          // const char*
-  lldb::addr_t type;          // const char*
-  lldb::addr_t offset;        // int* (pointer to offset value)
-  uint32_t size;
-  uint32_t flags;
+  lldb::addr_t name;          // const char* (address to name string)
+  lldb::addr_t type;          // const char* (address to type encoding)
+  lldb::addr_t offset;        // int* (address to offset value)
+  uint32_t size;              // Size of this ivar
+  uint32_t flags;             // Flags
 };
 
 struct objc_ivar_list {
-  uint32_t count;
-  uint32_t size;              // Size of each ivar struct
+  uint32_t count;             // Number of ivars (int in runtime)
+  uint32_t padding;           // Padding for alignment on 64-bit
+  uint64_t size;              // Size of each ivar struct (size_t in runtime)
   // ivars follow...
 };
 
@@ -155,8 +142,18 @@ std::vector<IvarInfo> GNUstepGenericFormatter::ExtractIvarsFromClass(
   
   std::vector<IvarInfo> ivars;
   
-  if (!process || class_addr == LLDB_INVALID_ADDRESS)
+  // ExtractIvarsFromClass: class_addr, obj_addr
+  
+  if (!process || class_addr == LLDB_INVALID_ADDRESS || obj_addr == LLDB_INVALID_ADDRESS) {
+  // printf("ExtractIvarsFromClass: Invalid process or class address\n");
     return ivars;
+  }
+  
+  // Validate process state
+  if (!process->IsValid()) {
+  // printf("ExtractIvarsFromClass: Process is not in valid state\n");
+    return ivars;
+  }
   
   uint32_t addr_size = GNUstepRuntimeHelper::GetAddressByteSize(process);
   Status error;
@@ -165,57 +162,148 @@ std::vector<IvarInfo> GNUstepGenericFormatter::ExtractIvarsFromClass(
   lldb::addr_t ivars_addr_ptr = class_addr + (addr_size * 6);
   lldb::addr_t ivars_addr = GNUstepRuntimeHelper::ReadPointer(process, ivars_addr_ptr, error);
   
-  if (error.Fail() || ivars_addr == 0)
-    return ivars;
+  // printf("ExtractIvarsFromClass: ivars pointer at 0x%llx = 0x%llx\n");
   
-  // Read the ivar list header
+  if (error.Fail() || ivars_addr == 0) {
+  // printf("ExtractIvarsFromClass: No ivars pointer or read failed\n");
+    return ivars;
+  }
+  
+  // Read the ivar list header with proper validation
   objc_ivar_list ivar_list;
-  if (!GNUstepRuntimeHelper::ReadMemory(process, ivars_addr, &ivar_list, 8))
+  memset(&ivar_list, 0, sizeof(ivar_list)); // Initialize to prevent garbage values
+  
+  // Validate the address before reading
+  if (ivars_addr == 0 || ivars_addr == LLDB_INVALID_ADDRESS) {
+  // printf("ExtractIvarsFromClass: Invalid ivars address\n");
     return ivars;
+  }
   
-  // Sanity check
-  if (ivar_list.count > MAX_LOOP_ITERATIONS || ivar_list.size == 0)
+  const size_t ivar_list_header_size = sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint64_t); // count + padding + size
+  if (!GNUstepRuntimeHelper::ReadMemory(process, ivars_addr, &ivar_list, ivar_list_header_size)) {
+  // printf("ExtractIvarsFromClass: Failed to read ivar list header\n");
     return ivars;
+  }
   
-  // Read each ivar
-  lldb::addr_t ivar_ptr = ivars_addr + 8; // Skip header
+  // printf("ExtractIvarsFromClass: ivar_list count=%d, size=%d\n");
   
-  for (uint32_t i = 0; i < ivar_list.count && i < MAX_LOOP_ITERATIONS; ++i) {
-    objc_ivar ivar_data;
+  // Comprehensive sanity checks
+  if (ivar_list.count == 0) {
+  // printf("ExtractIvarsFromClass: No ivars in this class\n");
+    return ivars; // Not an error, just no ivars
+  }
+  
+  if (ivar_list.count > MAX_LOOP_ITERATIONS) {
+  // printf("ExtractIvarsFromClass: Too many ivars (%u), limiting to %u\n", ivar_list.count, MAX_LOOP_ITERATIONS);
+    // Don't return empty - process what we can safely
+  }
+  
+  if (ivar_list.size == 0 || ivar_list.size > 1024) { // Reasonable upper bound for ivar struct size
+  // printf("ExtractIvarsFromClass: Invalid ivar struct size: %llu\n", (unsigned long long)ivar_list.size);
+    return ivars;
+  }
+  
+  // Read each ivar with proper bounds checking
+  lldb::addr_t ivar_ptr = ivars_addr + ivar_list_header_size; // Skip header
+  
+  // Additional safety check for the starting address
+  if (ivar_ptr == LLDB_INVALID_ADDRESS) {
+  // printf("ExtractIvarsFromClass: Invalid ivar array start address\n");
+    return ivars;
+  }
+  
+  // printf("ExtractIvarsFromClass: Starting to read %d ivars from 0x%llx\n");
+  
+  const uint32_t safe_count = (ivar_list.count > MAX_LOOP_ITERATIONS) ? MAX_LOOP_ITERATIONS : ivar_list.count;
+  
+  for (uint32_t i = 0; i < safe_count; ++i) {
+  // printf("ExtractIvarsFromClass: Reading ivar %d at 0x%llx\n", i, (unsigned long long)ivar_ptr);
     
-    // Read the ivar structure
-    if (!GNUstepRuntimeHelper::ReadMemory(process, ivar_ptr, &ivar_data, 
-                                          sizeof(lldb::addr_t) * 3 + 8)) {
+    // Validate the ivar pointer before reading
+    if (ivar_ptr == 0 || ivar_ptr == LLDB_INVALID_ADDRESS) {
+  // printf("ExtractIvarsFromClass: Invalid ivar pointer at index %u\n", i);
       break;
     }
     
+    // Read the ivar structure with proper size validation
+    objc_ivar ivar_data;
+    memset(&ivar_data, 0, sizeof(ivar_data)); // Initialize to prevent garbage
+    
+    const size_t ivar_struct_size = sizeof(lldb::addr_t) * 3 + sizeof(uint32_t) * 2; // name, type, offset, size, flags
+    if (!GNUstepRuntimeHelper::ReadMemory(process, ivar_ptr, &ivar_data, ivar_struct_size)) {
+  // printf("ExtractIvarsFromClass: Failed to read ivar at 0x%llx\n", (unsigned long long)ivar_ptr);
+      break; // Don't continue if we can't read this ivar
+    }
+    
+  // printf("ExtractIvarsFromClass: ivar %d - name=0x%llx, type=0x%llx, offset=0x%llx, size=%u\n");
+    
     IvarInfo info;
     
-    // Read ivar name
-    if (ivar_data.name != 0) {
+    // Read ivar name with proper validation
+    if (ivar_data.name != 0 && ivar_data.name != LLDB_INVALID_ADDRESS) {
       info.name = GNUstepRuntimeHelper::ReadUTF8String(process, ivar_data.name, 256);
+      // Validate the name was read successfully
+      if (info.name.empty()) {
+  // printf("ExtractIvarsFromClass: Failed to read ivar name at 0x%llx\n", (unsigned long long)ivar_data.name);
+        info.name = "<unknown>";
+      }
+  // printf("  Name: '%s'\n", info.name.c_str());
+    } else {
+      info.name = "<unnamed>";
     }
     
-    // Read ivar type encoding
-    if (ivar_data.type != 0) {
+    // Read ivar type encoding with proper validation
+    if (ivar_data.type != 0 && ivar_data.type != LLDB_INVALID_ADDRESS) {
       info.type_encoding = GNUstepRuntimeHelper::ReadUTF8String(process, ivar_data.type, 256);
+      // Validate the type encoding was read successfully
+      if (info.type_encoding.empty()) {
+  // printf("ExtractIvarsFromClass: Failed to read ivar type at 0x%llx\n", (unsigned long long)ivar_data.type);
+        info.type_encoding = "?";
+      }
+  // printf("  Type: '%s'\n", info.type_encoding.c_str());
+    } else {
+      info.type_encoding = "?";
     }
     
-    // Read the offset value (it's a pointer to the offset)
-    if (ivar_data.offset != 0) {
+    // Read the offset value with proper validation (it's a pointer to the offset)
+    if (ivar_data.offset != 0 && ivar_data.offset != LLDB_INVALID_ADDRESS) {
       int32_t offset_value = 0;
       if (GNUstepRuntimeHelper::ReadMemory(process, ivar_data.offset, 
                                            &offset_value, sizeof(int32_t))) {
         info.offset = offset_value;
+  // printf("  Ivar '%s': Offset: %d, Size: %u, Type: %s\n", 
+  //        info.name.c_str(), offset_value, ivar_data.size, info.type_encoding.c_str());
+      } else {
+  // printf("ExtractIvarsFromClass: Failed to read ivar offset at 0x%llx\n", (unsigned long long)ivar_data.offset);
+        info.offset = -1; // Invalid offset
       }
+    } else {
+      info.offset = -1; // Invalid offset
     }
     
     info.size = ivar_data.size;
-    info.value_addr = obj_addr + info.offset;
     
-    ivars.push_back(info);
+    // Only calculate value_addr if we have a valid offset
+    if (info.offset >= 0) {
+      info.value_addr = obj_addr + info.offset;
+  // printf("    -> value_addr = 0x%llx (obj_addr 0x%llx + offset %d)\n", 
+  //        (unsigned long long)info.value_addr, (unsigned long long)obj_addr, info.offset);
+      
+      // Basic sanity check for the calculated address
+      if (info.value_addr != LLDB_INVALID_ADDRESS && info.value_addr != 0) {
+        ivars.push_back(info);
+      } else {
+  // printf("ExtractIvarsFromClass: Invalid calculated value address for ivar '%s'\n", info.name.c_str());
+      }
+    } else {
+  // printf("ExtractIvarsFromClass: Skipping ivar '%s' due to invalid offset\n", info.name.c_str());
+    }
     
-    // Move to next ivar
+    // Move to next ivar with overflow protection
+    if (ivar_ptr > LLDB_INVALID_ADDRESS - ivar_list.size) {
+  // printf("ExtractIvarsFromClass: Address overflow protection triggered\n");
+      break;
+    }
     ivar_ptr += ivar_list.size;
   }
   
@@ -226,13 +314,20 @@ std::vector<IvarInfo> GNUstepGenericFormatter::CollectAllIvars(Process *process,
                                                                lldb::addr_t obj_addr) {
   std::vector<IvarInfo> all_ivars;
   
-  if (!process || obj_addr == LLDB_INVALID_ADDRESS)
+  // printf("CollectAllIvars: Starting for object at 0x%llx\n", (unsigned long long)obj_addr);
+  
+  if (!process || obj_addr == LLDB_INVALID_ADDRESS) {
+  // printf("CollectAllIvars: Invalid process or object address\n");
     return all_ivars;
+  }
   
   // Get the class of this object
   lldb::addr_t class_addr = GetClassFromObject(process, obj_addr);
-  if (class_addr == LLDB_INVALID_ADDRESS)
+  // printf("CollectAllIvars: Class address is 0x%llx\n", (unsigned long long)class_addr);
+  if (class_addr == LLDB_INVALID_ADDRESS) {
+  // printf("CollectAllIvars: Failed to get class address\n");
     return all_ivars;
+  }
   
   // Walk up the class hierarchy
   std::vector<lldb::addr_t> class_hierarchy;
@@ -240,6 +335,8 @@ std::vector<IvarInfo> GNUstepGenericFormatter::CollectAllIvars(Process *process,
   
   // Collect classes from most derived to base
   while (current_class != LLDB_INVALID_ADDRESS && current_class != 0) {
+    std::string class_name = GetClassName(process, current_class);
+  // printf("CollectAllIvars: Found class '%s' at 0x%llx\n");
     class_hierarchy.push_back(current_class);
     current_class = GetSuperclass(process, current_class);
     
@@ -248,9 +345,13 @@ std::vector<IvarInfo> GNUstepGenericFormatter::CollectAllIvars(Process *process,
       break;
   }
   
+  // printf("CollectAllIvars: Class hierarchy has %zu classes\n", class_hierarchy.size());
+  
   // Now collect ivars from base to most derived (reverse order)
   for (auto it = class_hierarchy.rbegin(); it != class_hierarchy.rend(); ++it) {
+    std::string class_name = GetClassName(process, *it);
     std::vector<IvarInfo> class_ivars = ExtractIvarsFromClass(process, *it, obj_addr);
+  // printf("CollectAllIvars: Found %zu ivars in class '%s'\n", class_ivars.size(), class_name.c_str());
     
     // Add class name prefix for inherited ivars (optional, for clarity)
     // Currently we don't prefix inherited ivars, but could be enabled in the future
@@ -267,12 +368,27 @@ std::vector<IvarInfo> GNUstepGenericFormatter::CollectAllIvars(Process *process,
     all_ivars.insert(all_ivars.end(), class_ivars.begin(), class_ivars.end());
   }
   
+  // printf("CollectAllIvars: Total ivars collected: %zu\n", all_ivars.size());
+  
   return all_ivars;
 }
 
 std::string GNUstepGenericFormatter::FormatIvar(Process *process, const IvarInfo &ivar) {
   if (!process || ivar.value_addr == LLDB_INVALID_ADDRESS)
     return "<invalid>";
+  
+  // Special handling for ISA field (which is a Class pointer, not an object)
+  if (ivar.name == "isa") {
+    Status error;
+    lldb::addr_t class_addr = GNUstepRuntimeHelper::ReadPointer(process, ivar.value_addr, error);
+    if (!error.Fail() && class_addr != 0 && class_addr != LLDB_INVALID_ADDRESS) {
+      std::string class_name = GetClassName(process, class_addr);
+      if (!class_name.empty()) {
+        return class_name;
+      }
+    }
+    return "<Class>";
+  }
   
   BasicType type = GetBasicType(ivar.type_encoding);
   
@@ -321,17 +437,41 @@ std::string GNUstepGenericFormatter::FormatIvar(Process *process, const IvarInfo
 
 std::string GNUstepGenericFormatter::FormatObjectIvar(Process *process, 
                                                       lldb::addr_t obj_addr) {
-  if (!process)
+  if (!process || !process->IsValid())
     return "nil";
   
+  if (obj_addr == 0 || obj_addr == LLDB_INVALID_ADDRESS)
+    return "nil";
+  
+  // CRITICAL FIX: For object ivars, obj_addr is the ADDRESS where the object pointer is stored,
+  // not the object itself. We need to read the pointer first.
   Status error;
   lldb::addr_t obj_ptr = GNUstepRuntimeHelper::ReadPointer(process, obj_addr, error);
   
-  if (error.Fail() || obj_ptr == 0)
+  if (error.Fail() || obj_ptr == 0 || obj_ptr == LLDB_INVALID_ADDRESS) {
     return "nil";
+  }
   
-  // Get the class of this object
-  lldb::addr_t isa = GetClassFromObject(process, obj_ptr);
+  // Check if this is a tagged string
+  if ((obj_ptr & 0x8000000000000000ULL) != 0) {
+    // This is a tagged string
+    GNUstepObjCRuntimeIntrospector introspector(process);
+    std::string decoded = introspector.DecodeTaggedString(obj_ptr);
+    if (!decoded.empty()) {
+      return "\"" + decoded + "\"";
+    }
+    return "<tagged_string>";
+  }
+  
+  // Verify it's a valid object by checking for ISA at offset 0
+  lldb::addr_t isa = GNUstepRuntimeHelper::ReadPointer(process, obj_ptr, error);
+  
+  if (error.Fail() || isa == 0 || isa == LLDB_INVALID_ADDRESS) {
+    return "nil";
+  }
+  
+  // Now obj_ptr definitely points to a valid object
+  // Use the ISA we already read
   if (isa == LLDB_INVALID_ADDRESS)
     return "<invalid object>";
   
@@ -340,10 +480,27 @@ std::string GNUstepGenericFormatter::FormatObjectIvar(Process *process,
     return "<unknown object>";
   
   // For known Foundation classes, provide better summaries
-  if (class_name.find("NSString") != std::string::npos ||
+  if (class_name.find("NSConstantString") != std::string::npos || 
+      class_name.find("__NSConstantString") != std::string::npos) {
+    // NSConstantString layout: { Class isa; char *cString; uint32_t length; }
+    lldb::addr_t str_ptr_addr = obj_ptr + 8;  // char* at offset 8
+    lldb::addr_t str_data_addr = GNUstepRuntimeHelper::ReadPointer(process, str_ptr_addr, error);
+    
+    if (!error.Fail() && str_data_addr != 0) {
+      // Read the string directly
+      std::string str_content = GNUstepRuntimeHelper::ReadUTF8String(process, str_data_addr, 256);
+      if (!str_content.empty()) {
+        // Truncate for display
+        if (str_content.length() > 64) {
+          str_content = str_content.substr(0, 61) + "...";
+        }
+        return "\"" + str_content + "\"";
+      }
+    }
+  } else if (class_name.find("NSString") != std::string::npos ||
       class_name.find("GSString") != std::string::npos ||
       class_name.find("GSCString") != std::string::npos) {
-    // Try to extract string content
+    // Try to extract string content for other string types
     uint32_t addr_size = GNUstepRuntimeHelper::GetAddressByteSize(process);
     lldb::addr_t chars_addr = obj_ptr + addr_size + 4 + 4; // Skip isa, count, len
     std::string str_content = GNUstepRuntimeHelper::ReadUTF8String(process, 
@@ -580,14 +737,12 @@ bool GNUstepGenericObjectSyntheticProvider::UpdateImpl() {
   std::vector<IvarInfo> all_ivars = formatter.CollectAllIvars(m_process, m_obj_addr);
   
   // Debug: Print number of ivars collected
-  printf("GNUstepGenericObjectSyntheticProvider: Collected %zu ivars for object at 0x%llx\n", 
-         all_ivars.size(), (unsigned long long)m_obj_addr);
+  // printf("GNUstepGenericObjectSyntheticProvider: Collected %zu ivars for object at 0x%llx\n");
   
   // Filter out the isa pointer and any other runtime-internal ivars
   for (const auto& ivar : all_ivars) {
     // Debug: Print each ivar
-    printf("  Ivar: name='%s', type='%s', offset=%d\n", 
-           ivar.name.c_str(), ivar.type_encoding.c_str(), ivar.offset);
+  // printf("  Ivar: name='%s', type='%s', offset=%d\n");
     
     // Skip isa pointer - it's always the first ivar at offset 0 with type "@"
     if (ivar.name == "isa")
@@ -600,7 +755,7 @@ bool GNUstepGenericObjectSyntheticProvider::UpdateImpl() {
     m_ivars.push_back(ivar);
   }
   
-  printf("GNUstepGenericObjectSyntheticProvider: After filtering, %zu ivars remain\n", m_ivars.size());
+  // printf("GNUstepGenericObjectSyntheticProvider: After filtering, %zu ivars remain\n", m_ivars.size());
   
   return true;
 }
@@ -612,6 +767,8 @@ llvm::Expected<uint32_t> GNUstepGenericObjectSyntheticProvider::CalculateNumChil
 }
 
 lldb::ValueObjectSP GNUstepGenericObjectSyntheticProvider::GetChildAtIndex(uint32_t idx) {
+  // printf("GNUstepGenericObjectSyntheticProvider::GetChildAtIndex(%u) called, m_update_called=%d, m_ivars.size()=%zu\n");
+  
   if (!m_update_called || idx >= m_ivars.size())
     return nullptr;
     
@@ -680,21 +837,23 @@ lldb::ValueObjectSP GNUstepGenericObjectSyntheticProvider::GetChildAtIndex(uint3
   
   // Create a value object for this ivar
   DataExtractor data;
-  if (ivar.type_encoding[0] == '@' || ivar.type_encoding[0] == '^' || ivar.type_encoding[0] == '*') {
-    // For pointer types, read the pointer value
+  if (ivar.type_encoding[0] == '@') {
+    // CRITICAL FIX: For object types, use CreateValueObjectFromAddress
+    // ivar.value_addr is the ADDRESS where the object pointer is stored
+    // LLDB will read the pointer from this address and apply formatters
+    return ValueObject::CreateValueObjectFromAddress(ivar.name, ivar.value_addr, exe_ctx, ivar_type);
+  } else if (ivar.type_encoding[0] == '^' || ivar.type_encoding[0] == '*') {
+    // For non-object pointer types, read the pointer value
     Status error;
     lldb::addr_t ptr_value = GNUstepRuntimeHelper::ReadPointer(m_process, ivar.value_addr, error);
     if (error.Success()) {
-      return CreateValueObjectFromAddress(ivar.name, ptr_value, ivar_type);
+      // Create value object from address for non-object pointers
+      return ValueObject::CreateValueObjectFromAddress(ivar.name, ptr_value, exe_ctx, ivar_type);
     }
   } else {
-    // For primitive types, read the value directly
-    std::vector<uint8_t> buffer(ivar.size);
-    if (GNUstepRuntimeHelper::ReadMemory(m_process, ivar.value_addr, buffer.data(), ivar.size)) {
-      DataBufferSP data_buffer = std::make_shared<DataBufferHeap>(buffer.data(), buffer.size());
-      data.SetData(data_buffer, m_process->GetByteOrder(), m_process->GetAddressByteSize());
-      return CreateValueObjectFromData(ivar.name, data, ivar_type);
-    }
+    // CRITICAL FIX: For primitive types, use CreateValueObjectFromAddress
+    // This lets LLDB read the value directly from memory with proper type handling
+    return ValueObject::CreateValueObjectFromAddress(ivar.name, ivar.value_addr, exe_ctx, ivar_type);
   }
   
   return nullptr;

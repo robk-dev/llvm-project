@@ -1,0 +1,48 @@
+#!/usr/bin/env lldb -f
+
+# Test script for custom class synthetic children and expansion
+# This validates that BankAccount properties display correctly and can be expanded
+
+# Load the test program
+file custom_class_test
+
+# Set breakpoint after BankAccount is created
+b custom_class_test.m:127
+
+# Run to breakpoint
+run
+
+# Test 1: Check BankAccount displays correctly
+frame variable account
+# Expected: Shows BankAccount with readable string properties, not raw addresses
+
+# Test 2: Check string ivars display properly
+frame variable account._accountNumber
+# Expected: Shows "ACC-001" not a raw address
+
+frame variable account._ownerName
+# Expected: Shows "John Doe" not a raw address
+
+# Test 3: Check collections can be expanded
+frame variable account._transactions
+# Expected: Shows "4 objects" and can be expanded
+
+frame variable account._transactions[0]
+# Expected: Shows dictionary with 4 key/value pairs
+
+frame variable account._authorizedUsers
+# Expected: Shows set with 4 objects and can be expanded
+
+# Test 4: Check NSNumber displays value in dictionary
+frame variable accountSummary
+# Expected: Shows dictionary with readable values
+
+frame variable accountSummary[1].value
+# Expected: Shows the actual NSNumber value for total_transactions, not just address
+
+# Test 5: Check nested expansion works
+frame variable account._transactions[0][0].value
+# Expected: Shows "deposit" string value
+
+# If all tests pass, the custom class synthetic children are working correctly
+quit
