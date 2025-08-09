@@ -1,0 +1,404 @@
+# LLDB GNUstep Debugger - Windows MSYS2/UCRT64 Setup
+
+This directory contains production-ready setup scripts for building LLVM/LLDB with the integrated GNUstep runtime on Windows using MSYS2/UCRT64.
+
+**Important:** These scripts work with the current repository which already has the GNUstep runtime integrated into the LLDB source. No patching or additional downloads are required.
+
+## 🎯 Overview
+
+These scripts automate the complete setup process for the LLDB GNUstep debugger on Windows, including:
+
+- **LLVM/LLDB Build**: Builds your current LLVM source with integrated GNUstep runtime
+- **GNUstep Environment**: Builds libobjc2, gnustep-make, and gnustep-base from source
+- **Path Portability**: Automatically replaces hardcoded paths for workspace portability  
+- **Verification**: Includes comprehensive testing and verification scripts
+- **Windows Optimization**: Tailored for Windows MSYS2/UCRT64 environment with memory management
+
+## 📋 Prerequisites
+
+### System Requirements
+- **Windows 10/11** (64-bit)
+- **MSYS2** with UCRT64 environment
+- **50GB+ free disk space**
+- **16GB+ RAM** (8GB minimum, but build will be slower)
+- **4+ CPU cores** recommended
+
+### MSYS2 Setup
+If you don't have MSYS2 installed:
+1. Download from https://www.msys2.org/
+2. Install to `C:\msys64` (recommended) or `C:\tools\msys64`
+3. Open "MSYS2 UCRT64" terminal (not MSYS2 MSYS!)
+
+## 🚀 Quick Start
+
+### 1. Prerequisites
+This repository already contains everything needed:
+```bash
+# ✓ LLVM/LLDB source code with integrated GNUstep runtime
+# ✓ GNUstep runtime in lldb/source/Plugins/LanguageRuntime/ObjC/GNUstepObjCRuntime/
+# ✓ Windows setup scripts in lldb/scripts-windows/
+# ✓ No additional downloads or patches required
+```
+
+### 2. Navigate to Project Root
+```bash
+# Ensure you're in the LLVM project root directory
+cd /path/to/your/llvm-project
+pwd  # Should show the llvm-project directory
+ls   # Should show: llvm/ lldb/ clang/ etc.
+```
+
+### 3. Run the Setup Script
+```bash
+# Full build from scratch (2-3 hours)
+# Run from the LLVM project root directory
+./lldb/scripts-windows/setup.sh
+
+# Or with options:
+./lldb/scripts-windows/setup.sh --help
+```
+
+### 4. Source the Environment
+```bash
+# After successful build
+source ~/llvm-project/build-windows/setup_environment.sh
+```
+
+### 5. Test the Installation
+```bash
+cd ~/llvm-project/build-windows/examples
+make
+./test_custom_class.exe
+
+# Debug with LLDB
+lldb test_custom_class.exe
+```
+
+## 📦 What Gets Built
+
+### LLVM/LLDB Components
+- **LLDB**: Full debugger with GNUstep runtime patch
+- **lldb-server**: For remote debugging support
+- **Clang**: C/C++/Objective-C compiler
+- **LLD**: Fast linker
+
+### GNUstep Components
+- **libobjc2**: Modern Objective-C runtime
+- **gnustep-make**: Build system
+- **gnustep-base**: Foundation library
+
+### Build Locations
+```
+~/llvm-project/
+├── build-windows/          # LLVM build directory
+│   ├── bin/               # lldb.exe, clang.exe, etc.
+│   ├── lib/               # LLVM libraries
+│   └── examples/          # Test programs
+├── gnustep-install-windows/  # GNUstep installation
+│   ├── bin/               # GNUstep tools
+│   ├── lib/               # libobjc.dll, etc.
+│   └── include/           # Headers
+└── lldb/scripts-windows/   # Setup scripts
+```
+
+## 🛠️ Setup Options
+
+### GNUstep-Only Build Mode
+
+If you only need the GNUstep environment without LLVM/LLDB, use the `--gnustep-only` option:
+
+```bash
+# Build only GNUstep stack (much faster - ~30 minutes)
+./lldb/scripts-windows/setup.sh --gnustep-only
+```
+
+This mode will:
+- ✅ Install dependencies via pacman
+- ✅ Build libobjc2 with debug symbols
+- ✅ Build gnustep-make build system
+- ✅ Build gnustep-base Foundation library
+- ✅ Create GNUstep test programs
+- ✅ Set up GNUstep environment scripts
+- ❌ Skip LLVM/LLDB/Clang build (saves 2+ hours)
+
+After completion:
+```bash
+# Test the GNUstep environment
+source ./gnustep-install-windows/setup-gnustep-env.sh
+cd gnustep-install-windows/examples
+./test_environment.sh
+```
+
+### Command Line Options
+```bash
+# Quick developer rebuild (after initial build)
+./setup.sh --dev
+
+# Skip dependency installation (if already installed)
+./setup.sh --skip-deps
+
+# Use existing LLVM source (skip download)
+./setup.sh --skip-download
+
+# Skip GNUstep build (LLDB only)
+./setup.sh --skip-gnustep
+
+# Build only GNUstep environment (no LLVM/LLDB)
+./setup.sh --gnustep-only
+
+# Skip path replacement
+./setup.sh --skip-path-replace
+
+# Clean rebuild
+./setup.sh --force-clean
+```
+
+### Environment Variables
+```bash
+# Control parallel jobs (default: CPU cores / 2)
+export PARALLEL_JOBS=4
+
+# Custom build directory
+export LLVM_BUILD_DIR=/path/to/build
+
+# Then run setup
+./setup.sh
+```
+
+## 🔧 Script Architecture
+
+### Main Script
+- `setup.sh`: Main entry point, orchestrates the entire build process
+
+### Helper Modules
+- `helpers/common.sh`: Common utilities, path handling, colored output
+- `helpers/system_checks.sh`: Windows environment verification, dependency installation
+- `helpers/llvm_operations.sh`: LLVM download, patching, quick rebuild
+- `helpers/build_operations.sh`: CMake configuration, LLDB/lldb-server build
+- `helpers/gnustep_operations.sh`: GNUstep components build (libobjc2, base)
+- `helpers/path_replacer.sh`: Workspace path portability
+- `helpers/helper_scripts.sh`: Verification, test programs, VS Code config
+
+## 🧪 Testing & Verification
+
+### Automatic Tests
+The setup script automatically:
+1. Verifies all components are built
+2. Creates test programs
+3. Checks the GNUstep patch is applied
+4. Tests basic LLDB functionality
+
+### Manual Testing
+```bash
+# Run verification script
+~/llvm-project/build-windows/verify_gnustep_patch.sh
+
+# Build and run test programs
+cd ~/llvm-project/build-windows/examples
+make run
+
+# Debug test program
+make debug
+```
+
+### Test Programs Included
+- `test_simple.m`: Basic Objective-C class test
+- `test_custom_class.m`: BankAccount class with runtime introspection
+
+## 🐛 Debugging with LLDB
+
+### Basic Commands
+```bash
+# Start debugging
+lldb test_custom_class.exe
+
+# Set breakpoint
+(lldb) b main
+
+# Run program
+(lldb) r
+
+# Print object
+(lldb) po account
+
+# Show methods
+(lldb) p (void)class_copyMethodList([BankAccount class], &count)
+
+# Continue execution
+(lldb) c
+```
+
+### VS Code Integration
+1. Copy generated settings:
+   ```bash
+   cp ~/llvm-project/build-windows/vscode_settings.json /path/to/project/.vscode/settings.json
+   ```
+
+2. Install CodeLLDB extension in VS Code
+
+3. Create launch.json:
+   ```json
+   {
+       "type": "lldb",
+       "request": "launch",
+       "name": "Debug",
+       "program": "${workspaceFolder}/test.exe",
+       "args": [],
+       "cwd": "${workspaceFolder}"
+   }
+   ```
+
+## 🔄 Path Portability
+
+The scripts automatically replace hardcoded paths like `/home/robk` with your current workspace path. This ensures:
+- The project works on any Windows system
+- No manual path editing required
+- Build artifacts are portable
+
+### Path Mapping
+After build, check `~/llvm-project/build-windows/path-mapping.txt` for:
+- Original Linux paths → Your Windows paths
+- Environment variables to set
+- VS Code configuration paths
+
+## ⚡ Performance Tips
+
+### Build Performance
+- **ccache**: Automatically configured for faster rebuilds
+- **Parallel Jobs**: Auto-calculated based on available RAM
+- **Memory Management**: Build uses staged compilation to manage memory
+
+### Runtime Performance
+- **Release Mode**: Use `RelWithDebInfo` for optimal performance with debugging
+- **Static Linking**: Windows build uses static linking for better performance
+
+## 🚨 Troubleshooting
+
+### Common Issues
+
+#### 1. Out of Memory During Build
+```bash
+# Reduce parallel jobs
+export PARALLEL_JOBS=2
+./setup.sh
+```
+
+#### 2. MSYS2 Package Issues
+```bash
+# Update MSYS2
+pacman -Syu
+# Restart terminal, then:
+pacman -Su
+```
+
+#### 3. Path Not Found Errors
+```bash
+# Ensure you're in UCRT64 environment
+echo $MSYSTEM  # Should show "UCRT64"
+```
+
+#### 4. Build Fails at Linking
+```bash
+# Windows has limited memory for linking
+# The script already limits link jobs to 2
+# If still failing, try:
+export LDFLAGS="-Wl,--no-keep-memory"
+./setup.sh --dev
+```
+
+### Getting Help
+Check the generated files:
+- `build-windows/build-report.txt`: Build configuration summary
+- `build-windows/DEBUGGING_TIPS.md`: Debugging guide
+- Build logs in `build-windows/build/`
+
+## 📝 Development Workflow
+
+### After Initial Build
+```bash
+# Quick rebuild after code changes
+cd ~/llvm-project/build-windows
+./quick_rebuild.sh
+
+# Or use developer mode
+cd ~/llvm-project/lldb/scripts-windows
+./setup.sh --dev
+```
+
+### Updating the GNUstep Runtime
+1. Modify files in `lldb/source/Plugins/LanguageRuntime/ObjC/GNUstepObjCRuntime/`
+2. Run quick rebuild:
+   ```bash
+   ./setup.sh --dev
+   ```
+
+## 🎉 Features
+
+### What's Working
+- ✅ Dynamic Objective-C class discovery via objc_copyClassList()
+- ✅ Custom class debugging without hardcoded registration
+- ✅ Property and ivar introspection with debug symbols
+- ✅ Method listing and runtime invocation
+- ✅ GNUstep Foundation library support
+- ✅ Windows-native performance with optimized build
+- ✅ VS Code integration with CodeLLDB
+
+### Known Limitations
+- ⚠️ Some GNUstep GUI components may not build
+- ⚠️ Remote debugging requires additional firewall configuration
+- ⚠️ Some LLDB Python scripting features may be limited
+
+## 📄 License
+
+This project follows the LLVM project license. The GNUstep components are under their respective licenses.
+
+## 🤝 Contributing
+
+Contributions are welcome! Please:
+1. Test changes on Windows MSYS2/UCRT64
+2. Maintain backward compatibility
+3. Update documentation for new features
+4. Follow the existing code style
+
+## 📚 Additional Resources
+
+- [LLVM Documentation](https://llvm.org/docs/)
+- [LLDB Tutorial](https://lldb.llvm.org/use/tutorial.html)
+- [GNUstep Documentation](http://www.gnustep.org/documentation/)
+- [MSYS2 Documentation](https://www.msys2.org/docs/)
+
+## 💡 Tips for Success
+
+1. **Always use UCRT64 terminal** (not MINGW64 or MSYS)
+2. **Close other applications** during build to free RAM
+3. **Use an SSD** for much faster build times
+4. **Enable Windows Developer Mode** for symbolic links
+5. **Disable antivirus scanning** for build directory (temporarily)
+
+---
+
+---
+
+## 📁 Repository Structure
+
+Your repository should have this structure before running the setup:
+
+```
+your-llvm-project/
+├── llvm/                           # LLVM source code
+├── lldb/                           # LLDB source code
+│   └── scripts-windows/            # These Windows setup scripts
+│       ├── setup.sh               # Main setup script
+│       ├── helpers/               # Helper modules
+│       └── README.md              # This file
+├── clang/                          # Clang source code
+├── lldb/source/Plugins/LanguageRuntime/ObjC/  # LLDB ObjC runtime plugins
+│   ├── AppleObjCRuntime/          # Apple's runtime
+│   └── GNUstepObjCRuntime/        # GNUstep runtime (integrated)
+│       ├── GNUstepObjCRuntime.cpp
+│       ├── GNUstepObjCRuntime.h
+│       └── CMakeLists.txt
+└── (other LLVM components)
+```
+
+**Built with ❤️ for the GNUstep and LLDB community**
