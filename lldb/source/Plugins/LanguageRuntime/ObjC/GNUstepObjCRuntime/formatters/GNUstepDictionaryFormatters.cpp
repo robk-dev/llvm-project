@@ -50,21 +50,17 @@ bool GNUstepNSDictionarySummaryProvider::FormatObject(ValueObject &valobj,
   
   // Format the summary with inline elements like Apple's formatters
   if (count == 0) {
-    stream.Printf("0 key/value pairs");
+    stream.Printf("{}");
     return true;
   }
   
-  // Show count and first few key-value pairs inline
-  if (count == 1) {
-    stream.Printf("1 key/value pair");
-  } else {
-    stream.Printf("%u key/value pairs", count);
-  }
-  
-  // Add inline key-value preview for better UX
+  // Show inline key-value preview
   std::string inline_pairs = GetInlinePairsPreview(valobj, count);
   if (!inline_pairs.empty()) {
-    stream.Printf(" %s", inline_pairs.c_str());
+    stream.Printf("%s", inline_pairs.c_str());
+  } else {
+    // Fallback to just showing count if preview fails
+    stream.Printf("{%u pairs}", count);
   }
   
   return true;

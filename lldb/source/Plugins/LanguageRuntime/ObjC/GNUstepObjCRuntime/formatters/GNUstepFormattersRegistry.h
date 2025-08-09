@@ -59,6 +59,21 @@ public:
   /// Register UUID formatters (NSUUID)
   static void RegisterUUIDFormatters(TypeCategoryImpl &category);
   
+  /// Register NSNull formatter
+  static void RegisterNullFormatter(TypeCategoryImpl &category);
+  
+  /// Register NSException formatter
+  static void RegisterExceptionFormatter(TypeCategoryImpl &category);
+  
+  /// Register NSAttributedString formatter
+  static void RegisterAttributedStringFormatter(TypeCategoryImpl &category);
+  
+  /// Register NSIndexPath formatter
+  static void RegisterIndexPathFormatter(TypeCategoryImpl &category);
+  
+  /// Register NSNotification formatter
+  static void RegisterNotificationFormatter(TypeCategoryImpl &category);
+  
   /// Register generic formatter for any Objective-C object
   static void RegisterGenericFormatter(TypeCategoryImpl &category);
 

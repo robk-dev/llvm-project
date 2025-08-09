@@ -850,7 +850,6 @@ static void LoadObjCFormatters(TypeCategoryImplSP objc_category_sp) {
       objc_category_sp, lldb_private::formatters::CFBitVectorSummaryProvider,
       "CFBitVector summary provider", "__CFMutableBitVector", appkit_flags);
 
-  // GNUstep Formatters (Apple Pattern Integration)
   LoadGNUstepFormatters(objc_category_sp);
 }
 
@@ -872,7 +871,7 @@ static void LoadCoreMediaFormatters(TypeCategoryImplSP objc_category_sp) {
                 "CMTime summary provider", "CMTime", cm_flags);
 }
 
-// GNUstep Formatter Registration (Apple Pattern Integration)
+// GNUstep Formatter Registration
 static void LoadGNUstepFormatters(TypeCategoryImplSP objc_category_sp) {
     if (!objc_category_sp)
         return;

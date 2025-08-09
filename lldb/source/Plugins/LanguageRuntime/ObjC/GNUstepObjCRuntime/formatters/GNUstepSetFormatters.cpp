@@ -53,21 +53,17 @@ bool GNUstepNSSetSummaryProvider::FormatObject(ValueObject &valobj,
   
   // Format the summary with inline elements like Apple's formatters
   if (count == 0) {
-    stream.Printf("0 objects");
+    stream.Printf("{}");
     return true;
   }
   
-  // Show count and first few elements inline
-  if (count == 1) {
-    stream.Printf("1 object");
-  } else {
-    stream.Printf("%u objects", count);
-  }
-  
-  // Add inline element preview for better UX (like Apple's formatters)
+  // Show inline element preview (like Apple's formatters)
   std::string inline_elements = GetInlineElementsPreview(valobj, count);
   if (!inline_elements.empty()) {
-    stream.Printf(" %s", inline_elements.c_str());
+    stream.Printf("%s", inline_elements.c_str());
+  } else {
+    // Fallback to just showing count if preview fails
+    stream.Printf("{%u elements}", count);
   }
   
   return true;

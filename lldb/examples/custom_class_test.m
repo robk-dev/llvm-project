@@ -1,4 +1,6 @@
 #import <Foundation/Foundation.h>
+#import <string.h>
+#import <stdio.h>
 
 @interface BankAccount : NSObject {
   NSString *_accountNumber;
@@ -77,6 +79,68 @@ int main(int argc, const char *argv[]) {
     NSString *greeting2 = @"Hello, Enhanced Debugging!";
     NSNumber *magicNumber = @42;
     NSDate *currentTime = [NSDate date];
+    
+    // === SECTION 1B: Foundation Types (TDD Tests) ===
+    // Test NSDate variations
+    NSDate *futureDate = [NSDate dateWithTimeIntervalSinceNow:3600]; // 1 hour from now
+    NSDate *pastDate = [NSDate dateWithTimeIntervalSince1970:0]; // Unix epoch
+    NSDate *nilDate = nil; // Edge case: nil date
+    
+    // Test NSURL variations
+    NSURL *webURL = [NSURL URLWithString:@"https://www.example.com/path?query=value"];
+    NSURL *fileURL = [NSURL fileURLWithPath:@"/usr/local/bin/test"];
+    NSURL *complexURL = [NSURL URLWithString:@"ftp://user:pass@host.com:8080/path/to/file.txt"];
+    NSURL *nilURL = nil; // Edge case: nil URL
+    NSURL *emptyURL = [NSURL URLWithString:@""]; // Edge case: empty string URL
+    
+    // Test NSError variations
+    NSError *simpleError = [NSError errorWithDomain:@"TestDomain" code:404 userInfo:nil];
+    NSError *detailedError = [NSError errorWithDomain:NSURLErrorDomain 
+                                                 code:NSURLErrorFileDoesNotExist
+                                             userInfo:@{
+                                                NSLocalizedDescriptionKey: @"File not found",
+                                                NSLocalizedFailureReasonErrorKey: @"The specified file does not exist",
+                                                NSURLErrorFailingURLStringErrorKey: @"file:///missing.txt"
+                                             }];
+    NSError *nilError = nil; // Edge case: nil error
+    
+    // Test NSData variations
+    const char *bytes = "Hello, World!";
+    NSData *stringData = [NSData dataWithBytes:bytes length:strlen(bytes)];
+    NSData *emptyData = [NSData data]; // Edge case: empty data
+    NSData *largeData = [NSData dataWithBytes:"A very long string that contains lots of data for testing purposes" 
+                                        length:66];
+    NSMutableData *mutableData = [NSMutableData dataWithCapacity:100];
+    [mutableData appendBytes:"Mutable" length:7];
+    NSData *nilData = nil; // Edge case: nil data
+    
+    // Test NSUUID variations
+    NSUUID *randomUUID = [NSUUID UUID];
+    NSUUID *specificUUID = [[NSUUID alloc] initWithUUIDString:@"550e8400-e29b-41d4-a716-446655440000"];
+    NSUUID *nilUUID = nil; // Edge case: nil UUID
+    
+    // === NEW HIGH-PRIORITY FOUNDATION OBJECTS ===
+    // Test NSNull singleton
+    NSNull *nullObject = [NSNull null];
+    
+    // Test NSException
+    NSException *testException = [NSException exceptionWithName:@"TestException" 
+                                                         reason:@"This is a test exception for debugging"
+                                                       userInfo:@{@"errorCode": @404, @"context": @"Testing"}];
+    
+    // Test NSAttributedString
+    NSAttributedString *attrString = [[NSAttributedString alloc] 
+        initWithString:@"Hello with attributes" 
+        attributes:@{@"font": @"Helvetica", @"size": @12}];
+    
+    // Test NSIndexPath  
+    NSUInteger indexes[] = {0, 1, 2};
+    NSIndexPath *indexPath = [NSIndexPath indexPathWithIndexes:indexes length:3];
+    
+    // Test NSNotification
+    NSNotification *notification = [NSNotification notificationWithName:@"TestNotification" 
+                                                                 object:nil 
+                                                               userInfo:@{@"timestamp": currentTime}];
 
     // === SECTION 2: Collections ===
     NSArray *fruits = @[ @"apple", @"banana", @"cherry", @"date" ];
@@ -128,11 +192,45 @@ int main(int argc, const char *argv[]) {
     NSLog(@"Complex custom class debugging test");
     NSLog(@"Account: %@", account);
     NSLog(@"Account summary: %@", accountSummary);
+    
+    // Log the new high-priority objects for testing
+    NSLog(@"NSNull: %@", nullObject);
+    NSLog(@"NSException: %@", testException);
+    NSLog(@"NSAttributedString: %@", attrString);
+    NSLog(@"NSIndexPath: %@", indexPath);
+    NSLog(@"NSNotification: %@", notification);
 
     // Inspect individual transactions
     for (NSDictionary *transaction in account.transactions) {
       NSLog(@"Transaction: %@", transaction);
     }
+    
+    // === SECTION 4: Test Foundation Types ===
+    NSLog(@"Testing Foundation formatters:");
+    NSLog(@"NSDate - current: %@", currentTime);
+    NSLog(@"NSDate - future: %@", futureDate);
+    NSLog(@"NSDate - epoch: %@", pastDate);
+    
+    NSLog(@"NSURL - web: %@", webURL);
+    NSLog(@"NSURL - file: %@", fileURL);
+    NSLog(@"NSURL - complex: %@", complexURL);
+    
+    NSLog(@"NSError - simple: %@", simpleError);
+    NSLog(@"NSError - detailed: %@", detailedError);
+    
+    NSLog(@"NSData - string: %@", stringData);
+    NSLog(@"NSData - empty: %@", emptyData);
+    NSLog(@"NSData - mutable: %@", mutableData);
+    
+    NSLog(@"NSUUID - random: %@", randomUUID);
+    NSLog(@"NSUUID - specific: %@", specificUUID);
+    
+    // Set a breakpoint here to test all Foundation formatters
+    NSLog(@"Foundation formatter test breakpoint"); // Line for setting breakpoint
+    
+    // Add a simple pause to allow debugging
+    printf("Press Enter to continue...\n");
+    getchar();
 
     return 0;
   }

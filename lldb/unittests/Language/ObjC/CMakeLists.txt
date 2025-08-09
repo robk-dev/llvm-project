@@ -4,3 +4,5 @@ add_lldb_unittest(LanguageObjCTests
   LINK_LIBS
     lldbPluginObjCLanguage
 )
+
+add_subdirectory(GNUstep)

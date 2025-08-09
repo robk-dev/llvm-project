@@ -591,6 +591,14 @@ void GNUstepObjCRuntime::RegisterFormatters() {
   Log *log = GetLog(LLDBLog::Process | LLDBLog::Types);
   LLDB_LOG(log, "GNUstepObjCRuntime::RegisterFormatters - Registering GNUstep formatters");
   
+  // Disable Apple's ObjC formatters to prevent conflicts
+  // This is necessary because both Apple and GNUstep register formatters for the same types
+  TypeCategoryImplSP objc_category_sp;
+  if (DataVisualization::Categories::GetCategory(ConstString("objc"), objc_category_sp)) {
+    DataVisualization::Categories::Disable(ConstString("objc"));
+    LLDB_LOG(log, "Disabled Apple ObjC formatters to prevent conflicts");
+  }
+  
   // Get or create the GNUstep type category
   TypeCategoryImplSP category_sp;
   if (!DataVisualization::Categories::GetCategory(ConstString("gnustep"), 
@@ -607,7 +615,7 @@ void GNUstepObjCRuntime::RegisterFormatters() {
   // Register our formatters
   GNUstepFormattersRegistry::RegisterFormatters(*category_sp);
   
-  // Enable the category
+  // Enable the category with higher priority than default
   DataVisualization::Categories::Enable(ConstString("gnustep"), 
                                         TypeCategoryMap::Default);
   

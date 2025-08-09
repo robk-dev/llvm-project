@@ -119,6 +119,8 @@ protected:
 private:
   std::vector<IvarInfo> m_ivars; // List of ivars excluding isa
   lldb::addr_t m_obj_addr;
+  // Child cache to ensure unique ValueObject instances
+  std::map<uint32_t, lldb::ValueObjectSP> m_children_cache;
 };
 
 /// Creator function for generic object synthetic provider

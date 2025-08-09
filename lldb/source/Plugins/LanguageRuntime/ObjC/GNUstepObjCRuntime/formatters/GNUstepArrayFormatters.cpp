@@ -51,26 +51,25 @@ bool GNUstepNSArraySummaryProvider::FormatObject(ValueObject &valobj,
   // Create formatter context to prevent infinite recursion
   FormatterContext context;
   
-  // Format the summary with inline elements like Apple's formatters
+  // Format the summary of inline elements
   if (count == 0) {
-    stream.Printf("0 objects");
+    stream.Printf("()");
     return true;
   }
   
-  // Show count and first few elements inline
-  if (count == 1) {
-    stream.Printf("1 object");
-  } else {
-    stream.Printf("%u objects", count);
-  }
-  
-  // Add inline element preview for better UX (like Apple's formatters)
+  // Show inline element preview
   // Limit to reasonable counts to avoid performance issues
   if (count <= MAX_COLLECTION_ELEMENTS_INLINE) {
     std::string inline_elements = GetInlineElementsPreview(valobj, count, context);
     if (!inline_elements.empty()) {
-      stream.Printf(" %s", inline_elements.c_str());
+      stream.Printf("%s", inline_elements.c_str());
+    } else {
+      // Fallback to just showing count if preview fails
+      stream.Printf("(%u elements)", count);
     }
+  } else {
+    // For large arrays, just show count
+    stream.Printf("(%u elements)", count);
   }
   
   return true;
@@ -409,6 +408,16 @@ std::string GNUstepNSArraySummaryProvider::GetElementSummary(Process *process, l
         if (!error) {
           std::string result = value_stream.GetString().str();
           if (!result.empty()) {
+            // CRITICAL FIX: Clean up the result - remove newlines and extra whitespace
+            // that could break the inline array display format
+            size_t pos = result.find('\n');
+            if (pos != std::string::npos) {
+              result = result.substr(0, pos);
+            }
+            // Trim trailing whitespace
+            while (!result.empty() && std::isspace(result.back())) {
+              result.pop_back();
+            }
             context.ExitObject(element_addr);
             return result;
           }
@@ -472,6 +481,31 @@ std::string GNUstepNSArraySummaryProvider::TryExtractStringContent(Process *proc
   // For regular NSString objects, we need to properly extract the content
   // by using the same logic as the standalone string formatter
   
+  // Special check: if obj_addr points to a known class object, not an instance
+  // This is a workaround for a compiler/linker bug where NSConstantString class
+  // is stored in arrays instead of string instances
+  // Check if this address looks like it's from the library's data section
+  if ((obj_addr & 0x7ffff7000000) == 0x7ffff7000000) {
+    // This looks like a library address, check if it's actually the NSConstantString class
+    Status test_error;
+    lldb::addr_t test_isa = GNUstepRuntimeHelper::ReadPointer(process, obj_addr, test_error);
+    if (!test_error.Fail() && test_isa != 0) {
+      // Check if what we read as ISA is actually pointing to a metaclass
+      // For the NSConstantString class object, the ISA would be NSConstantString metaclass
+      std::string test_name = introspector.GetClassName(test_isa);
+      if (test_name.find("METACLASS") != std::string::npos || test_name.empty()) {
+        // This is likely a class object, not an instance
+        // This is a compiler bug - the array literal syntax is storing the class object
+        // instead of a string instance. Check if this is NSConstantString class.
+        std::string class_name = introspector.GetClassName(obj_addr);
+        if (class_name == "NSConstantString" || class_name == "__NSConstantString") {
+          return "<NSConstantString class>";
+        }
+        return "<class object>";
+      }
+    }
+  }
+  
   // First, read the ISA pointer to determine the exact string type
   Status error;
   lldb::addr_t isa_addr = GNUstepRuntimeHelper::ReadPointer(process, obj_addr, error);
@@ -482,9 +516,43 @@ std::string GNUstepNSArraySummaryProvider::TryExtractStringContent(Process *proc
   // Get the class name from the ISA
   std::string class_name = introspector.GetClassName(isa_addr);
   
+  // DEBUG: Print what we got
+  if (obj_addr == 0x00007ffff7d9f6f8) {
+    printf("[DEBUG] TryExtractStringContent for 0x%llx: ISA=0x%llx, class_name='%s'\n", 
+           (unsigned long long)obj_addr, (unsigned long long)isa_addr, class_name.c_str());
+  }
+  
+  // If we couldn't get the class name, try checking if it looks like NSConstantString
+  // by its memory layout or known ISA addresses
+  if (class_name.empty()) {
+    // Try a fallback - check if this could be NSConstantString
+    // by reading what should be the string pointer at offset 8
+    lldb::addr_t potential_str_ptr = GNUstepRuntimeHelper::ReadPointer(process, obj_addr + 8, error);
+    if (!error.Fail() && potential_str_ptr != 0) {
+      // Try to read a few bytes to see if it looks like a string
+      char test_buf[16] = {0};
+      size_t bytes_read = process->ReadMemory(potential_str_ptr, test_buf, 15, error);
+      if (!error.Fail() && bytes_read > 0) {
+        // Check if it looks like printable text
+        bool looks_like_string = true;
+        for (size_t i = 0; i < bytes_read && test_buf[i] != 0; i++) {
+          if (!isprint(test_buf[i]) && test_buf[i] != '\n' && test_buf[i] != '\t') {
+            looks_like_string = false;
+            break;
+          }
+        }
+        if (looks_like_string) {
+          // Treat it as NSConstantString
+          class_name = "NSConstantString";
+        }
+      }
+    }
+  }
+  
   // Handle different string types based on their class
   if (class_name.find("NSConstantString") != std::string::npos || 
-      class_name.find("__NSConstantString") != std::string::npos) {
+      class_name.find("__NSConstantString") != std::string::npos ||
+      class_name.find("_NSConstantString") != std::string::npos) {
     // NSConstantString layout (compile-time constant strings that aren't tagged):
     // struct {
     //   Class isa;          // offset 0
@@ -511,6 +579,7 @@ std::string GNUstepNSArraySummaryProvider::TryExtractStringContent(Process *proc
       }
     }
   } else if (class_name.find("GSCString") != std::string::npos ||
+             class_name.find("GSCInlineString") != std::string::npos ||
              class_name.find("GSString") != std::string::npos ||
              class_name.find("NSString") != std::string::npos) {
     

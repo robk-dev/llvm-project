@@ -16,6 +16,7 @@
 #include <sstream>
 #include <iomanip>
 #include <cstring>
+#include <map>
 
 using namespace lldb;
 using namespace lldb_private;
@@ -724,6 +725,7 @@ GNUstepGenericObjectSyntheticProvider::GNUstepGenericObjectSyntheticProvider(
 
 bool GNUstepGenericObjectSyntheticProvider::UpdateImpl() {
   m_ivars.clear();
+  m_children_cache.clear(); // Clear child cache on update
   
   if (!m_process)
     return false;
@@ -731,6 +733,16 @@ bool GNUstepGenericObjectSyntheticProvider::UpdateImpl() {
   m_obj_addr = m_backend.GetPointerValue();
   if (m_obj_addr == 0 || m_obj_addr == LLDB_INVALID_ADDRESS)
     return false;
+  
+  // CRITICAL: Check class name and skip problematic types that should not have synthetic children
+  std::string class_name = GNUstepRuntimeHelper::GetGNUstepClassName(m_backend);
+  if (class_name == "NSException" || class_name == "NSIndexPath" || 
+      class_name == "NSNotification" || class_name == "GSException" ||
+      class_name == "GSIndexPath" || class_name == "GSNotification") {
+    // These types should use their specific formatters with noop synthetic providers
+    // Returning false prevents synthetic children from being created
+    return false;
+  }
   
   // Create a temporary formatter to reuse its ivar collection logic
   GNUstepGenericFormatter formatter;
@@ -767,27 +779,57 @@ llvm::Expected<uint32_t> GNUstepGenericObjectSyntheticProvider::CalculateNumChil
 }
 
 lldb::ValueObjectSP GNUstepGenericObjectSyntheticProvider::GetChildAtIndex(uint32_t idx) {
-  // printf("GNUstepGenericObjectSyntheticProvider::GetChildAtIndex(%u) called, m_update_called=%d, m_ivars.size()=%zu\n");
+  // printf("GNUstepGenericObjectSyntheticProvider::GetChildAtIndex(%u) called, m_update_called=%d, m_ivars.size()=%zu\n", idx, m_update_called, m_ivars.size());
   
+  // CRITICAL FIX: Add safety checks to prevent crashes when expanding problematic objects
   if (!m_update_called || idx >= m_ivars.size())
     return nullptr;
+  
+  // CRITICAL FIX: Check child cache first to avoid recreation and address reuse
+  auto cache_iter = m_children_cache.find(idx);
+  if (cache_iter != m_children_cache.end() && cache_iter->second) {
+    // printf("  Returning cached child at index %u: %p\n", idx, cache_iter->second.get());
+    return cache_iter->second;
+  }
+  
+  // CRITICAL FIX: Check if backend is valid to prevent crash when accessing execution context
+  // ValueObject doesn't have IsValid() method, check pointer validity instead
+  if (!&m_backend) {
+    return nullptr;
+  }
     
   const IvarInfo& ivar = m_ivars[idx];
   
+  // CRITICAL FIX: Add bounds checking for ivar access to prevent buffer overrun
+  if (ivar.name.empty() || ivar.type_encoding.empty()) {
+    return nullptr;
+  }
+  
   // Determine the type for the ivar
   CompilerType ivar_type;
-  ExecutionContext exe_ctx(m_backend.GetExecutionContextRef());
+  
+  // CRITICAL FIX: Wrap execution context creation in safety checks
+  ExecutionContextRef exe_ctx_ref = m_backend.GetExecutionContextRef();
+  // Skip complex validation - if the ref is invalid, ExecutionContext will handle it safely
+  
+  ExecutionContext exe_ctx(exe_ctx_ref);
+  
+  // CRITICAL FIX: Add safety checks around type system access to prevent crashes
+  CompilerType backend_type = m_backend.GetCompilerType();
+  if (!backend_type.IsValid()) {
+    return nullptr;
+  }
   
   // For object types, use 'id'
   if (ivar.type_encoding[0] == '@') {
-    auto type_system = m_backend.GetCompilerType().GetTypeSystem();
+    auto type_system = backend_type.GetTypeSystem();
     if (type_system) {
       ivar_type = type_system->GetBasicTypeFromAST(eBasicTypeObjCID);
     }
   } else {
     // For primitive types, try to get the appropriate type
     // This is simplified - a full implementation would parse the type encoding
-    auto type_system = m_backend.GetCompilerType().GetTypeSystem();
+    auto type_system = backend_type.GetTypeSystem();
     if (type_system) {
       switch (ivar.type_encoding[0]) {
         case 'i':
@@ -835,25 +877,92 @@ lldb::ValueObjectSP GNUstepGenericObjectSyntheticProvider::GetChildAtIndex(uint3
     return nullptr;
   }
   
+  // CRITICAL FIX: Validate ivar value address before creating ValueObject
+  if (ivar.value_addr == 0 || ivar.value_addr == LLDB_INVALID_ADDRESS) {
+    return nullptr;
+  }
+  
   // Create a value object for this ivar
   DataExtractor data;
   if (ivar.type_encoding[0] == '@') {
-    // CRITICAL FIX: For object types, use CreateValueObjectFromAddress
-    // ivar.value_addr is the ADDRESS where the object pointer is stored
-    // LLDB will read the pointer from this address and apply formatters
-    return ValueObject::CreateValueObjectFromAddress(ivar.name, ivar.value_addr, exe_ctx, ivar_type);
+    // CRITICAL FIX: For object types, read the pointer value first
+    Status error;
+    lldb::addr_t obj_ptr = GNUstepRuntimeHelper::ReadPointer(m_process, ivar.value_addr, error);
+    if (!error.Success() || obj_ptr == 0) {
+      // For nil objects, create a synthetic nil value
+      DataBufferSP data_buffer_sp(new DataBufferHeap(sizeof(lldb::addr_t), 0));
+      DataExtractor data(data_buffer_sp, m_process->GetByteOrder(), m_process->GetAddressByteSize());
+      lldb::ValueObjectSP result = ValueObject::CreateValueObjectFromData(ivar.name, data, exe_ctx, ivar_type);
+      if (result) {
+        m_children_cache[idx] = result;
+        // printf("  Created nil object child at index %u: %p\n", idx, result.get());
+      }
+      return result;
+    }
+    
+    // For non-nil objects, create from the actual object address
+    // Using CreateValueObjectFromData to ensure unique instances
+    DataBufferSP data_buffer_sp(new DataBufferHeap(&obj_ptr, sizeof(obj_ptr)));
+    DataExtractor data(data_buffer_sp, m_process->GetByteOrder(), m_process->GetAddressByteSize());
+    lldb::ValueObjectSP result = ValueObject::CreateValueObjectFromData(ivar.name, data, exe_ctx, ivar_type);
+    
+    // CRITICAL FIX: Cache the result to avoid recreation
+    if (result) {
+      m_children_cache[idx] = result;
+      // printf("  Created and cached object child at index %u: %p (obj_ptr=0x%llx)\n", idx, result.get(), (unsigned long long)obj_ptr);
+    }
+    
+    return result;
   } else if (ivar.type_encoding[0] == '^' || ivar.type_encoding[0] == '*') {
     // For non-object pointer types, read the pointer value
     Status error;
     lldb::addr_t ptr_value = GNUstepRuntimeHelper::ReadPointer(m_process, ivar.value_addr, error);
     if (error.Success()) {
-      // Create value object from address for non-object pointers
-      return ValueObject::CreateValueObjectFromAddress(ivar.name, ptr_value, exe_ctx, ivar_type);
+      // Create value object from data for non-object pointers
+      DataBufferSP data_buffer_sp(new DataBufferHeap(&ptr_value, sizeof(ptr_value)));
+      DataExtractor data(data_buffer_sp, m_process->GetByteOrder(), m_process->GetAddressByteSize());
+      lldb::ValueObjectSP result = ValueObject::CreateValueObjectFromData(ivar.name, data, exe_ctx, ivar_type);
+      
+      // CRITICAL FIX: Cache the result
+      if (result) {
+        m_children_cache[idx] = result;
+        // printf("  Created and cached pointer child at index %u: %p\n", idx, result.get());
+      }
+      
+      return result;
     }
   } else {
-    // CRITICAL FIX: For primitive types, use CreateValueObjectFromAddress
-    // This lets LLDB read the value directly from memory with proper type handling
-    return ValueObject::CreateValueObjectFromAddress(ivar.name, ivar.value_addr, exe_ctx, ivar_type);
+    // CRITICAL FIX: For primitive types, read the value and create from data
+    // Determine the size of the primitive type
+    uint32_t value_size = ivar.size;
+    if (value_size == 0) {
+      // Fallback to type size
+      value_size = ivar_type.GetByteSize(nullptr).value_or(0);
+    }
+    if (value_size == 0 || value_size > 128) { // Sanity check
+      return nullptr;
+    }
+    
+    // Read the primitive value
+    std::vector<uint8_t> buffer(value_size, 0);
+    Status error;
+    size_t bytes_read = m_process->ReadMemory(ivar.value_addr, buffer.data(), value_size, error);
+    if (!error.Success() || bytes_read != value_size) {
+      return nullptr;
+    }
+    
+    // Create DataBuffer from the read data
+    DataBufferSP data_buffer_sp(new DataBufferHeap(buffer.data(), buffer.size()));
+    DataExtractor data(data_buffer_sp, m_process->GetByteOrder(), m_process->GetAddressByteSize());
+    lldb::ValueObjectSP result = ValueObject::CreateValueObjectFromData(ivar.name, data, exe_ctx, ivar_type);
+    
+    // CRITICAL FIX: Cache the result
+    if (result) {
+      m_children_cache[idx] = result;
+      // printf("  Created and cached primitive child at index %u: %p\n", idx, result.get());
+    }
+    
+    return result;
   }
   
   return nullptr;

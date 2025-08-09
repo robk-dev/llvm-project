@@ -18,7 +18,13 @@
 #include "GNUstepErrorFormatters.h"
 #include "GNUstepDataFormatters.h"
 #include "GNUstepUUIDFormatters.h"
+#include "GNUstepNullFormatter.h"
+#include "GNUstepExceptionFormatter.h"
+#include "GNUstepAttributedStringFormatter.h"
+#include "GNUstepIndexPathFormatter.h"
+#include "GNUstepNotificationFormatter.h"
 #include "GNUstepGenericFormatter.h"
+#include "GNUstepNoOpSyntheticProvider.h"
 #include "lldb/DataFormatters/DataVisualization.h"
 #include "lldb/DataFormatters/TypeCategory.h"
 #include "lldb/DataFormatters/TypeSummary.h"
@@ -80,7 +86,7 @@ void GNUstepFormattersRegistry::RegisterStringFormatters(TypeCategoryImpl &categ
       string_flags, GNUstepIdDispatcherFunction, "GNUstep id dispatcher");
   category.AddTypeSummary("id", eFormatterMatchExact, id_summary);
   
-  // Also register synthetic children provider for id
+  // Only register synthetic children provider for id type here
   SyntheticChildren::Flags id_synth_flags;
   id_synth_flags.SetCascades(true)
                 .SetSkipPointers(false)
@@ -93,18 +99,8 @@ void GNUstepFormattersRegistry::RegisterStringFormatters(TypeCategoryImpl &categ
       
   category.AddTypeSynthetic("id", eFormatterMatchExact, id_synth);
   
-  // Register generic synthetic provider for all Objective-C classes
-  // This will filter out the isa pointer for any ObjC object
-  auto generic_synth = std::make_shared<CXXSyntheticChildren>(
-      id_synth_flags, "Generic ObjC synthetic children", 
-      GNUstepIdSyntheticFrontEndCreator);
-  
-  // Match any class that starts with a capital letter (typical ObjC pattern)
-  // This includes NSObject, TestClass, etc.
-  category.AddTypeSynthetic("^[A-Z][A-Za-z0-9_]+$", eFormatterMatchRegex, generic_synth);
-  
-  // Also register for pointer types (with or without space before *)
-  category.AddTypeSynthetic("^[A-Z][A-Za-z0-9_]+\\s*\\*$", eFormatterMatchRegex, generic_synth);
+  // NOTE: Generic synthetic providers moved to RegisterGenericFormatter()
+  // to ensure they don't override specific formatters
   
 }
 
@@ -332,11 +328,19 @@ void GNUstepFormattersRegistry::RegisterFoundationFormatters(TypeCategoryImpl &c
   // Enable NSDate formatter - it's implemented
   RegisterDateFormatters(category);
   
-  // TODO: Uncomment when these formatters are implemented
-  // RegisterURLFormatters(category);
-  // RegisterErrorFormatters(category);
-  // RegisterDataFormatters(category);
-  // RegisterUUIDFormatters(category);
+  // Enable additional Foundation formatters - all are implemented and ready
+  RegisterURLFormatters(category);
+  RegisterErrorFormatters(category);
+  RegisterDataFormatters(category);
+  RegisterUUIDFormatters(category);
+  
+  // Register new high-priority Foundation formatters
+  RegisterNullFormatter(category);
+  RegisterExceptionFormatter(category);
+  RegisterAttributedStringFormatter(category);
+  // DISABLED: These cause infinite recursion/crashes
+  // RegisterIndexPathFormatter(category);
+  // RegisterNotificationFormatter(category);
 }
 
 void GNUstepFormattersRegistry::RegisterDateFormatters(TypeCategoryImpl &category) {
@@ -490,4 +494,213 @@ void GNUstepFormattersRegistry::RegisterGenericFormatter(TypeCategoryImpl &categ
   // Also register for common base class patterns
   category.AddTypeSummary("NSObject *", eFormatterMatchExact, generic_summary);
   
+  // CRITICAL FIX: Register generic synthetic provider HERE (last) to avoid overriding specific formatters
+  SyntheticChildren::Flags generic_synth_flags;
+  generic_synth_flags.SetCascades(true)
+                     .SetSkipPointers(false)
+                     .SetSkipReferences(false)
+                     .SetNonCacheable(true);  // IMPORTANT: Non-cacheable to prevent cross-contamination
+                     
+  auto generic_synth = std::make_shared<CXXSyntheticChildren>(
+      generic_synth_flags, "Generic ObjC synthetic children", 
+      GNUstepGenericObjectSyntheticFrontEndCreator);  // Use the actual generic provider, not ID dispatcher
+  
+  // Match any class that starts with a capital letter (typical ObjC pattern)
+  // This includes NSObject, TestClass, etc. - but will be overridden by specific formatters
+  category.AddTypeSynthetic("^[A-Z][A-Za-z0-9_]+$", eFormatterMatchRegex, generic_synth);
+  
+  // Also register for pointer types (with or without space before *)
+  category.AddTypeSynthetic("^[A-Z][A-Za-z0-9_]+\\s*\\*$", eFormatterMatchRegex, generic_synth);
+  
+}
+
+void GNUstepFormattersRegistry::RegisterNullFormatter(TypeCategoryImpl &category) {
+  // Register NSNull summary provider
+  TypeSummaryImpl::Flags null_flags;
+  null_flags.SetCascades(true)
+            .SetSkipPointers(false)
+            .SetSkipReferences(false)
+            .SetDontShowChildren(true)
+            .SetDontShowValue(true)
+            .SetShowMembersOneLiner(false)
+            .SetHideItemNames(true);
+
+  // Create the summary provider
+  auto null_summary = std::make_shared<CXXFunctionSummaryFormat>(
+      null_flags, GNUstepNSNullFormatterFunction, "NSNull summary provider");
+
+  // Register for NSNull
+  category.AddTypeSummary("NSNull", eFormatterMatchExact, null_summary);
+  category.AddTypeSummary("NSNull *", eFormatterMatchExact, null_summary);
+  
+  // Create NoOp synthetic provider for safe disabling
+  SyntheticChildren::Flags noop_synth_flags;
+  noop_synth_flags.SetCascades(true)
+                  .SetSkipPointers(false)
+                  .SetSkipReferences(false)
+                  .SetNonCacheable(true);
+                  
+  auto noop_synth = std::make_shared<CXXSyntheticChildren>(
+      noop_synth_flags, "NoOp synthetic children", 
+      GNUstepNoOpSyntheticFrontEndCreator);
+  
+  // Disable synthetic children for NSNull (it's a singleton with no meaningful children)
+  category.AddTypeSynthetic("NSNull", eFormatterMatchExact, noop_synth);
+  category.AddTypeSynthetic("NSNull *", eFormatterMatchExact, noop_synth);
+}
+
+void GNUstepFormattersRegistry::RegisterExceptionFormatter(TypeCategoryImpl &category) {
+  // Create NoOp synthetic provider for safe disabling
+  SyntheticChildren::Flags noop_synth_flags;
+  noop_synth_flags.SetCascades(true)
+                  .SetSkipPointers(false)
+                  .SetSkipReferences(false)
+                  .SetNonCacheable(true);
+                  
+  auto noop_synth = std::make_shared<CXXSyntheticChildren>(
+      noop_synth_flags, "NoOp synthetic children", 
+      GNUstepNoOpSyntheticFrontEndCreator);
+  
+  // Register NSException summary provider
+  TypeSummaryImpl::Flags exception_flags;
+  exception_flags.SetCascades(true)
+                 .SetSkipPointers(false)
+                 .SetSkipReferences(false)
+                 .SetDontShowChildren(false)  // Show children for debugging
+                 .SetDontShowValue(true)
+                 .SetShowMembersOneLiner(false)
+                 .SetHideItemNames(false);
+
+  // Create the summary provider
+  auto exception_summary = std::make_shared<CXXFunctionSummaryFormat>(
+      exception_flags, GNUstepNSExceptionFormatterFunction, "NSException summary provider");
+
+  // Register for NSException
+  category.AddTypeSummary("NSException", eFormatterMatchExact, exception_summary);
+  category.AddTypeSummary("NSException *", eFormatterMatchExact, exception_summary);
+  category.AddTypeSummary("GSException", eFormatterMatchExact, exception_summary);
+  category.AddTypeSummary("GSException *", eFormatterMatchExact, exception_summary);
+  
+  // Disable synthetic children for NSException to prevent recursion
+  category.AddTypeSynthetic("NSException", eFormatterMatchExact, noop_synth);
+  category.AddTypeSynthetic("NSException *", eFormatterMatchExact, noop_synth);
+}
+
+void GNUstepFormattersRegistry::RegisterAttributedStringFormatter(TypeCategoryImpl &category) {
+  // Create NoOp synthetic provider for safe disabling
+  SyntheticChildren::Flags noop_synth_flags;
+  noop_synth_flags.SetCascades(true)
+                  .SetSkipPointers(false)
+                  .SetSkipReferences(false)
+                  .SetNonCacheable(true);
+                  
+  auto noop_synth = std::make_shared<CXXSyntheticChildren>(
+      noop_synth_flags, "NoOp synthetic children", 
+      GNUstepNoOpSyntheticFrontEndCreator);
+  
+  // Register NSAttributedString summary provider
+  TypeSummaryImpl::Flags attrstring_flags;
+  attrstring_flags.SetCascades(true)
+                  .SetSkipPointers(false)
+                  .SetSkipReferences(false)
+                  .SetDontShowChildren(false)
+                  .SetDontShowValue(true)
+                  .SetShowMembersOneLiner(false)
+                  .SetHideItemNames(false);
+
+  // Create the summary provider
+  auto attrstring_summary = std::make_shared<CXXFunctionSummaryFormat>(
+      attrstring_flags, GNUstepNSAttributedStringFormatterFunction, "NSAttributedString summary provider");
+
+  // Register for NSAttributedString
+  category.AddTypeSummary("NSAttributedString", eFormatterMatchExact, attrstring_summary);
+  category.AddTypeSummary("NSAttributedString *", eFormatterMatchExact, attrstring_summary);
+  category.AddTypeSummary("NSMutableAttributedString", eFormatterMatchExact, attrstring_summary);
+  category.AddTypeSummary("NSMutableAttributedString *", eFormatterMatchExact, attrstring_summary);
+  category.AddTypeSummary("GSAttributedString", eFormatterMatchExact, attrstring_summary);
+  category.AddTypeSummary("GSAttributedString *", eFormatterMatchExact, attrstring_summary);
+  
+  // Disable synthetic children for NSAttributedString to prevent recursion
+  category.AddTypeSynthetic("NSAttributedString", eFormatterMatchExact, noop_synth);
+  category.AddTypeSynthetic("NSAttributedString *", eFormatterMatchExact, noop_synth);
+  category.AddTypeSynthetic("NSMutableAttributedString", eFormatterMatchExact, noop_synth);
+  category.AddTypeSynthetic("NSMutableAttributedString *", eFormatterMatchExact, noop_synth);
+}
+
+void GNUstepFormattersRegistry::RegisterIndexPathFormatter(TypeCategoryImpl &category) {
+  // Create NoOp synthetic provider for safe disabling
+  SyntheticChildren::Flags noop_synth_flags;
+  noop_synth_flags.SetCascades(true)
+                  .SetSkipPointers(false)
+                  .SetSkipReferences(false)
+                  .SetNonCacheable(true);
+                  
+  auto noop_synth = std::make_shared<CXXSyntheticChildren>(
+      noop_synth_flags, "NoOp synthetic children", 
+      GNUstepNoOpSyntheticFrontEndCreator);
+  
+  // Register NSIndexPath summary provider
+  TypeSummaryImpl::Flags indexpath_flags;
+  indexpath_flags.SetCascades(true)
+                 .SetSkipPointers(false)
+                 .SetSkipReferences(false)
+                 .SetDontShowChildren(true)
+                 .SetDontShowValue(true)
+                 .SetShowMembersOneLiner(false)
+                 .SetHideItemNames(true);
+
+  // Create the summary provider
+  auto indexpath_summary = std::make_shared<CXXFunctionSummaryFormat>(
+      indexpath_flags, GNUstepNSIndexPathFormatterFunction, "NSIndexPath summary provider");
+
+  // Register for NSIndexPath
+  category.AddTypeSummary("NSIndexPath", eFormatterMatchExact, indexpath_summary);
+  category.AddTypeSummary("NSIndexPath *", eFormatterMatchExact, indexpath_summary);
+  category.AddTypeSummary("GSIndexPath", eFormatterMatchExact, indexpath_summary);
+  category.AddTypeSummary("GSIndexPath *", eFormatterMatchExact, indexpath_summary);
+  
+  // Disable synthetic children for NSIndexPath to prevent recursion
+  category.AddTypeSynthetic("NSIndexPath", eFormatterMatchExact, noop_synth);
+  category.AddTypeSynthetic("NSIndexPath *", eFormatterMatchExact, noop_synth);
+  category.AddTypeSynthetic("GSIndexPath", eFormatterMatchExact, noop_synth);
+  category.AddTypeSynthetic("GSIndexPath *", eFormatterMatchExact, noop_synth);
+}
+
+void GNUstepFormattersRegistry::RegisterNotificationFormatter(TypeCategoryImpl &category) {
+  // Create NoOp synthetic provider for safe disabling
+  SyntheticChildren::Flags noop_synth_flags;
+  noop_synth_flags.SetCascades(true)
+                  .SetSkipPointers(false)
+                  .SetSkipReferences(false)
+                  .SetNonCacheable(true);
+                  
+  auto noop_synth = std::make_shared<CXXSyntheticChildren>(
+      noop_synth_flags, "NoOp synthetic children", 
+      GNUstepNoOpSyntheticFrontEndCreator);
+  
+  // Register NSNotification summary provider
+  TypeSummaryImpl::Flags notification_flags;
+  notification_flags.SetCascades(true)
+                    .SetSkipPointers(false)
+                    .SetSkipReferences(false)
+                    .SetDontShowChildren(false)
+                    .SetDontShowValue(true)
+                    .SetShowMembersOneLiner(false)
+                    .SetHideItemNames(false);
+
+  // Create the summary provider
+  auto notification_summary = std::make_shared<CXXFunctionSummaryFormat>(
+      notification_flags, GNUstepNSNotificationFormatterFunction, "NSNotification summary provider");
+
+  // Register for NSNotification
+  category.AddTypeSummary("NSNotification", eFormatterMatchExact, notification_summary);
+  category.AddTypeSummary("NSNotification *", eFormatterMatchExact, notification_summary);
+  category.AddTypeSummary("GSNotification", eFormatterMatchExact, notification_summary);
+  category.AddTypeSummary("GSNotification *", eFormatterMatchExact, notification_summary);
+  
+  // Disable synthetic children for NSNotification to prevent recursion
+  category.AddTypeSynthetic("NSNotification", eFormatterMatchExact, noop_synth);
+  category.AddTypeSynthetic("NSNotification *", eFormatterMatchExact, noop_synth);
+  category.AddTypeSynthetic("GSNotification", eFormatterMatchExact, noop_synth);
+  category.AddTypeSynthetic("GSNotification *", eFormatterMatchExact, noop_synth);
 }
