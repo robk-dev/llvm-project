@@ -29,6 +29,7 @@
 #include "lldb/Utility/StreamString.h"
 #include <cstdio>
 #include <cstring>
+#include <sstream>
 
 using namespace lldb;
 using namespace lldb_private;
@@ -469,9 +470,11 @@ std::string GNUstepNSArraySummaryProvider::TryExtractStringContent(Process *proc
       return "<tagged_string>";
     }
     
-    // Check if it's a tagged number
-    if (tag == 2) {
-      return "<tagged_number>";
+    // Check if it's a tagged number - return empty to let GetElementSummary handle it properly
+    if (tag == 2 || tag == 3 || tag == 5 || tag == 1) {
+      // Don't handle tagged numbers here - let GetElementSummary handle them
+      // This function is specifically for string content extraction
+      return "";
     }
     
     // Not a string tagged pointer
@@ -930,8 +933,21 @@ bool formatters::GNUstepNSArrayFormatterFunction(ValueObject &valobj, Stream &st
   return provider.FormatObject(valobj, stream, options);
 }
 
+// Compatibility function for ObjC language plugin
+bool formatters::GNUstepArraySummaryProvider(ValueObject &valobj, Stream &stream,
+                                            const TypeSummaryOptions &options) {
+  return GNUstepNSArrayFormatterFunction(valobj, stream, options);
+}
+
 SyntheticChildrenFrontEnd *
 formatters::GNUstepNSArraySyntheticFrontEndCreator(CXXSyntheticChildren *synth,
                                                    lldb::ValueObjectSP valobj_sp) {
   return new GNUstepNSArraySyntheticProvider(valobj_sp);
+}
+
+// Compatibility function for ObjC language plugin
+SyntheticChildrenFrontEnd *
+formatters::GNUstepArraySyntheticFrontEndCreator(CXXSyntheticChildren *synth,
+                                                lldb::ValueObjectSP valobj_sp) {
+  return GNUstepNSArraySyntheticFrontEndCreator(synth, valobj_sp);
 }

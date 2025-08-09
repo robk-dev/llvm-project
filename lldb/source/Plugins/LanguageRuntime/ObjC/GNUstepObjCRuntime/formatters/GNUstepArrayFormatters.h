@@ -88,6 +88,14 @@ SyntheticChildrenFrontEnd *
 GNUstepNSArraySyntheticFrontEndCreator(CXXSyntheticChildren *synth,
                                        lldb::ValueObjectSP valobj_sp);
 
+// Compatibility functions for ObjC language plugin
+bool GNUstepArraySummaryProvider(ValueObject &valobj, Stream &stream,
+                                const TypeSummaryOptions &options);
+
+SyntheticChildrenFrontEnd *
+GNUstepArraySyntheticFrontEndCreator(CXXSyntheticChildren *synth,
+                                   lldb::ValueObjectSP valobj_sp);
+
 } // namespace formatters
 } // namespace lldb_private
 

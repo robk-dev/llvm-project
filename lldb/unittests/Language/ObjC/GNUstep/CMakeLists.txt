@@ -1,7 +1,11 @@
 add_lldb_unittest(LanguageObjCGNUstepTests
-  GNUstepIntrospectorTest.cpp
   GNUstepFormattersTest.cpp
   GNUstepTaggedPointerTest.cpp
+  GNUstepIntrospectorTest.cpp
+  GNUstepRuntimeTest.cpp
+  GNUstepRuntimeAPITest.cpp
+  GNUstepDeclVendorTest.cpp
+  GNUstepIntegrationTest.cpp
 
   LINK_LIBS
     lldbPluginGNUstepObjCRuntime
@@ -10,4 +14,6 @@ add_lldb_unittest(LanguageObjCGNUstepTests
     lldbUtility
     lldbCore
     lldbDataFormatters
+    lldbSymbol
+    lldbHost
 )

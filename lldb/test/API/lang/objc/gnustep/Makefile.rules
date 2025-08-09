@@ -1,0 +1,21 @@
+# Include the standard LLDB test makefile rules
+# This file provides common build rules for LLDB API tests
+
+# If Makefile.rules doesn't exist in parent directories, provide minimal rules
+LEVEL ?= ../../../../make
+
+# Default build settings
+CC ?= clang
+CXX ?= clang++
+OBJC ?= clang
+
+# Build rules
+all: a.out
+
+a.out: $(OBJC_SOURCES)
+	$(OBJC) $(CFLAGS_EXTRAS) $(LD_EXTRAS) -o $@ $^
+
+clean:
+	rm -f a.out *.o
+
+.PHONY: all clean

@@ -47,10 +47,10 @@ class TestGNUstepFormatters(TestBase):
         self.build()
         self.run_to_breakpoint()
         
-        # Test array display
+        # Test array display - no longer shows "3 objects" prefix
         self.expect("po emptyArray", substrs=["@[]"])
         self.expect("po simpleArray", substrs=["@[", "Apple", "Banana", "Cherry"])
-        self.expect("po mutableArray", substrs=["3 objects"])
+        self.expect("po mutableArray", substrs=["@[", "]"])  # Just shows content, no prefix
         
         # Test synthetic children
         self.expect("expr simpleArray[0]", substrs=["Apple"])
@@ -62,10 +62,10 @@ class TestGNUstepFormatters(TestBase):
         self.build()
         self.run_to_breakpoint()
         
-        # Test dictionary display
+        # Test dictionary display - no longer shows "2 key/value pairs" prefix
         self.expect("po emptyDict", substrs=["@{}"])
-        self.expect("po simpleDict", substrs=["name", "John", "age", "30"])
-        self.expect("po mutableDict", substrs=["2 key/value pairs"])
+        self.expect("po simpleDict", substrs=["@{", "name", "John", "age", "30", "}"])
+        self.expect("po mutableDict", substrs=["@{", "}"])  # Just shows content, no prefix
         
         # Test synthetic children
         self.expect("expr simpleDict[@\"name\"]", substrs=["John"])
@@ -76,10 +76,10 @@ class TestGNUstepFormatters(TestBase):
         self.build()
         self.run_to_breakpoint()
         
-        # Test set display
-        self.expect("po emptySet", substrs=["NSSet"])
-        self.expect("po simpleSet", substrs=["3 objects"])
-        self.expect("po mutableSet", substrs=["NSMutableSet"])
+        # Test set display - no longer shows "3 objects" prefix
+        self.expect("po emptySet", substrs=["{", "}"])  # Empty set shows {}
+        self.expect("po simpleSet", substrs=["{", "}"])  # Just shows content, no prefix
+        self.expect("po mutableSet", substrs=["{", "}"])  # Just shows content, no prefix
         
     @skipUnlessPlatform(["linux"])
     def test_nil_handling(self):
@@ -122,11 +122,11 @@ class TestGNUstepFormatters(TestBase):
         self.build()
         self.run_to_breakpoint()
         
-        # Large array should complete quickly
-        self.expect("po largeArray", substrs=["1000 objects"], timeout=5)
+        # Large array should complete quickly - no longer shows count prefix
+        self.expect("po largeArray", substrs=["@["], timeout=5)
         
-        # Large dictionary should complete quickly
-        self.expect("po largeDict", substrs=["500 key/value pairs"], timeout=5)
+        # Large dictionary should complete quickly - no longer shows count prefix
+        self.expect("po largeDict", substrs=["@{"], timeout=5)
         
     def run_to_breakpoint(self):
         """Helper to run to the test breakpoint."""

@@ -18,6 +18,13 @@ class GNUstepNSIndexPathSummaryProvider : public GNUstepSummaryProvider {
 public:
   bool FormatObject(ValueObject &valobj, Stream &stream, 
                    const TypeSummaryOptions &options) override;
+
+private:
+  // Format the index path as a clean "1.2.3" string
+  std::string FormatIndexPath(ValueObject &valobj);
+  
+  // Read indexes from memory and format them
+  std::string ReadIndexesFromMemory(lldb::addr_t indexes_ptr, uint64_t length, Process *process);
 };
 
 // Function entry point for LLDB's formatting system

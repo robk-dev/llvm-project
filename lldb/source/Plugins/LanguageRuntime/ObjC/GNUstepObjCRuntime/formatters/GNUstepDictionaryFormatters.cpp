@@ -26,6 +26,8 @@
 #include "lldb/Utility/Status.h"
 #include "lldb/Utility/Stream.h"
 
+#include <sstream>
+
 // GNUstep small object (tagged pointer) detection
 // On 64-bit systems, the low 3 bits are used
 #define GNUSTEP_SMALL_OBJECT_MASK 7
@@ -629,9 +631,11 @@ std::string GNUstepNSDictionarySummaryProvider::TryExtractStringContent(Process 
       return "<tagged_string>";
     }
     
-    // Check if it's a tagged number
-    if (tag == 2) {
-      return "<tagged_number>";
+    // Check if it's a tagged number - return empty to let proper number handling take over
+    if (tag == 2 || tag == 3 || tag == 5 || tag == 1) {
+      // Don't handle tagged numbers here - let the proper number formatter handle them
+      // This function is specifically for string content extraction
+      return "";
     }
     
     // Not a string tagged pointer

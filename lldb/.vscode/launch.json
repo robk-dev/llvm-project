@@ -1,0 +1,318 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        // ============================================
+        // EXISTING CONFIGURATIONS
+        // ============================================
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "🚀 Bridge v2 - Modular Debug",
+            "program": "${workspaceFolder}/examples/custom_class_test_custom",
+            "args": [],
+            "cwd": "${workspaceFolder}",
+            "preLaunchTask": "build-custom-class-test-with-custom-gnustep",
+            "initCommands": [
+                "log enable lldb formatters",
+                // "settings set target.language objc",
+                // "type category enable gnustep/libobjc2",
+                "settings set target.process.stop-on-sharedlibrary-events false",
+                "settings set target.prefer-dynamic-value no-dynamic-values"
+            ],
+            "env": {
+                "LD_LIBRARY_PATH": "${workspaceFolder}/gnustep-install/lib:/usr/local/lib:/home/robk/code/llvm-project/build/lib",
+                "PATH": "/home/robk/code/llvm-project/build/bin:${workspaceFolder}/gnustep-install/bin:${env:PATH}"
+            }
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "🔍 Debug with Full Logging",
+            "program": "${workspaceFolder}/examples/custom_class_test",
+            "args": [],
+            "cwd": "${workspaceFolder}",
+            "preLaunchTask": "build-custom-class-test",
+            "initCommands": [
+                "log enable -f ${workspaceFolder}/lldb_full.log -v lldb all",
+                "log enable -f ${workspaceFolder}/lldb_language.log -v lldb language",
+                "log enable -f ${workspaceFolder}/lldb_types.log lldb types",
+                "log enable -f ${workspaceFolder}/lldb_formatters.log lldb formatters",
+                "settings set target.process.stop-on-sharedlibrary-events false",
+                "script print('🔍 Full LLDB logging enabled to files:')",
+                "script print('   - lldb_full.log (all categories)')",
+                "script print('   - lldb_language.log (language runtime)')",
+                "script print('   - lldb_types.log (type system)')",
+                "script print('   - lldb_formatters.log (data formatters)')"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src:${env:PYTHONPATH}",
+                "LD_LIBRARY_PATH": "/home/robk/code/llvm-project/build/lib",
+                "OBJC_DEBUG_LOG": "1",
+                "GNUSTEP_MAKEFILES": "/usr/local/share/GNUstep/Makefiles",
+                "PATH": "/home/robk/code/llvm-project/build/bin:${env:PATH}"
+            }
+        },
+        // ============================================
+        // FOUNDATION FORMATTER TESTS
+        // ============================================
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "📚 Test All Foundation Formatters",
+            "program": "${workspaceFolder}/examples/foundation_test_simple",
+            "args": [],
+            "cwd": "${workspaceFolder}/examples",
+            "preLaunchTask": "build-foundation-tests",
+            "initCommands": [
+                // "log enable lldb formatters",
+                "settings set target.language objc",
+                "b main",
+                "settings set target.process.stop-on-sharedlibrary-events false",
+                "settings set target.prefer-dynamic-value no-dynamic-values"
+            ],
+            "env": {
+                "LD_LIBRARY_PATH": "/usr/local/lib:/home/robk/code/llvm-project/build/lib",
+                "PATH": "/home/robk/code/llvm-project/build/bin:${env:PATH}"
+            }
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "🔤 Test NSString Formatters",
+            "program": "${workspaceFolder}/examples/string_test",
+            "args": [],
+            "cwd": "${workspaceFolder}/examples",
+            "preLaunchTask": "build-string-tests",
+            "env": {
+                "LD_LIBRARY_PATH": "/usr/local/lib:/home/robk/code/llvm-project/build/lib",
+                "PATH": "/home/robk/code/llvm-project/build/bin:${env:PATH}"
+            }
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "🔢 Test NSNumber Formatters",
+            "program": "${workspaceFolder}/examples/test_nsnumber_comprehensive",
+            "args": [],
+            "cwd": "${workspaceFolder}/examples",
+            "preLaunchTask": "build-number-tests",
+            "env": {
+                "LD_LIBRARY_PATH": "/usr/local/lib:/home/robk/code/llvm-project/build/lib",
+                "PATH": "/home/robk/code/llvm-project/build/bin:${env:PATH}"
+            }
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "📊 Test Collection Formatters",
+            "program": "${workspaceFolder}/examples/test_collections_formatter",
+            "args": [],
+            "cwd": "${workspaceFolder}/examples",
+            "preLaunchTask": "build-collection-tests",
+            "env": {
+                "LD_LIBRARY_PATH": "/usr/local/lib:/home/robk/code/llvm-project/build/lib",
+                "PATH": "/home/robk/code/llvm-project/build/bin:${env:PATH}"
+            }
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "📅 Test NSDate Formatter",
+            "program": "${workspaceFolder}/examples/test_date",
+            "args": [],
+            "cwd": "${workspaceFolder}/examples",
+            "preLaunchTask": "build-date-test",
+            "env": {
+                "LD_LIBRARY_PATH": "/usr/local/lib:/home/robk/code/llvm-project/build/lib",
+                "PATH": "/home/robk/code/llvm-project/build/bin:${env:PATH}"
+            }
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "🔗 Test NSURL Formatter",
+            "program": "${workspaceFolder}/examples/test_url",
+            "args": [],
+            "cwd": "${workspaceFolder}/examples",
+            "preLaunchTask": "build-url-test",
+            "env": {
+                "LD_LIBRARY_PATH": "/usr/local/lib:/home/robk/code/llvm-project/build/lib",
+                "PATH": "/home/robk/code/llvm-project/build/bin:${env:PATH}"
+            }
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "❌ Test NSError Formatter",
+            "program": "${workspaceFolder}/examples/error_test",
+            "args": [],
+            "cwd": "${workspaceFolder}/examples",
+            "preLaunchTask": "build-error-test",
+            "env": {
+                "LD_LIBRARY_PATH": "/usr/local/lib:/home/robk/code/llvm-project/build/lib",
+                "PATH": "/home/robk/code/llvm-project/build/bin:${env:PATH}"
+            }
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "📦 Test NSData Formatter",
+            "program": "${workspaceFolder}/examples/test_data",
+            "args": [],
+            "cwd": "${workspaceFolder}/examples",
+            "preLaunchTask": "build-data-test",
+            "env": {
+                "LD_LIBRARY_PATH": "/usr/local/lib:/home/robk/code/llvm-project/build/lib",
+                "PATH": "/home/robk/code/llvm-project/build/bin:${env:PATH}"
+            }
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "🆔 Test NSUUID Formatter",
+            "program": "${workspaceFolder}/examples/test_uuid",
+            "args": [],
+            "cwd": "${workspaceFolder}/examples",
+            "preLaunchTask": "build-uuid-test",
+            "env": {
+                "LD_LIBRARY_PATH": "/usr/local/lib:/home/robk/code/llvm-project/build/lib",
+                "PATH": "/home/robk/code/llvm-project/build/bin:${env:PATH}"
+            }
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "🔢 Test NSIndexSet Formatter",
+            "program": "${workspaceFolder}/examples/test_indexset",
+            "args": [],
+            "cwd": "${workspaceFolder}/examples",
+            "preLaunchTask": "build-indexset-test",
+            "env": {
+                "LD_LIBRARY_PATH": "/usr/local/lib:/home/robk/code/llvm-project/build/lib",
+                "PATH": "/home/robk/code/llvm-project/build/bin:${env:PATH}"
+            }
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "📝 Test NSCharacterSet Formatter",
+            "program": "${workspaceFolder}/examples/test_characterset",
+            "args": [],
+            "cwd": "${workspaceFolder}/examples",
+            "preLaunchTask": "build-characterset-test",
+            "env": {
+                "LD_LIBRARY_PATH": "/usr/local/lib:/home/robk/code/llvm-project/build/lib",
+                "PATH": "/home/robk/code/llvm-project/build/bin:${env:PATH}"
+            }
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "💠 Test NSDecimalNumber Formatter",
+            "program": "${workspaceFolder}/examples/test_decimalnumber",
+            "args": [],
+            "cwd": "${workspaceFolder}/examples",
+            "preLaunchTask": "build-decimalnumber-test",
+            "env": {
+                "LD_LIBRARY_PATH": "/usr/local/lib:/home/robk/code/llvm-project/build/lib",
+                "PATH": "/home/robk/code/llvm-project/build/bin:${env:PATH}"
+            }
+        },
+        // ============================================
+        // SYNTHETIC CHILDREN TESTS
+        // ============================================
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "🧩 Test Synthetic Children",
+            "program": "${workspaceFolder}/examples/test_synthetic_children",
+            "args": [],
+            "cwd": "${workspaceFolder}/examples",
+            "preLaunchTask": "build-synthetic-tests",
+            "env": {
+                "LD_LIBRARY_PATH": "/usr/local/lib:/home/robk/code/llvm-project/build/lib",
+                "PATH": "/home/robk/code/llvm-project/build/bin:${env:PATH}"
+            }
+        },
+        // ============================================
+        // CUSTOM CLASS TESTS
+        // ============================================
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "🏦 Test BankAccount Custom Class",
+            "program": "${workspaceFolder}/examples/custom_class_test",
+            "args": [],
+            "cwd": "${workspaceFolder}/examples",
+            "preLaunchTask": "build-custom-class-test",
+            "env": {
+                "LD_LIBRARY_PATH": "/usr/local/lib:/home/robk/code/llvm-project/build/lib",
+                "PATH": "/home/robk/code/llvm-project/build/bin:${env:PATH}"
+            }
+        },
+        // ============================================
+        // UNIT TEST SUITE
+        // ============================================
+        {
+            "type": "cppdbg",
+            "request": "launch",
+            "name": "🧪 Run Unit Tests",
+            "program": "${workspaceFolder}/../build/tools/lldb/unittests/Language/ObjC/GNUstep/LanguageObjCGNUstepTests",
+            "args": [
+                "--gtest_brief=1"
+            ],
+            "cwd": "${workspaceFolder}/../build",
+            "preLaunchTask": "build-unit-tests",
+            "MIMode": "gdb",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ]
+        },
+        // ============================================
+        // INTEGRATION TESTS
+        // ============================================
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "🔄 Integration Test Suite",
+            "program": "${workspaceFolder}/examples/formatter_integration_test",
+            "args": [],
+            "cwd": "${workspaceFolder}/examples",
+            "preLaunchTask": "build-integration-tests",
+            "env": {
+                "LD_LIBRARY_PATH": "/usr/local/lib:/home/robk/code/llvm-project/build/lib",
+                "PATH": "/home/robk/code/llvm-project/build/bin:${env:PATH}"
+            }
+        },
+        // ============================================
+        // DEBUGGING HELPERS
+        // ============================================
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "🐛 Debug Current Test File",
+            "program": "${workspaceFolder}/examples/${fileBasenameNoExtension}",
+            "args": [],
+            "cwd": "${workspaceFolder}/examples",
+            "preLaunchTask": "build-current-test",
+            "env": {
+                "LD_LIBRARY_PATH": "/usr/local/lib:/home/robk/code/llvm-project/build/lib",
+                "PATH": "/home/robk/code/llvm-project/build/bin:${env:PATH}"
+            }
+        },
+        {
+            "type": "lldb",
+            "request": "attach",
+            "name": "📎 Attach to Process",
+            "pid": "${command:pickProcess}",
+            "env": {
+                "LD_LIBRARY_PATH": "/usr/local/lib:/home/robk/code/llvm-project/build/lib",
+                "PATH": "/home/robk/code/llvm-project/build/bin:${env:PATH}"
+            }
+        }
+    ]
+}

@@ -1,0 +1,68 @@
+{
+    "lldb.library": "/home/robk/code/llvm-project/build/lib/liblldb.so",
+    "lldb.adapterEnv": {
+        "LLDB_DEBUGSERVER_PATH": "/home/robk/code/llvm-project/build/bin/lldb-server",
+        "LD_LIBRARY_PATH": "/home/robk/code/llvm-project/build/lib:/usr/local/lib"
+    },
+    "lldb.verboseLogging": true,
+    "lldb.showDisassembly": "never",
+    "lldb.dereferencePointers": true,
+    "python.formatting.provider": "black",
+    "python.linting.enabled": true,
+    "python.linting.pylintEnabled": false,
+    "python.linting.ruffEnabled": true,
+    "python.testing.pytestEnabled": true,
+    "python.testing.pytestArgs": [
+        "tests/"
+    ],
+    "files.associations": {
+        "*.m": "objective-c",
+        "*.h": "objective-c",
+        "array": "cpp",
+        "string_view": "cpp",
+        "initializer_list": "cpp",
+        "utility": "cpp",
+        "typeinfo": "cpp",
+        "ratio": "cpp",
+        "functional": "cpp",
+        "tuple": "cpp",
+        "type_traits": "cpp",
+        "cmath": "cpp",
+        "chrono": "cpp",
+        "variant": "cpp"
+    },
+    "C_Cpp.default.configurationProvider": "ms-vscode.makefile-tools",
+    "makefile.configureOnOpen": true,
+    "lldb.displayFormat": "auto",
+    "lldb.evaluateForHovers": true,
+    "lldb.commandCompletions": true,
+    "lldb.suppressUpdateNotifications": false,
+    "lldb.evaluationTimeout": 30,
+    "lldb.launch.expressions": "native",
+    "lldb.consoleMode": "commands",
+    "debug.trace": true,
+    "debug.console.wordWrap": false,
+    "debug.internalConsoleOptions": "openOnSessionStart",
+    "terminal.integrated.env.linux": {
+        "GNUSTEP_MAKEFILES": "/usr/share/GNUstep/Makefiles",
+        "OBJC_DEBUG_LOG": "1",
+        "BRIDGE_LOG_LEVEL": "DEBUG"
+    },
+    "terminal.integrated.env.osx": {},
+    "terminal.integrated.env.windows": {},
+    "lldb.reproducer": true,
+    "C_Cpp.default.includePath": [
+        "/usr/local/include/GNUstep",
+        "/usr/include/GNUstep",
+        "/usr/local/include",
+        "/usr/include"
+    ],
+    "C_Cpp.default.defines": [
+        "GNUSTEP",
+        "GNUSTEP_BASE_LIBRARY=1"
+    ],
+    "C_Cpp.default.compilerPath": "/usr/bin/clang",
+    "C_Cpp.default.cStandard": "gnu11",
+    "C_Cpp.default.cppStandard": "gnu++17",
+    "python.defaultInterpreterPath": "/usr/bin/python3"
+}

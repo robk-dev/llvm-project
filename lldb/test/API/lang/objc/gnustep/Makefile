@@ -1,4 +1,4 @@
-OBJC_SOURCES := main.m test_formatter_crash.m
+OBJC_SOURCES := main.m test_formatter_crash.m test_collections.m test_new_formatters.m
 
 # Use GNUstep runtime
 CFLAGS_EXTRAS := -fobjc-runtime=gnustep-2.1 \

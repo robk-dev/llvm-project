@@ -29,6 +29,10 @@ private:
   
   /// Helper to determine the concrete NSNumber subclass
   std::string GetNumberClassName(ValueObject &valobj);
+  
+  /// Format NSDecimalNumber objects (called from FormatObject when detected)
+  bool FormatNSDecimalNumber(ValueObject &valobj, Stream &stream, 
+                             const TypeSummaryOptions &options);
 };
 
 /// Function wrapper for LLDB registration

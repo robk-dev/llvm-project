@@ -25,6 +25,9 @@
 #include "GNUstepNotificationFormatter.h"
 #include "GNUstepGenericFormatter.h"
 #include "GNUstepNoOpSyntheticProvider.h"
+#include "GNUstepIndexSetFormatters.h"
+#include "GNUstepDecimalNumberFormatters.h"
+#include "GNUstepCharacterSetFormatters.h"
 #include "lldb/DataFormatters/DataVisualization.h"
 #include "lldb/DataFormatters/TypeCategory.h"
 #include "lldb/DataFormatters/TypeSummary.h"
@@ -39,6 +42,9 @@ void GNUstepFormattersRegistry::RegisterFormatters(TypeCategoryImpl &category) {
   // Add safety checks to prevent crashes during formatter registration
   // Note: LLDB builds with exceptions disabled, so we use simpler checks
   RegisterStringFormatters(category);
+  
+  // Register Priority 1 Foundation formatters FIRST to ensure precedence over base classes
+  RegisterPriority1Formatters(category);
   
   RegisterNumberFormatters(category);
   
@@ -338,9 +344,14 @@ void GNUstepFormattersRegistry::RegisterFoundationFormatters(TypeCategoryImpl &c
   RegisterNullFormatter(category);
   RegisterExceptionFormatter(category);
   RegisterAttributedStringFormatter(category);
-  // DISABLED: These cause infinite recursion/crashes
-  // RegisterIndexPathFormatter(category);
-  // RegisterNotificationFormatter(category);
+  
+  // Priority 1 Foundation formatters already registered above for precedence
+  
+  // Re-enable IndexPath formatter - issues should be fixed now
+  RegisterIndexPathFormatter(category);
+  
+  // Re-enabled with NoOp synthetic to prevent recursion
+  RegisterNotificationFormatter(category);
 }
 
 void GNUstepFormattersRegistry::RegisterDateFormatters(TypeCategoryImpl &category) {
@@ -703,4 +714,91 @@ void GNUstepFormattersRegistry::RegisterNotificationFormatter(TypeCategoryImpl &
   category.AddTypeSynthetic("NSNotification *", eFormatterMatchExact, noop_synth);
   category.AddTypeSynthetic("GSNotification", eFormatterMatchExact, noop_synth);
   category.AddTypeSynthetic("GSNotification *", eFormatterMatchExact, noop_synth);
+}
+
+void GNUstepFormattersRegistry::RegisterPriority1Formatters(TypeCategoryImpl &category) {
+  // Register the three priority 1 Foundation formatters
+  RegisterIndexSetFormatters(category);
+  RegisterDecimalNumberFormatters(category);
+  RegisterCharacterSetFormatters(category);
+}
+
+void GNUstepFormattersRegistry::RegisterIndexSetFormatters(TypeCategoryImpl &category) {
+  // Register NSIndexSet summary provider
+  TypeSummaryImpl::Flags indexset_flags;
+  indexset_flags.SetCascades(true)
+                .SetSkipPointers(false)
+                .SetSkipReferences(false)
+                .SetDontShowChildren(true)
+                .SetDontShowValue(true)
+                .SetShowMembersOneLiner(false)
+                .SetHideItemNames(true);
+
+  // Create the summary provider
+  auto indexset_summary = std::make_shared<CXXFunctionSummaryFormat>(
+      indexset_flags, GNUstepNSIndexSetFormatterFunction, "NSIndexSet summary provider");
+
+  // Register for various NSIndexSet type names
+  category.AddTypeSummary("NSIndexSet", eFormatterMatchExact, indexset_summary);
+  category.AddTypeSummary("NSMutableIndexSet", eFormatterMatchExact, indexset_summary);
+  category.AddTypeSummary("GSIndexSet", eFormatterMatchExact, indexset_summary);
+  category.AddTypeSummary("GSMutableIndexSet", eFormatterMatchExact, indexset_summary);
+  
+  // Also register with pointer types
+  category.AddTypeSummary("NSIndexSet *", eFormatterMatchExact, indexset_summary);
+  category.AddTypeSummary("NSMutableIndexSet *", eFormatterMatchExact, indexset_summary);
+  category.AddTypeSummary("GSIndexSet *", eFormatterMatchExact, indexset_summary);
+  category.AddTypeSummary("GSMutableIndexSet *", eFormatterMatchExact, indexset_summary);
+}
+
+void GNUstepFormattersRegistry::RegisterDecimalNumberFormatters(TypeCategoryImpl &category) {
+  // Register NSDecimalNumber summary provider
+  TypeSummaryImpl::Flags decimal_flags;
+  decimal_flags.SetCascades(true)
+               .SetSkipPointers(false)
+               .SetSkipReferences(false)
+               .SetDontShowChildren(true)
+               .SetDontShowValue(true)
+               .SetShowMembersOneLiner(false)
+               .SetHideItemNames(true);
+
+  // Create the summary provider
+  auto decimal_summary = std::make_shared<CXXFunctionSummaryFormat>(
+      decimal_flags, GNUstepNSDecimalNumberFormatterFunction, "NSDecimalNumber summary provider");
+
+  // Register for various NSDecimalNumber type names
+  category.AddTypeSummary("NSDecimalNumber", eFormatterMatchExact, decimal_summary);
+  category.AddTypeSummary("GSDecimalNumber", eFormatterMatchExact, decimal_summary);
+  
+  // Also register with pointer types
+  category.AddTypeSummary("NSDecimalNumber *", eFormatterMatchExact, decimal_summary);
+  category.AddTypeSummary("GSDecimalNumber *", eFormatterMatchExact, decimal_summary);
+}
+
+void GNUstepFormattersRegistry::RegisterCharacterSetFormatters(TypeCategoryImpl &category) {
+  // Register NSCharacterSet summary provider
+  TypeSummaryImpl::Flags charset_flags;
+  charset_flags.SetCascades(true)
+               .SetSkipPointers(false)
+               .SetSkipReferences(false)
+               .SetDontShowChildren(true)
+               .SetDontShowValue(true)
+               .SetShowMembersOneLiner(false)
+               .SetHideItemNames(true);
+
+  // Create the summary provider
+  auto charset_summary = std::make_shared<CXXFunctionSummaryFormat>(
+      charset_flags, GNUstepNSCharacterSetFormatterFunction, "NSCharacterSet summary provider");
+
+  // Register for various NSCharacterSet type names
+  category.AddTypeSummary("NSCharacterSet", eFormatterMatchExact, charset_summary);
+  category.AddTypeSummary("NSMutableCharacterSet", eFormatterMatchExact, charset_summary);
+  category.AddTypeSummary("GSCharacterSet", eFormatterMatchExact, charset_summary);
+  category.AddTypeSummary("GSMutableCharacterSet", eFormatterMatchExact, charset_summary);
+  
+  // Also register with pointer types
+  category.AddTypeSummary("NSCharacterSet *", eFormatterMatchExact, charset_summary);
+  category.AddTypeSummary("NSMutableCharacterSet *", eFormatterMatchExact, charset_summary);
+  category.AddTypeSummary("GSCharacterSet *", eFormatterMatchExact, charset_summary);
+  category.AddTypeSummary("GSMutableCharacterSet *", eFormatterMatchExact, charset_summary);
 }

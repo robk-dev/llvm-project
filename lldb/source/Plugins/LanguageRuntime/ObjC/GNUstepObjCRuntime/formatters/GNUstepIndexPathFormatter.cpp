@@ -23,6 +23,12 @@ using namespace lldb_private::formatters;
 bool GNUstepNSIndexPathSummaryProvider::FormatObject(
     ValueObject &valobj, Stream &stream, const TypeSummaryOptions &options) {
   
+  // Use the same validation pattern as other GNUstep formatters
+  if (!GNUstepRuntimeHelper::IsValidGNUstepObject(valobj)) {
+    stream.Printf("invalid object");
+    return false;
+  }
+
   ProcessSP process_sp = valobj.GetProcessSP();
   if (!process_sp)
     return false;
@@ -34,15 +40,34 @@ bool GNUstepNSIndexPathSummaryProvider::FormatObject(
     return true;
   }
   
+  // Extract and format the indexes
+  std::string formatted_path = FormatIndexPath(valobj);
+  if (!formatted_path.empty()) {
+    stream.Printf("%s", formatted_path.c_str());
+  } else {
+    stream.Printf("NSIndexPath");
+  }
+  
+  return true;
+}
+
+std::string GNUstepNSIndexPathSummaryProvider::FormatIndexPath(ValueObject &valobj) {
+  ProcessSP process_sp = valobj.GetProcessSP();
+  if (!process_sp)
+    return "";
+
+  addr_t indexpath_ptr = valobj.GetPointerValue();
+  if (indexpath_ptr == 0 || indexpath_ptr == LLDB_INVALID_ADDRESS)
+    return "";
+  
   // NSIndexPath typically has these ivars:
   // - _indexes (NSUInteger*) - pointer to array of indexes
   // - _length (NSUInteger) - number of indexes
   
-  // Try to find the indexes and length ivars
+  // Try to find the indexes and length ivars first
   ValueObjectSP indexes_sp;
   ValueObjectSP length_sp;
   
-  // First try to get child members directly
   auto num_children_or_error = valobj.GetNumChildren();
   size_t num_children = num_children_or_error ? *num_children_or_error : 0;
   for (size_t i = 0; i < num_children; i++) {
@@ -60,99 +85,69 @@ bool GNUstepNSIndexPathSummaryProvider::FormatObject(
     }
   }
   
-  // If we couldn't find the ivars directly, try via memory layout
-  // NSIndexPath layout typically has indexes at offset 8 and length at offset 16
-  if (!indexes_sp || !length_sp) {
-    uint32_t addr_size = process_sp->GetAddressByteSize();
-    Status error;
-    
-    // Read indexes pointer (typically at offset 8)
-    addr_t indexes_addr = indexpath_ptr + addr_size; // Skip isa
-    addr_t indexes_ptr = GNUstepRuntimeHelper::ReadPointer(process_sp.get(), indexes_addr, error);
-    
-    // Read length (typically at offset 16)
-    addr_t length_addr = indexpath_ptr + (2 * addr_size); // Skip isa and indexes pointer
-    uint64_t length = 0;
-    process_sp->ReadMemory(length_addr, &length, addr_size, error);
-    
-    // Read the indexes if we got valid values
-    if (indexes_ptr && indexes_ptr != LLDB_INVALID_ADDRESS && length > 0 && length < 100) {
-      std::stringstream path_stream;
-      
-      for (uint64_t i = 0; i < length && i < 10; i++) { // Limit to 10 for safety
-        if (i > 0)
-          path_stream << ".";
-          
-        uint64_t index_value = 0;
-        addr_t index_addr = indexes_ptr + (i * addr_size);
-        process_sp->ReadMemory(index_addr, &index_value, addr_size, error);
-        
-        if (error.Success()) {
-          path_stream << index_value;
-        } else {
-          path_stream << "?";
-        }
-      }
-      
-      if (length > 10) {
-        path_stream << "...";
-      }
-      
-      stream.Printf("%s", path_stream.str().c_str());
-      return true;
+  // If we found both ivars via child access, use them
+  if (indexes_sp && length_sp) {
+    uint64_t length = length_sp->GetValueAsUnsigned(0);
+    if (length == 0) {
+      return "(empty)";
     }
     
-    // If we couldn't read the data, just show basic info
-    stream.Printf("NSIndexPath");
-    return true;
-  }
-  
-  // If we found the ivars, try to extract values
-  uint64_t length = 0;
-  if (length_sp) {
-    length = length_sp->GetValueAsUnsigned(0);
-  }
-  
-  if (length == 0) {
-    stream.Printf("(empty)");
-    return true;
-  }
-  
-  // Try to read the indexes
-  if (indexes_sp && length > 0 && length < 100) {
     addr_t indexes_ptr = indexes_sp->GetValueAsUnsigned(0);
     if (indexes_ptr && indexes_ptr != LLDB_INVALID_ADDRESS) {
-      std::stringstream path_stream;
-      uint32_t addr_size = process_sp->GetAddressByteSize();
-      Status error;
-      
-      for (uint64_t i = 0; i < length && i < 10; i++) { // Limit to 10 for safety
-        if (i > 0)
-          path_stream << ".";
-          
-        uint64_t index_value = 0;
-        addr_t index_addr = indexes_ptr + (i * addr_size);
-        process_sp->ReadMemory(index_addr, &index_value, addr_size, error);
-        
-        if (error.Success()) {
-          path_stream << index_value;
-        } else {
-          path_stream << "?";
-        }
-      }
-      
-      if (length > 10) {
-        path_stream << "...";
-      }
-      
-      stream.Printf("%s", path_stream.str().c_str());
-      return true;
+      return ReadIndexesFromMemory(indexes_ptr, length, process_sp.get());
     }
   }
   
-  // Fallback
-  stream.Printf("NSIndexPath[%llu]", (unsigned long long)length);
-  return true;
+  // Fallback: try to read via memory layout
+  // NSIndexPath layout typically has indexes at offset 8 and length at offset 16
+  uint32_t addr_size = process_sp->GetAddressByteSize();
+  Status error;
+  
+  // Read indexes pointer (typically at offset 8)
+  addr_t indexes_addr = indexpath_ptr + addr_size; // Skip isa
+  addr_t indexes_ptr = GNUstepRuntimeHelper::ReadPointer(process_sp.get(), indexes_addr, error);
+  
+  // Read length (typically at offset 16)
+  addr_t length_addr = indexpath_ptr + (2 * addr_size); // Skip isa and indexes pointer
+  uint64_t length = 0;
+  process_sp->ReadMemory(length_addr, &length, addr_size, error);
+  
+  // Read the indexes if we got valid values
+  if (error.Success() && indexes_ptr && indexes_ptr != LLDB_INVALID_ADDRESS && length > 0 && length < 100) {
+    return ReadIndexesFromMemory(indexes_ptr, length, process_sp.get());
+  }
+  
+  return "";
+}
+
+std::string GNUstepNSIndexPathSummaryProvider::ReadIndexesFromMemory(addr_t indexes_ptr, uint64_t length, Process *process) {
+  if (!process || length == 0 || length > 100)  // Sanity check
+    return "";
+    
+  std::stringstream path_stream;
+  uint32_t addr_size = process->GetAddressByteSize();
+  Status error;
+  
+  for (uint64_t i = 0; i < length && i < 10; i++) { // Limit to 10 for safety
+    if (i > 0)
+      path_stream << ".";
+      
+    uint64_t index_value = 0;
+    addr_t index_addr = indexes_ptr + (i * addr_size);
+    process->ReadMemory(index_addr, &index_value, addr_size, error);
+    
+    if (error.Success()) {
+      path_stream << index_value;
+    } else {
+      path_stream << "?";
+    }
+  }
+  
+  if (length > 10) {
+    path_stream << "...";
+  }
+  
+  return path_stream.str();
 }
 
 bool lldb_private::formatters::GNUstepNSIndexPathFormatterFunction(

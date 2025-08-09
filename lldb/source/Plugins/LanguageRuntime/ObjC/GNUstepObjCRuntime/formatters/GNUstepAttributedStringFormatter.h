@@ -12,12 +12,23 @@
 #include "GNUstepFormattersBase.h"
 
 namespace lldb_private {
+class Process;
 namespace formatters {
 
 class GNUstepNSAttributedStringSummaryProvider : public GNUstepSummaryProvider {
 public:
   bool FormatObject(ValueObject &valobj, Stream &stream, 
                    const TypeSummaryOptions &options) override;
+
+private:
+  // Extract the underlying string content from NSAttributedString
+  std::string ExtractStringContent(ValueObject &valobj);
+  
+  // Extract string content from a string pointer (using NSString logic)
+  std::string ExtractStringFromPointer(lldb::addr_t string_ptr, Process *process);
+  
+  // Estimate the number of attributes
+  size_t EstimateAttributeCount(ValueObject &valobj);
 };
 
 // Function entry point for LLDB's formatting system

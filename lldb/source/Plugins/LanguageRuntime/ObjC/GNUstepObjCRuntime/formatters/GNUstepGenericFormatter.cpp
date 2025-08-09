@@ -712,6 +712,20 @@ double GNUstepGenericFormatter::ReadFloatingPoint(Process *process,
 
 bool lldb_private::formatters::GNUstepGenericFormatterFunction(ValueObject &valobj, Stream &stream,
                                      const TypeSummaryOptions &options) {
+  // CRITICAL: Skip specific types that have their own specialized formatters
+  // This prevents the generic formatter from interfering with specialized formatters
+  std::string class_name = GNUstepRuntimeHelper::GetGNUstepClassName(valobj);
+  
+  if (class_name == "NSException" || class_name == "NSIndexPath" ||
+      class_name == "NSNotification" || class_name == "NSAttributedString" ||
+      class_name == "GSException" || class_name == "GSIndexPath" ||
+      class_name == "GSNotification" || class_name == "GSAttributedString" ||
+      class_name == "NSNull" || class_name == "NSDecimalNumber" ||
+      class_name == "NSIndexSet" || class_name == "NSCharacterSet") {
+    // These types should use their specialized formatters instead
+    return false;
+  }
+  
   GNUstepGenericFormatter formatter;
   return formatter.FormatObject(valobj, stream, options);
 }

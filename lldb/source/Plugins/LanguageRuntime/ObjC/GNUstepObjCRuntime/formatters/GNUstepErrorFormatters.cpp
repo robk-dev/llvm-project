@@ -34,17 +34,21 @@ bool GNUstepNSErrorSummaryProvider::FormatObject(ValueObject &valobj, Stream &st
   }
   
   std::ostringstream oss;
+  oss << "Error(";
+  
   if (!domain.empty()) {
-    oss << domain;
+    oss << "Domain=" << domain;
   } else {
-    oss << "(unknown domain)";
+    oss << "Domain=Unknown";
   }
   
-  oss << "(" << code << ")";
+  oss << ", Code=" << code;
   
   if (!description.empty()) {
-    oss << ": " << description;
+    oss << ", Description=" << description;
   }
+  
+  oss << ")";
   
   WriteQuotedString(stream, oss.str());
   return true;
@@ -59,14 +63,15 @@ std::string GNUstepNSErrorSummaryProvider::ExtractDomain(ValueObject &valobj) {
   if (object_addr == LLDB_INVALID_ADDRESS)
     return "";
 
-  uint32_t addr_size = GNUstepRuntimeHelper::GetAddressByteSize(process);
+  // NSError layout based on memory analysis:
+  // struct NSError { void *isa; int64_t _code; NSString *_domain; NSDictionary *_userInfo; }
+  // _domain is at offset 16 (isa=8 + code=8)
+  lldb::addr_t domain_addr = object_addr + 16;
   
-  // NSError layout (simplified for GNUstep):
-  // [isa][_domain NSString*][_code NSInteger][_userInfo NSDictionary*]
-  lldb::addr_t domain_addr = object_addr + addr_size;
   
   Status error;
   lldb::addr_t domain_string_addr = GNUstepRuntimeHelper::ReadPointer(process, domain_addr, error);
+  
   
   if (domain_string_addr == 0 || domain_string_addr == LLDB_INVALID_ADDRESS || error.Fail()) {
     return "";
@@ -86,20 +91,15 @@ int64_t GNUstepNSErrorSummaryProvider::ExtractCode(ValueObject &valobj) {
 
   uint32_t addr_size = GNUstepRuntimeHelper::GetAddressByteSize(process);
   
-  // Code comes after domain pointer
-  lldb::addr_t code_addr = object_addr + (addr_size * 2);
+  // NSError layout: _code comes directly after isa pointer at offset 8
+  lldb::addr_t code_addr = object_addr + addr_size;
   
   Status error;
+  // Based on memory analysis, _code is actually 64-bit aligned
   int64_t code = 0;
   size_t bytes_read = process->ReadMemory(code_addr, &code, sizeof(int64_t), error);
   
   if (bytes_read != sizeof(int64_t) || error.Fail()) {
-    // Try reading as 32-bit integer if 64-bit fails
-    int32_t code32 = 0;
-    bytes_read = process->ReadMemory(code_addr, &code32, sizeof(int32_t), error);
-    if (bytes_read == sizeof(int32_t) && !error.Fail()) {
-      return static_cast<int64_t>(code32);
-    }
     return 0;
   }
 
@@ -115,11 +115,9 @@ std::string GNUstepNSErrorSummaryProvider::ExtractDescription(ValueObject &valob
   if (object_addr == LLDB_INVALID_ADDRESS)
     return "";
 
-  uint32_t addr_size = GNUstepRuntimeHelper::GetAddressByteSize(process);
-  
-  // UserInfo dictionary comes after code
-  // Layout: [isa][domain][code][userInfo]
-  lldb::addr_t user_info_addr = object_addr + (addr_size * 2) + sizeof(int64_t);
+  // UserInfo dictionary comes after domain pointer
+  // Layout: [isa][_code][_domain][_userInfo] at offset 24 (isa=8 + code=8 + domain=8)
+  lldb::addr_t user_info_addr = object_addr + 24;
   
   Status error;
   lldb::addr_t user_info_dict_addr = GNUstepRuntimeHelper::ReadPointer(process, user_info_addr, error);
@@ -138,13 +136,44 @@ std::string GNUstepNSErrorSummaryProvider::ExtractStringFromAddress(Process *pro
   if (!process || string_addr == 0 || string_addr == LLDB_INVALID_ADDRESS)
     return "";
 
-  uint32_t addr_size = GNUstepRuntimeHelper::GetAddressByteSize(process);
+  // GNUstep NSConstantString structure (based on working NSString formatter):
+  // struct {
+  //   Class isa;          // Object's class pointer (offset 0)
+  //   uint32_t len;       // String length (offset 8)
+  //   uint32_t padding;   // Padding (offset 12)
+  //   uint64_t len2;      // Length again? (offset 16)
+  //   const char *str;    // C string data pointer (offset 24)
+  // };
   
-  // Skip the isa pointer and length field to get to the actual string data
-  lldb::addr_t string_data_addr = string_addr + (addr_size * 2);
+  // The string pointer appears to be at offset 24 (after isa, two length fields)
+  lldb::addr_t str_ptr_addr = string_addr + 24;  // Skip isa (8) + len (4) + padding (4) + len2 (8)
   
-  // Read up to 256 characters for domain names (reasonable limit)
-  return GNUstepRuntimeHelper::ReadUTF8String(process, string_data_addr, 256);
+  Status error;
+  lldb::addr_t str_data_addr = GNUstepRuntimeHelper::ReadPointer(process, str_ptr_addr, error);
+  if (error.Fail() || str_data_addr == 0 || str_data_addr == LLDB_INVALID_ADDRESS) {
+    return "";
+  }
+  
+  // Read the string length from offset 8 (after ISA pointer)
+  lldb::addr_t len_addr = string_addr + 8;
+  uint32_t string_length = 0;
+  
+  if (!GNUstepRuntimeHelper::ReadMemory(process, len_addr, &string_length, sizeof(string_length))) {
+    // Fall back to reading as null-terminated string
+    string_length = 0;
+  }
+  
+  // Limit string length for safety
+  if (string_length > 1024) {
+    string_length = 1024;
+  }
+  
+  if (string_length > 0) {
+    return GNUstepRuntimeHelper::ReadUTF8String(process, str_data_addr, string_length);
+  }
+  
+  // Fallback: try to read a null-terminated string (up to 256 chars for domain names)
+  return GNUstepRuntimeHelper::ReadUTF8String(process, str_data_addr, 256);
 }
 
 bool lldb_private::formatters::GNUstepNSErrorFormatterFunction(ValueObject &valobj, Stream &stream,

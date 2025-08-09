@@ -128,6 +128,40 @@ int main(int argc, const char *argv[]) {
                                                          reason:@"This is a test exception for debugging"
                                                        userInfo:@{@"errorCode": @404, @"context": @"Testing"}];
     
+    // === PRIORITY 1 FORMATTERS: NSIndexSet, NSDecimalNumber, NSCharacterSet ===
+    
+    // Test NSIndexSet variations
+    NSIndexSet *emptyIndexSet = [NSIndexSet indexSet];
+    NSIndexSet *singleIndexSet = [NSIndexSet indexSetWithIndex:42];
+    NSIndexSet *rangeIndexSet = [NSIndexSet indexSetWithIndexesInRange:NSMakeRange(10, 5)];
+    NSMutableIndexSet *mutableIndexSet = [NSMutableIndexSet indexSet];
+    [mutableIndexSet addIndex:1];
+    [mutableIndexSet addIndex:3];
+    [mutableIndexSet addIndex:5];
+    [mutableIndexSet addIndexesInRange:NSMakeRange(100, 3)]; // Add 100, 101, 102
+    NSIndexSet *nilIndexSet = nil; // Edge case: nil index set
+    
+    // Test NSDecimalNumber variations
+    NSDecimalNumber *integerDecimal = [NSDecimalNumber decimalNumberWithString:@"42"];
+    NSDecimalNumber *floatDecimal = [NSDecimalNumber decimalNumberWithString:@"123.456"];
+    NSDecimalNumber *largeDecimal = [NSDecimalNumber decimalNumberWithString:@"999999999999999999.123456789"];
+    NSDecimalNumber *negativeDecimal = [NSDecimalNumber decimalNumberWithString:@"-987.654"];
+    NSDecimalNumber *zeroDecimal = [NSDecimalNumber zero];
+    NSDecimalNumber *oneDecimal = [NSDecimalNumber one];
+    NSDecimalNumber *notANumber = [NSDecimalNumber notANumber];
+    NSDecimalNumber *nilDecimalNumber = nil; // Edge case: nil decimal number
+    
+    // Test NSCharacterSet variations
+    NSCharacterSet *letterCharSet = [NSCharacterSet letterCharacterSet];
+    NSCharacterSet *digitCharSet = [NSCharacterSet decimalDigitCharacterSet];
+    NSCharacterSet *whitespaceCharSet = [NSCharacterSet whitespaceAndNewlineCharacterSet];
+    NSCharacterSet *punctuationCharSet = [NSCharacterSet punctuationCharacterSet];
+    NSCharacterSet *customCharSet = [NSCharacterSet characterSetWithCharactersInString:@"abc123!@#"];
+    NSMutableCharacterSet *mutableCharSet = [NSMutableCharacterSet letterCharacterSet];
+    [mutableCharSet addCharactersInString:@"0123456789"];
+    NSCharacterSet *invertedCharSet = [[NSCharacterSet letterCharacterSet] invertedSet];
+    NSCharacterSet *nilCharacterSet = nil; // Edge case: nil character set
+    
     // Test NSAttributedString
     NSAttributedString *attrString = [[NSAttributedString alloc] 
         initWithString:@"Hello with attributes" 
@@ -224,6 +258,30 @@ int main(int argc, const char *argv[]) {
     
     NSLog(@"NSUUID - random: %@", randomUUID);
     NSLog(@"NSUUID - specific: %@", specificUUID);
+    
+    // === PRIORITY 1 FORMATTERS OUTPUT ===
+    NSLog(@"=== PRIORITY 1 FORMATTERS: NSIndexSet, NSDecimalNumber, NSCharacterSet ===");
+    
+    NSLog(@"NSIndexSet - empty: %@", emptyIndexSet);
+    NSLog(@"NSIndexSet - single (42): %@", singleIndexSet);
+    NSLog(@"NSIndexSet - range (10-14): %@", rangeIndexSet);
+    NSLog(@"NSMutableIndexSet - scattered: %@", mutableIndexSet);
+    
+    NSLog(@"NSDecimalNumber - integer: %@", integerDecimal);
+    NSLog(@"NSDecimalNumber - float: %@", floatDecimal);
+    NSLog(@"NSDecimalNumber - large: %@", largeDecimal);
+    NSLog(@"NSDecimalNumber - negative: %@", negativeDecimal);
+    NSLog(@"NSDecimalNumber - zero: %@", zeroDecimal);
+    NSLog(@"NSDecimalNumber - one: %@", oneDecimal);
+    NSLog(@"NSDecimalNumber - NaN: %@", notANumber);
+    
+    NSLog(@"NSCharacterSet - letters: %@", letterCharSet);
+    NSLog(@"NSCharacterSet - digits: %@", digitCharSet);
+    NSLog(@"NSCharacterSet - whitespace: %@", whitespaceCharSet);
+    NSLog(@"NSCharacterSet - punctuation: %@", punctuationCharSet);
+    NSLog(@"NSCharacterSet - custom: %@", customCharSet);
+    NSLog(@"NSMutableCharacterSet - mixed: %@", mutableCharSet);
+    NSLog(@"NSCharacterSet - inverted letters: %@", invertedCharSet);
     
     // Set a breakpoint here to test all Foundation formatters
     NSLog(@"Foundation formatter test breakpoint"); // Line for setting breakpoint

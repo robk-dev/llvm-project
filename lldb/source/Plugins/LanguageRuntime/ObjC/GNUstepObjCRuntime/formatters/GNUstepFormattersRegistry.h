@@ -77,6 +77,18 @@ public:
   /// Register generic formatter for any Objective-C object
   static void RegisterGenericFormatter(TypeCategoryImpl &category);
 
+  /// Register Priority 1 Foundation formatters (NSIndexSet, NSDecimalNumber, NSCharacterSet)
+  static void RegisterPriority1Formatters(TypeCategoryImpl &category);
+  
+  /// Register NSIndexSet and NSMutableIndexSet formatters
+  static void RegisterIndexSetFormatters(TypeCategoryImpl &category);
+  
+  /// Register NSDecimalNumber formatters
+  static void RegisterDecimalNumberFormatters(TypeCategoryImpl &category);
+  
+  /// Register NSCharacterSet and NSMutableCharacterSet formatters
+  static void RegisterCharacterSetFormatters(TypeCategoryImpl &category);
+
 private:
   GNUstepFormattersRegistry() = delete; // Static class only
 };

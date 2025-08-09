@@ -193,6 +193,17 @@ bool lldb_private::formatters::GNUstepIdDispatcherFunction(ValueObject &valobj, 
   // For custom classes and other Objective-C objects, use the generic formatter
   // This provides a reasonable default display
   // Fixed crash issues in generic formatter - now safe to enable
+  // But first check if this type has a specialized formatter
+  if (class_name == "NSException" || class_name == "NSIndexPath" ||
+      class_name == "NSNotification" || class_name == "NSAttributedString" ||
+      class_name == "GSException" || class_name == "GSIndexPath" ||
+      class_name == "GSNotification" || class_name == "GSAttributedString" ||
+      class_name == "NSNull" || class_name == "NSDecimalNumber" ||
+      class_name == "NSIndexSet" || class_name == "NSCharacterSet") {
+    // These types should use their specialized formatters instead
+    return false;
+  }
+  
   if (class_name[0] >= 'A' && class_name[0] <= 'Z') { // Likely an Objective-C class
     return GNUstepGenericFormatterFunction(valobj, stream, options);
   }

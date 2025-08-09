@@ -37,6 +37,19 @@ bool GNUstepNSNumberSummaryProvider::FormatObject(
     return true;
   }
   
+  // CRITICAL FIX: Check if this is actually an NSDecimalNumber
+  // NSDecimalNumber inherits from NSNumber, so LLDB calls this formatter
+  // We need to delegate to the NSDecimalNumber formatter instead
+  std::string class_name = GetNumberClassName(valobj);
+  
+  // DEBUG: Show what class name we're getting
+  stream.Printf("DEBUG: class_name='%s' ", class_name.c_str());
+  
+  if (class_name.find("DecimalNumber") != std::string::npos) {
+    // This is actually an NSDecimalNumber - delegate to our specific formatter
+    return FormatNSDecimalNumber(valobj, stream, options);
+  }
+  
   // Get architecture to handle pointer size differences
   uint32_t addr_size = process_sp->GetAddressByteSize();
   
@@ -100,7 +113,7 @@ bool GNUstepNSNumberSummaryProvider::FormatObject(
   
   // Regular NSNumber object - try to extract value
   // First check if it's a boolean
-  std::string class_name = GetNumberClassName(valobj);
+  // (class_name already extracted above for NSDecimalNumber check)
   
   // Check if the type name contains Bool (for cases where it's explicitly typed)
   const char* type_name = valobj.GetTypeName().AsCString();
@@ -271,6 +284,107 @@ bool GNUstepNSNumberSummaryProvider::TryExtractInteger(ValueObject &valobj, int6
   }
   
   return false;
+}
+
+// NSDecimalNumber formatting implementation
+bool GNUstepNSNumberSummaryProvider::FormatNSDecimalNumber(
+    ValueObject &valobj, Stream &stream, const TypeSummaryOptions &options) {
+
+  ProcessSP process_sp = valobj.GetProcessSP();
+  if (!process_sp) return false;
+
+  addr_t obj_addr = valobj.GetPointerValue();
+  if (obj_addr == 0 || obj_addr == LLDB_INVALID_ADDRESS) {
+    stream.Printf("(null)");
+    return true;
+  }
+
+  uint32_t addr_size = process_sp->GetAddressByteSize();
+  Status error;
+
+  // NSDecimalNumber structure: isa + NSDecimal data
+  // NSDecimal layout (verified by memory inspection):
+  // offset +0: signed char exponent
+  // offset +1: BOOL isNegative  
+  // offset +2: BOOL validNumber
+  // offset +3: unsigned char length
+  // offset +4: unsigned char cMantissa[38]
+  addr_t decimal_addr = obj_addr + addr_size;
+
+  // Read the NSDecimal structure (41 bytes total)
+  uint8_t buffer[41];
+  size_t bytes_read = process_sp->ReadMemory(decimal_addr, buffer, sizeof(buffer), error);
+  if (error.Fail() || bytes_read < 4) {
+    stream.Printf("(error reading decimal)");
+    return false;
+  }
+
+  // Extract NSDecimal fields
+  int8_t exponent = (int8_t)buffer[0];
+  bool isNegative = buffer[1] != 0;
+  bool validNumber = buffer[2] != 0;
+  uint8_t length = buffer[3];
+
+  // Check for special values
+  if (!validNumber) {
+    stream.Printf("NaN");
+    return true;
+  }
+
+  // Check for zero
+  if (length == 0) {
+    stream.Printf("0");
+    return true;
+  }
+
+  // Extract mantissa digits
+  if (length > 38) {
+    stream.Printf("(invalid length)");
+    return false;
+  }
+
+  // Convert mantissa to string
+  std::string mantissaStr;
+  for (int i = 0; i < length; i++) {
+    uint8_t digit = buffer[4 + i];
+    if (digit > 9) {
+      stream.Printf("(invalid digit)");
+      return false;
+    }
+    mantissaStr += ('0' + digit);
+  }
+
+  // Apply sign and exponent
+  std::string result;
+  if (isNegative) {
+    result += "-";
+  }
+
+  if (exponent == 0) {
+    result += mantissaStr;
+  } else if (exponent > 0) {
+    result += mantissaStr;
+    for (int i = 0; i < exponent; i++) {
+      result += "0";
+    }
+  } else {
+    int absExponent = -exponent;
+    if (absExponent >= (int)mantissaStr.length()) {
+      result += "0.";
+      for (int i = 0; i < absExponent - (int)mantissaStr.length(); i++) {
+        result += "0";
+      }
+      result += mantissaStr;
+    } else {
+      int pointPos = mantissaStr.length() - absExponent;
+      result += mantissaStr.substr(0, pointPos);
+      result += ".";
+      result += mantissaStr.substr(pointPos);
+    }
+  }
+
+  stream.Printf("%s", result.c_str());
+  return true;
 }
 
 
