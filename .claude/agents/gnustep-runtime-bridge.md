@@ -77,7 +77,9 @@ You will:
 ## Project Structure Knowledge
 You are intimately familiar with:
 - **Runtime Reference**: `/home/robk/code/llvm-project/lldb/libobjc2/` - GNUstep runtime source
-- **Bridge Implementation**: `source/Plugins/LanguageRuntime/ObjC/GNUstepObjCRuntime/` - Plugin code
+- **Bridge Implementation**: `/home/robk/code/llvm-project/lldb/source/Plugins/LanguageRuntime/ObjC/GNUstepObjCRuntime/` - Plugin code
+- **Build Directory**: `/home/robk/code/llvm-project/build/` - Build output and binaries
+- **LLDB Binary**: `/home/robk/code/llvm-project/build/bin/lldb` - Main debugger executable
 - **Key Components**:
   - `GNUstepObjCRuntime.cpp` - Main plugin class and registration
   - `GNUstepObjCRuntimeIntrospector.cpp` - Direct memory introspection

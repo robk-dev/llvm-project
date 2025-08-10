@@ -34,6 +34,9 @@ public:
   // Given an isa pointer, return the class name.
   std::string GetClassName(lldb::addr_t isa_addr);
   
+  // Get class name from ISA with caching support
+  lldb_private::ConstString GetClassNameFromISA(lldb::addr_t isa_addr);
+  
   // Get class name directly from a ValueObject
   std::string GetClassNameFromObject(ValueObject &valobj);
   
@@ -68,6 +71,9 @@ private:
   };
   
   mutable FunctionCallerCache m_function_cache;
+  
+  // Cache for ISA to class name mapping
+  mutable std::unordered_map<lldb::addr_t, lldb_private::ConstString> m_isa_to_name_cache;
   
   // Helper method to call functions in the target process (existing interface)
   lldb::addr_t CallRuntimeFunction(const std::string &function_name,

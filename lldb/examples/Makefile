@@ -34,10 +34,11 @@ SOURCES = simple_test.m custom_class_test.m foundation_test.m string_test.m \
           test_nsstring_formatter.m test_nsnumber_formatter.m array_test.m \
           simple_array_test.m test_nsnumber_comprehensive.m test_nsarray_comprehensive.m \
           dictionary_test.m nsset_test.m test_collections_formatter.m test_method_enum.m \
-          test_indexset.m test_decimalnumber.m test_characterset.m
+          test_indexset.m test_decimalnumber.m test_characterset.m test_data_url_uuid.m \
+          test_userdefaults.m
 EXECUTABLES = $(SOURCES:.m=)
 
-.PHONY: all clean symbols
+.PHONY: all clean clean-all symbols help debug debug-simple debug-custom debug-foundation debug-nsstring debug-nsnumber debug-array debug-dictionary debug-set debug-collections debug-method-enum debug-data-url-uuid debug-timezone debug-timezone-comprehensive test-plugin
 
 all: $(EXECUTABLES)
 
@@ -46,6 +47,17 @@ all: $(EXECUTABLES)
 
 clean:
 	rm -f $(EXECUTABLES)
+
+# Enhanced clean - removes all build artifacts and temporary files
+clean-all: clean
+	@echo "Performing comprehensive cleanup..."
+	@find . -maxdepth 1 -type f -executable -not -name "*.sh" -not -name "*.py" -not -name "*.lldb" -delete 2>/dev/null || true
+	@find . -name "core.*" -delete 2>/dev/null || true
+	@find . -name "*.dSYM" -type d -exec rm -rf {} + 2>/dev/null || true  
+	@find . -name "*.o" -delete 2>/dev/null || true
+	@find . -name "a.out" -delete 2>/dev/null || true
+	@find . -name "*.tmp" -delete 2>/dev/null || true
+	@echo "Comprehensive cleanup completed"
 
 # Target to check symbols in generated binaries
 symbols: custom_class_test
@@ -155,18 +167,7 @@ test-plugin: custom_class_test
 	@echo "  (lldb) po accountSummary"
 	$(LLDB) ./custom_class_test
 
-# Debug targets for testing our GNUstep runtime plugin
-debug: custom_class_test
-	@echo "Starting LLDB with custom_class_test..."
-	export PATH="$(dir $(LLDB)):$$PATH" && \
-	export LLDB_DEBUGSERVER_PATH="$(dir $(LLDB))lldb-server" && \
-	$(LLDB) custom_class_test
-
-debug-simple: simple_test
-	@echo "Starting LLDB with simple_test..."
-	export PATH="$(dir $(LLDB)):$$PATH" && \
-	export LLDB_DEBUGSERVER_PATH="$(dir $(LLDB))lldb-server" && \
-	$(LLDB) simple_test
+# Duplicate debug targets removed - using the first definitions above
 
 # Additional test targets
 test_nsnumber_comprehensive: test_nsnumber_comprehensive.m
@@ -284,6 +285,81 @@ debug-method-enum: test_method_enum
 	export PATH="$(dir $(LLDB)):$$PATH" && \
 	export LLDB_DEBUGSERVER_PATH="$(dir $(LLDB))lldb-server" && \
 	$(LLDB) ./test_method_enum
+
+test_data_url_uuid: test_data_url_uuid.m
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $< $(LIBS)
+
+debug-data-url-uuid: test_data_url_uuid
+	@echo "Starting LLDB with NSData, NSURL, and NSUUID formatter test..."
+	@echo "Commands to test the formatters:"
+	@echo "  (lldb) b test_data_url_uuid.m:48   # NSData objects breakpoint"
+	@echo "  (lldb) b test_data_url_uuid.m:84   # NSURL objects breakpoint"
+	@echo "  (lldb) b test_data_url_uuid.m:114  # NSUUID objects breakpoint"
+	@echo "  (lldb) b test_data_url_uuid.m:127  # Final comprehensive test"
+	@echo "  (lldb) run"
+	@echo "  (lldb) po emptyData"
+	@echo "  (lldb) po smallData"
+	@echo "  (lldb) po binaryData"
+	@echo "  (lldb) po largeData"
+	@echo "  (lldb) po mutableData"
+	@echo "  (lldb) continue  # Move to NSURL tests"
+	@echo "  (lldb) po fileURL"
+	@echo "  (lldb) po httpURL"
+	@echo "  (lldb) po complexHttpURL"
+	@echo "  (lldb) continue  # Move to NSUUID tests"
+	@echo "  (lldb) po randomUUID"
+	@echo "  (lldb) po stringUUID"
+	@echo "  (lldb) po zeroUUID"
+	@echo "  (lldb) frame variable -O"
+	export PATH="$(dir $(LLDB)):$$PATH" && \
+	export LLDB_DEBUGSERVER_PATH="$(dir $(LLDB))lldb-server" && \
+	$(LLDB) ./test_data_url_uuid
+
+test_timezone_comprehensive: test_timezone_comprehensive.m
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $< $(LIBS)
+
+debug-timezone: test_timezone_basic
+	@echo "Starting LLDB with NSTimeZone enhanced formatter test..."
+	@echo "This tests the enhanced timezone debugging capabilities added to LLDB"
+	@echo ""
+	@echo "Key improvements being tested:"
+	@echo "  ✓ Complex timezones (America/New_York, Asia/Tokyo) show names instead of raw memory"
+	@echo "  ✓ NSLocalTimeZone shows meaningful timezone information" 
+	@echo "  ✓ GSAbsTimeZone shows clean timezone names and offsets"
+	@echo "  ✓ GSTimeZone shows timezone names with DST information"
+	@echo ""
+	@echo "Commands to test:"
+	@echo "  (lldb) b test_timezone_basic.m:19"
+	@echo "  (lldb) run"
+	@echo "  (lldb) po nyTimeZone        # Should show: GSTimeZone(name=\"America/New_York\", ...)"
+	@echo "  (lldb) po tokyoTimeZone     # Should show: GSTimeZone(name=\"Asia/Tokyo\", ...)"
+	@echo "  (lldb) po localTimeZone     # Should show: NSLocalTimeZone(name=\"...\", ...)"
+	@echo "  (lldb) po offsetTimeZone    # Should show: GSAbsTimeZone(name=\"GMT+0100\", offset=3600)"
+	@echo ""
+	export PATH="$(dir $(LLDB)):$$PATH" && \
+	export LLDB_DEBUGSERVER_PATH="$(dir $(LLDB))lldb-server" && \
+	$(LLDB) ./test_timezone_basic
+
+debug-timezone-comprehensive: test_timezone_comprehensive
+	@echo "Starting LLDB with comprehensive NSTimeZone formatter test..."
+	@echo "This is the comprehensive test of the enhanced NSTimeZone formatter"
+	@echo ""
+	@echo "Tests all timezone types:"
+	@echo "  • GSAbsTimeZone (simple fixed offsets)"
+	@echo "  • GSTimeZone (complex zoneinfo-based timezones)"  
+	@echo "  • NSLocalTimeZone (system timezone proxy)"
+	@echo "  • Edge cases (nil, invalid timezones)"
+	@echo ""
+	@echo "Quick test commands:"
+	@echo "  (lldb) b test_timezone_comprehensive.m:41"
+	@echo "  (lldb) run"
+	@echo "  (lldb) po newYorkTZ"
+	@echo "  (lldb) po tokyoTZ"
+	@echo "  (lldb) po localTZ"
+	@echo ""
+	export PATH="$(dir $(LLDB)):$$PATH" && \
+	export LLDB_DEBUGSERVER_PATH="$(dir $(LLDB))lldb-server" && \
+	$(LLDB) ./test_timezone_comprehensive
 
 # Help target
 help:

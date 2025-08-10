@@ -157,14 +157,19 @@ std::string GNUstepNSDictionarySummaryProvider::GetInlinePairsPreview(ValueObjec
       result += ", ";
     }
     
+    // Read the actual key and value pointers from storage addresses
+    lldb::addr_t key_ptr = 0, value_ptr = 0;
+    GNUstepRuntimeHelper::ReadMemory(process, pairs[i].key_addr, &key_ptr, sizeof(key_ptr));
+    GNUstepRuntimeHelper::ReadMemory(process, pairs[i].value_addr, &value_ptr, sizeof(value_ptr));
+    
     // Get key summary
-    std::string key_summary = GetElementSummary(process, pairs[i].key_addr, context);
+    std::string key_summary = GetElementSummary(process, key_ptr, context);
     if (key_summary.empty()) {
       key_summary = "<key>";
     }
     
     // Get value summary  
-    std::string value_summary = GetElementSummary(process, pairs[i].value_addr, context);
+    std::string value_summary = GetElementSummary(process, value_ptr, context);
     if (value_summary.empty()) {
       value_summary = "<value>";
     }
@@ -250,9 +255,8 @@ bool GNUstepNSDictionarySummaryProvider::ExtractKeyValuePairsForPreview(Process 
     
     // Walk the linked list of nodes in this bucket
     while (node_ptr != 0 && pairs_extracted < max_pairs) {
-      // CRITICAL FIX: Store the ADDRESSES where the key and value pointers are stored,
-      // not the pointer values themselves. This matches the synthetic provider approach
-      // and allows CreateValueObjectFromAddress to work correctly with dynamic type resolution.
+      // Store the ADDRESSES where the key and value pointers are stored,
+      // not the pointer values themselves. This is consistent with the synthetic provider.
       
       // The key is stored at offset 8 in the node
       lldb::addr_t key_storage_addr = node_ptr + 8;
@@ -286,20 +290,9 @@ bool GNUstepNSDictionarySummaryProvider::ExtractKeyValuePairsForPreview(Process 
   return true;
 }
 
-std::string GNUstepNSDictionarySummaryProvider::GetElementSummary(Process *process, lldb::addr_t storage_addr, FormatterContext &context) {
-  if (!process || storage_addr == 0 || storage_addr == LLDB_INVALID_ADDRESS) {
-    return "";
-  }
-  
-  // CRITICAL FIX: The input is now a storage address where a pointer is stored,
-  // not the object address itself. Read the actual object address first.
-  lldb::addr_t element_addr = 0;
-  if (!GNUstepRuntimeHelper::ReadMemory(process, storage_addr, &element_addr, sizeof(element_addr))) {
-    return "";
-  }
-  
-  if (element_addr == 0 || element_addr == LLDB_INVALID_ADDRESS) {
-    return "";
+std::string GNUstepNSDictionarySummaryProvider::GetElementSummary(Process *process, lldb::addr_t element_addr, FormatterContext &context) {
+  if (!process || element_addr == 0 || element_addr == LLDB_INVALID_ADDRESS) {
+    return "nil";
   }
   
   // Check for recursion depth limit and cycle detection
@@ -310,8 +303,34 @@ std::string GNUstepNSDictionarySummaryProvider::GetElementSummary(Process *proce
   // Enter this object in our recursion tracking
   context.EnterObject(element_addr);
   
-  // PRIORITY FIX: Try the ID dispatcher FIRST before custom string extraction
-  // This ensures consistent behavior across all formatters
+  // First attempt: Try to directly extract string content for NSConstantString
+  // This is more reliable than going through the ID dispatcher for simple strings
+  GNUstepObjCRuntimeIntrospector introspector(process);
+  Status error;
+  lldb::addr_t isa_addr = GNUstepRuntimeHelper::ReadPointer(process, element_addr, error);
+  std::string class_name;
+  if (error.Success() && isa_addr != 0) {
+    class_name = introspector.GetClassName(isa_addr);
+  }
+  
+  // Handle NSConstantString specially as it's very common in dictionaries
+  // Also check for partial matches in case the class name has a prefix
+  if (class_name == "NSConstantString" || class_name == "__NSConstantString" ||
+      class_name.find("NSConstantString") != std::string::npos || 
+      class_name.empty()) { // Try for empty class names too, in case introspection failed
+    std::string string_content = TryExtractStringContent(process, element_addr);
+    if (!string_content.empty()) {
+      context.ExitObject(element_addr);
+      // Format the string with quotes
+      const size_t MAX_STRING_PREVIEW_LENGTH = 30;
+      if (string_content.length() > MAX_STRING_PREVIEW_LENGTH) {
+        return "\"" + string_content.substr(0, MAX_STRING_PREVIEW_LENGTH - 3) + "...\"";
+      }
+      return "\"" + string_content + "\"";
+    }
+  }
+  
+  // Second attempt: Try the ID dispatcher for more complex objects
   ExecutionContextScope *exe_scope = process->GetTarget().GetProcessSP().get();
   if (exe_scope) {
     TypeSystemClangSP scratch_ts_sp = ScratchTypeSystemClang::GetForTarget(
@@ -323,14 +342,22 @@ std::string GNUstepNSDictionarySummaryProvider::GetElementSummary(Process *proce
       ExecutionContext exe_ctx;
       exe_scope->CalculateExecutionContext(exe_ctx);
       
-      // CRITICAL FIX: Always use CreateValueObjectFromAddress with storage address
-      // This allows LLDB to properly handle both tagged pointers and regular objects
-      // The storage_addr is where the pointer/tagged value is stored in memory
-      ValueObjectSP element_valobj_sp = ValueObject::CreateValueObjectFromAddress("element", 
-                                                                                  storage_addr, 
-                                                                                  exe_ctx, id_type);
-      
+      // For tagged pointers vs regular objects
       bool is_tagged_pointer = (element_addr & 0x7) != 0;
+      ValueObjectSP element_valobj_sp;
+      
+      if (is_tagged_pointer) {
+        // For tagged pointers, create ValueObject from data containing the tagged value
+        DataBufferSP data_buffer_sp(new DataBufferHeap(&element_addr, sizeof(element_addr)));
+        DataExtractor data(data_buffer_sp, process->GetByteOrder(), 
+                          process->GetAddressByteSize());
+        element_valobj_sp = ValueObject::CreateValueObjectFromData("element", data, exe_ctx, id_type);
+      } else {
+        // For regular objects, create from address
+        element_valobj_sp = ValueObject::CreateValueObjectFromAddress("element", 
+                                                                      element_addr, 
+                                                                      exe_ctx, id_type);
+      }
       
       if (element_valobj_sp) {
         // Get dynamic value for regular objects
@@ -341,43 +368,95 @@ std::string GNUstepNSDictionarySummaryProvider::GetElementSummary(Process *proce
           }
         }
         
-        // Try ID dispatcher first
+        // Try ID dispatcher
         StreamString dispatch_stream;
         TypeSummaryOptions dispatch_options;
         
         if (GNUstepIdDispatcherFunction(*element_valobj_sp, dispatch_stream, dispatch_options)) {
           context.ExitObject(element_addr);
           std::string result = dispatch_stream.GetString().str();
-          // For string values, ensure proper quoting for dictionary display
-          if (result.length() > 0 && result[0] != '"' && result.find("@\"") != 0 && 
-              result.find("object") == std::string::npos && result.find("<") != 0) {
-            // Truncate if too long
-            const size_t MAX_STRING_PREVIEW_LENGTH = 20;
+          
+          // ENHANCED FIX: The ID dispatcher should handle all formatting,
+          // but we need to ensure proper display for dictionary values.
+          // For collections in dictionaries, we want concise representations.
+          
+          // Check result type patterns to determine formatting
+          bool is_already_quoted = (result.find("@\"") == 0 || (result.length() > 0 && result[0] == '"'));
+          bool is_numeric = false;
+          bool is_boolean = (result == "YES" || result == "NO" || result == "true" || result == "false");
+          bool is_collection = (result.find("@[") == 0 || result.find("@{") == 0 || result.find("{") == 0);
+          bool is_object_ref = (result.find("<") == 0);
+          bool is_nil = (result == "nil" || result == "(null)");
+          
+          // Check if it's a pure number (handles integers, floats, scientific notation)
+          if (!is_boolean && !is_collection && !is_object_ref && !is_nil && !is_already_quoted && !result.empty()) {
+            // Try parsing as number - if entire string parses, it's numeric
+            char *endptr;
+            strtod(result.c_str(), &endptr);
+            is_numeric = (*endptr == '\0' && result[0] != '\0');
+            
+            // Additional check for negative numbers and scientific notation
+            if (!is_numeric && (result[0] == '-' || result.find('e') != std::string::npos || result.find('E') != std::string::npos)) {
+              is_numeric = (*endptr == '\0' && result[0] != '\0');
+            }
+          }
+          
+          // ENHANCED FIX: Truncate very long collections for dictionary values
+          if (is_collection && result.length() > 50) {
+            // For arrays: @[item1, item2, ...]
+            if (result.find("@[") == 0) {
+              size_t comma_pos = result.find(",");
+              if (comma_pos != std::string::npos) {
+                size_t second_comma = result.find(",", comma_pos + 1);
+                if (second_comma != std::string::npos) {
+                  result = result.substr(0, second_comma) + ", ...]";
+                }
+              }
+            }
+            // For dictionaries: @{key1: value1, ...}
+            else if (result.find("@{") == 0) {
+              size_t comma_pos = result.find(",");
+              if (comma_pos != std::string::npos) {
+                result = result.substr(0, comma_pos) + ", ...}";
+              }
+            }
+          }
+          
+          // Apply quoting logic:
+          // - Numbers, booleans, collections, object refs, nil: return as-is
+          // - Already quoted strings: return as-is  
+          // - Plain strings: add quotes
+          if (is_numeric || is_boolean || is_collection || is_object_ref || is_nil || is_already_quoted) {
+            return result;
+          } else {
+            // This is a plain string that needs quoting
+            const size_t MAX_STRING_PREVIEW_LENGTH = 30; // Increased for dictionary values
             if (result.length() > MAX_STRING_PREVIEW_LENGTH) {
               result = result.substr(0, MAX_STRING_PREVIEW_LENGTH - 3) + "...";
             }
             return "\"" + result + "\"";
           }
-          return result;
         }
       }
     }
   }
   
-  // FALLBACK: Try custom string extraction (legacy approach)
-  std::string string_content = TryExtractStringContent(process, element_addr);
-  if (!string_content.empty()) {
-    context.ExitObject(element_addr);
-    // Return quoted string, truncated for inline display
-    const size_t MAX_STRING_PREVIEW_LENGTH = 20;
-    if (string_content.length() > MAX_STRING_PREVIEW_LENGTH) {
-      return "\"" + string_content.substr(0, MAX_STRING_PREVIEW_LENGTH - 3) + "...\"";
+  // FALLBACK: Additional string extraction attempts for other string types
+  // Try custom string extraction for non-NSConstantString types
+  if (class_name.find("String") != std::string::npos) {
+    std::string string_content = TryExtractStringContent(process, element_addr);
+    if (!string_content.empty()) {
+      context.ExitObject(element_addr);
+      // Return quoted string, truncated for inline display
+      const size_t MAX_STRING_PREVIEW_LENGTH = 30;
+      if (string_content.length() > MAX_STRING_PREVIEW_LENGTH) {
+        return "\"" + string_content.substr(0, MAX_STRING_PREVIEW_LENGTH - 3) + "...\"";
+      }
+      return "\"" + string_content + "\"";
     }
-    return "\"" + string_content + "\"";
   }
   
   // Check if it's a tagged pointer that couldn't be decoded as string
-  GNUstepObjCRuntimeIntrospector introspector(process);
   if (introspector.IsTaggedPointer(element_addr)) {
     // For non-string tagged pointers, try to get proper formatting
     uint64_t tag = element_addr & 7;
@@ -447,10 +526,8 @@ std::string GNUstepNSDictionarySummaryProvider::GetElementSummary(Process *proce
   }
   
   // For regular objects (non-tagged), check if it's an NSNumber and handle it specially
-  Status error;
-  lldb::addr_t isa_addr = GNUstepRuntimeHelper::ReadPointer(process, element_addr, error);
-  if (error.Success() && isa_addr != 0) {
-    std::string class_name = introspector.GetClassName(isa_addr);
+  if (!class_name.empty()) {
+    // We already have the class name from above
     
     // Check if this is an NSNumber class
     if (class_name.find("NSNumber") != std::string::npos ||
@@ -469,8 +546,20 @@ std::string GNUstepNSDictionarySummaryProvider::GetElementSummary(Process *proce
           // This allows LLDB to properly resolve the object and apply formatters
           ExecutionContext exe_ctx;
           exe_scope->CalculateExecutionContext(exe_ctx);
-          ValueObjectSP valobj_sp = ValueObject::CreateValueObjectFromAddress(
-              "element", element_addr, exe_ctx, id_type);
+          // Use same logic as above for tagged vs regular objects
+          bool is_tagged = (element_addr & 0x7) != 0;
+          ValueObjectSP valobj_sp;
+          
+          if (is_tagged) {
+            // For tagged pointers, create ValueObject from data containing the tagged value
+            DataBufferSP data_buffer_sp(new DataBufferHeap(&element_addr, sizeof(element_addr)));
+            DataExtractor data(data_buffer_sp, process->GetByteOrder(), 
+                              process->GetAddressByteSize());
+            valobj_sp = ValueObject::CreateValueObjectFromData("element", data, exe_ctx, id_type);
+          } else {
+            // For regular objects, create from address
+            valobj_sp = ValueObject::CreateValueObjectFromAddress("element", element_addr, exe_ctx, id_type);
+          }
           
           if (valobj_sp) {
             // Use the GNUstep NSNumber formatter directly
@@ -506,8 +595,20 @@ std::string GNUstepNSDictionarySummaryProvider::GetElementSummary(Process *proce
       // This allows LLDB to properly resolve nested objects and apply formatters recursively
       ExecutionContext exe_ctx;
       exe_scope->CalculateExecutionContext(exe_ctx);
-      ValueObjectSP valobj_sp = ValueObject::CreateValueObjectFromAddress(
-          "element", element_addr, exe_ctx, id_type);
+      // Use same logic as above for tagged vs regular objects
+      bool is_tagged = (element_addr & 0x7) != 0;
+      ValueObjectSP valobj_sp;
+      
+      if (is_tagged) {
+        // For tagged pointers, create ValueObject from data containing the tagged value
+        DataBufferSP data_buffer_sp(new DataBufferHeap(&element_addr, sizeof(element_addr)));
+        DataExtractor data(data_buffer_sp, process->GetByteOrder(), 
+                          process->GetAddressByteSize());
+        valobj_sp = ValueObject::CreateValueObjectFromData("element", data, exe_ctx, id_type);
+      } else {
+        // For regular objects, create from address
+        valobj_sp = ValueObject::CreateValueObjectFromAddress("element", element_addr, exe_ctx, id_type);
+      }
       
       if (valobj_sp) {
         // CRITICAL FIX: Manually apply GNUstep formatters since LLDB may not
@@ -516,47 +617,79 @@ std::string GNUstepNSDictionarySummaryProvider::GetElementSummary(Process *proce
         // Try to get the class name to determine which formatter to use
         std::string class_name = introspector.GetClassName(isa_addr);
         
-        // For nested collections, extract count directly using the same logic as the main formatters
+        // CRITICAL FIX: For nested collections, prefer the ID dispatcher over direct formatter calls
+        // The ID dispatcher will properly route to the correct formatter and handle all edge cases
+        // This provides consistent behavior and proper nested formatting
+        
+        // STEP 1: Try ID dispatcher for nested collections - this is the most robust approach
+        StreamString nested_dispatch_stream;
+        TypeSummaryOptions nested_dispatch_options;
+        if (GNUstepIdDispatcherFunction(*valobj_sp, nested_dispatch_stream, nested_dispatch_options)) {
+          context.ExitObject(element_addr);
+          std::string nested_result = nested_dispatch_stream.GetString().str();
+          
+          // For nested collections, we want to show a reasonable amount of detail but avoid clutter
+          // Limit very long collection displays
+          if (nested_result.length() > 50 && 
+              (nested_result.find("@[") == 0 || nested_result.find("@{") == 0)) {
+            // For long collections, show truncated version
+            size_t comma_count = 0;
+            size_t pos = 0;
+            const size_t MAX_NESTED_ITEMS = 3;
+            
+            // Count items shown (comma separated)
+            while ((pos = nested_result.find(",", pos)) != std::string::npos && comma_count < MAX_NESTED_ITEMS) {
+              comma_count++;
+              pos++;
+            }
+            
+            if (comma_count >= MAX_NESTED_ITEMS) {
+              // Truncate after MAX_NESTED_ITEMS
+              pos = 0;
+              for (size_t i = 0; i < MAX_NESTED_ITEMS && pos != std::string::npos; i++) {
+                pos = nested_result.find(",", pos + 1);
+              }
+              if (pos != std::string::npos) {
+                nested_result = nested_result.substr(0, pos) + ", ..." + 
+                               nested_result.substr(nested_result.length() - 1); // Keep closing brace
+              }
+            }
+          }
+          
+          return nested_result;
+        }
+        
+        // STEP 2: Fallback to direct formatter calls if ID dispatcher fails
         if (class_name.find("Dictionary") != std::string::npos ||
             class_name.find("NSDictionary") != std::string::npos) {
-          // Use same count extraction as GNUstepNSDictionarySummaryProvider::ExtractDictionaryCount
-          // Dictionary count is at obj_addr + 16 (8 for isa + 8 for map ptr + 8 for nodeCount)
+          // Dictionary fallback - show count with pairs
           lldb::addr_t count_addr = element_addr + 16;
           uint64_t count64 = 0;
           if (GNUstepRuntimeHelper::ReadMemory(process, count_addr, &count64, sizeof(count64))) {
             uint32_t nested_count = static_cast<uint32_t>(count64);
-            if (nested_count > 0 && nested_count < 1000000) { // Sanity check
+            if (nested_count > 0 && nested_count < 1000000) {
               context.ExitObject(element_addr);
-              if (nested_count == 1) {
-                return "@{1 pair}";
-              } else {
-                return "@{" + std::to_string(nested_count) + " pairs}";
-              }
+              return nested_count == 1 ? "@{1 pair}" : "@{" + std::to_string(nested_count) + " pairs}";
             }
           }
           context.ExitObject(element_addr);
           return "@{...}";
         } else if (class_name.find("Array") != std::string::npos ||
                    class_name.find("NSArray") != std::string::npos) {
-          // Use same count extraction as GNUstepNSArraySummaryProvider::ExtractArrayCount
-          // Array count is at obj_addr + 16 (8 for isa + 8 for contents_array ptr)
+          // Array fallback - show count with objects
           lldb::addr_t count_addr = element_addr + 16;
           uint32_t nested_count = 0;
           if (GNUstepRuntimeHelper::ReadMemory(process, count_addr, &nested_count, sizeof(nested_count))) {
-            if (nested_count > 0 && nested_count < 1000000) { // Sanity check
+            if (nested_count > 0 && nested_count < 1000000) {
               context.ExitObject(element_addr);
-              if (nested_count == 1) {
-                return "@[1 object]";
-              } else {
-                return "@[" + std::to_string(nested_count) + " objects]";
-              }
+              return nested_count == 1 ? "@[1 object]" : "@[" + std::to_string(nested_count) + " objects]";
             }
           }
           context.ExitObject(element_addr);
           return "@[...]";
         } else if (class_name.find("Set") != std::string::npos ||
                    class_name.find("NSSet") != std::string::npos) {
-          // For nested sets, show simple placeholder (Set count extraction is more complex)
+          // Set fallback - show generic set indicator
           context.ExitObject(element_addr);
           return "{set}";
         }
@@ -581,12 +714,30 @@ std::string GNUstepNSDictionarySummaryProvider::GetElementSummary(Process *proce
         if (GNUstepIdDispatcherFunction(*valobj_sp, dispatch_stream, dispatch_options)) {
           context.ExitObject(element_addr);
           std::string result = dispatch_stream.GetString().str();
-          // For string values that don't already have quotes, add them for dictionary display  
-          if (result.length() > 0 && result[0] != '"' && result.find("@\"") != 0 && 
-              result.find("object") == std::string::npos && result.find("<") != 0) {
+          
+          // CRITICAL FIX: Apply the same improved logic as above for value type detection
+          bool is_already_quoted = (result.find("@\"") == 0 || (result.length() > 0 && result[0] == '"'));
+          bool is_numeric = false;
+          bool is_boolean = (result == "YES" || result == "NO" || result == "true" || result == "false");
+          bool is_collection = (result.find("@[") == 0 || result.find("@{") == 0 || result.find("{") == 0);
+          bool is_object_ref = (result.find("<") == 0);
+          bool is_nil = (result == "nil" || result == "(null)");
+          
+          if (!is_boolean && !is_collection && !is_object_ref && !is_nil && !is_already_quoted && !result.empty()) {
+            char *endptr;
+            strtod(result.c_str(), &endptr);
+            is_numeric = (*endptr == '\0' && result[0] != '\0');
+            
+            if (!is_numeric && (result[0] == '-' || result.find('e') != std::string::npos || result.find('E') != std::string::npos)) {
+              is_numeric = (*endptr == '\0' && result[0] != '\0');
+            }
+          }
+          
+          if (is_numeric || is_boolean || is_collection || is_object_ref || is_nil || is_already_quoted) {
+            return result;
+          } else {
             return "\"" + result + "\"";
           }
-          return result;
         }
       }
     }
@@ -694,35 +845,52 @@ std::string GNUstepNSDictionarySummaryProvider::TryExtractStringContent(Process 
   }
   
   // For other string types (GSPlaceholderString, GSCString, GSString, etc.)
-  // Default layout used by many GNUstep string classes:
-  // struct {
-  //   Class isa;        // offset 0
-  //   uint32_t _length; // offset 8
-  //   uint32_t _hash;   // offset 12 (optional)
-  //   char *_contents;  // offset 16 or 24 (depending on class)
-  // }
+  // Try multiple common layouts used by GNUstep string classes
   
-  // Try common offsets for the string data pointer
   lldb::addr_t str_data_addr = 0;
   uint32_t string_length = 0;
   
-  // First try reading length at offset 8
+  // First try reading length at offset 8 (common for most string types)
   lldb::addr_t len_addr = obj_addr + 8;
   if (!GNUstepRuntimeHelper::ReadMemory(process, len_addr, &string_length, sizeof(string_length))) {
-    return "";
+    // Some string types might not have length at offset 8
+    string_length = 0;
   }
   
-  // Try offset 24 first (most common for GSString)
-  lldb::addr_t str_ptr_addr = obj_addr + 24;
-  str_data_addr = GNUstepRuntimeHelper::ReadPointer(process, str_ptr_addr, error);
+  // GSString and similar: try multiple possible offsets for the string data
+  // Different string implementations use different layouts
+  const size_t possible_offsets[] = {24, 16, 20, 32, 12}; // Common offsets
   
-  if (error.Fail() || str_data_addr == 0) {
-    // Try offset 16 (some string types)
-    str_ptr_addr = obj_addr + 16;
+  for (size_t offset : possible_offsets) {
+    lldb::addr_t str_ptr_addr = obj_addr + offset;
     str_data_addr = GNUstepRuntimeHelper::ReadPointer(process, str_ptr_addr, error);
+    
+    if (!error.Fail() && str_data_addr != 0 && str_data_addr != LLDB_INVALID_ADDRESS) {
+      // Verify this looks like a valid string pointer
+      char test_char;
+      if (GNUstepRuntimeHelper::ReadMemory(process, str_data_addr, &test_char, 1)) {
+        // Check if it's a printable character or null terminator
+        if ((test_char >= 0x20 && test_char <= 0x7e) || test_char == 0) {
+          break; // Found valid string data
+        }
+      }
+      str_data_addr = 0; // Reset if not valid
+    }
   }
   
-  if (error.Fail() || str_data_addr == 0) {
+  if (str_data_addr == 0) {
+    // Last resort: check if the string data is embedded directly after the object header
+    // Some string types store short strings inline
+    lldb::addr_t inline_addr = obj_addr + 16;
+    char test_char;
+    if (GNUstepRuntimeHelper::ReadMemory(process, inline_addr, &test_char, 1)) {
+      if ((test_char >= 0x20 && test_char <= 0x7e) || test_char == 0) {
+        str_data_addr = inline_addr;
+      }
+    }
+  }
+  
+  if (str_data_addr == 0) {
     return "";
   }
   
@@ -1125,10 +1293,6 @@ std::string GNUstepNSDictionarySyntheticProvider::ExtractStringFromObject(lldb::
   
   // For regular NSString objects, try to read the string content
   Status error;
-  lldb::addr_t isa = GNUstepRuntimeHelper::ReadPointer(m_process, obj_addr, error);
-  if (error.Fail()) {
-    return "";
-  }
   
   // Get class name to determine string type
   ObjCLanguageRuntime *runtime = ObjCLanguageRuntime::Get(*m_process);

@@ -8,12 +8,13 @@
             "type": "lldb",
             "request": "launch",
             "name": "🚀 Bridge v2 - Modular Debug",
-            "program": "${workspaceFolder}/examples/custom_class_test_custom",
+            "program": "${workspaceFolder}/examples/custom_class_test",
             "args": [],
             "cwd": "${workspaceFolder}",
-            "preLaunchTask": "build-custom-class-test-with-custom-gnustep",
+            "preLaunchTask": "build-all-tests",
             "initCommands": [
                 "log enable lldb formatters",
+                // "b main",
                 // "settings set target.language objc",
                 // "type category enable gnustep/libobjc2",
                 "settings set target.process.stop-on-sharedlibrary-events false",
@@ -257,11 +258,12 @@
             "type": "cppdbg",
             "request": "launch",
             "name": "🧪 Run Unit Tests",
-            "program": "${workspaceFolder}/../build/tools/lldb/unittests/Language/ObjC/GNUstep/LanguageObjCGNUstepTests",
+            "program": "/home/robk/code/llvm-project/build/tools/lldb/unittests/Language/ObjC/GNUstep/LanguageObjCGNUstepTests",
             "args": [
-                "--gtest_brief=1"
+                "--gtest_brief=1",
+                "--gtest_filter=*"
             ],
-            "cwd": "${workspaceFolder}/../build",
+            "cwd": "/home/robk/code/llvm-project/build/tools/lldb/unittests/Language/ObjC/GNUstep",
             "preLaunchTask": "build-unit-tests",
             "MIMode": "gdb",
             "setupCommands": [
@@ -270,22 +272,71 @@
                     "text": "-enable-pretty-printing",
                     "ignoreFailures": true
                 }
-            ]
+            ],
+            "environment": [
+                {
+                    "name": "LD_LIBRARY_PATH",
+                    "value": "/home/robk/code/llvm-project/build/lib:/usr/local/lib:${env:LD_LIBRARY_PATH}"
+                }
+            ],
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "panel": "shared",
+                "clear": true
+            }
         },
         // ============================================
-        // INTEGRATION TESTS
+        // API INTEGRATION TESTS
         // ============================================
         {
-            "type": "lldb",
+            "type": "debugpy",
+            "name": "🔄 Run API Integration Tests",
             "request": "launch",
-            "name": "🔄 Integration Test Suite",
-            "program": "${workspaceFolder}/examples/formatter_integration_test",
-            "args": [],
-            "cwd": "${workspaceFolder}/examples",
-            "preLaunchTask": "build-integration-tests",
+            "program": "/home/robk/code/llvm-project/llvm/utils/lit/lit.py",
+            "args": [
+                "-v",
+                "--filter=gnustep",
+                "--param=dotest-args=--compiler=/home/robk/code/llvm-project/build/bin/clang",
+                "."
+            ],
+            "cwd": "/home/robk/code/llvm-project/build/tools/lldb/test/API",
+            "preLaunchTask": "build-api-tests",
             "env": {
-                "LD_LIBRARY_PATH": "/usr/local/lib:/home/robk/code/llvm-project/build/lib",
-                "PATH": "/home/robk/code/llvm-project/build/bin:${env:PATH}"
+                "LD_LIBRARY_PATH": "/usr/local/lib:/home/robk/code/llvm-project/build/lib:/home/robk/code/llvm-project/build/lib",
+                "PATH": "/home/robk/code/llvm-project/build/bin:/home/robk/code/llvm-project/build/bin:${env:PATH}",
+                "LLDB_TEST": "/home/robk/code/llvm-project/build/bin/lldb"
+            },
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "panel": "shared"
+            }
+        },
+        {
+            "type": "debugpy",
+            "name": "🔍 Debug API Integration Tests",
+            "request": "launch",
+            "program": "/home/robk/code/llvm-project/llvm/utils/lit/lit.py",
+            "args": [
+                "-vv",
+                "--show-unsupported",
+                "--show-xfail",
+                "--filter=gnustep",
+                "--param=dotest-args=--compiler=/home/robk/code/llvm-project/build/bin/clang --verbose",
+                "."
+            ],
+            "cwd": "/home/robk/code/llvm-project/build/tools/lldb/test/API",
+            "preLaunchTask": "build-api-tests",
+            "env": {
+                "LD_LIBRARY_PATH": "/usr/local/lib:/home/robk/code/llvm-project/build/lib:/home/robk/code/llvm-project/build/lib",
+                "PATH": "/home/robk/code/llvm-project/build/bin:/home/robk/code/llvm-project/build/bin:${env:PATH}",
+                "LLDB_TEST": "/home/robk/code/llvm-project/build/bin/lldb"
+            },
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "panel": "shared"
             }
         },
         // ============================================

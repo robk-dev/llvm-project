@@ -8,11 +8,16 @@
 
 #include "GNUstepGenericFormatter.h"
 #include "GNUstepStringFormatters.h"
+#include "GNUstepIdDispatcher.h"
 #include "../GNUstepObjCRuntimeIntrospector.h"
 #include "lldb/Utility/DataBufferHeap.h"
 #include "lldb/Utility/DataExtractor.h"
 #include "lldb/Utility/Endian.h"
 #include "lldb/Utility/Status.h"
+#include "lldb/ValueObject/ValueObject.h"
+#include "lldb/Target/ExecutionContext.h"
+#include "lldb/DataFormatters/TypeSummary.h"
+#include "Plugins/TypeSystem/Clang/TypeSystemClang.h"
 #include <sstream>
 #include <iomanip>
 #include <cstring>
@@ -75,6 +80,11 @@ bool GNUstepGenericFormatter::FormatObject(ValueObject &valobj, Stream &stream,
   
   bool first = true;
   for (const auto& ivar : all_ivars) {
+    // Skip the ISA field - it's redundant since we already show the class name
+    if (ivar.name == "isa") {
+      continue;
+    }
+    
     if (!first) {
       stream.PutCString(", ");
     }
@@ -453,6 +463,70 @@ std::string GNUstepGenericFormatter::FormatObjectIvar(Process *process,
     return "nil";
   }
   
+  // PRIORITY FIX: Use the ID dispatcher to format collection member variables properly
+  // This ensures NSMutableArray and NSMutableSet show formatted content, not raw addresses
+  ExecutionContextScope *exe_scope = process->GetTarget().GetProcessSP().get();
+  if (exe_scope) {
+    TypeSystemClangSP scratch_ts_sp = ScratchTypeSystemClang::GetForTarget(process->GetTarget());
+    if (scratch_ts_sp) {
+      CompilerType id_type = scratch_ts_sp->GetType(scratch_ts_sp->getASTContext().ObjCBuiltinIdTy);
+      
+      ExecutionContext exe_ctx;
+      exe_scope->CalculateExecutionContext(exe_ctx);
+      
+      // Check if this is a tagged pointer vs regular object
+      bool is_tagged_pointer = (obj_ptr & 0x7) != 0;
+      ValueObjectSP obj_valobj_sp;
+      
+      if (is_tagged_pointer) {
+        // For tagged pointers, create from data containing the tagged value
+        DataBufferSP data_buffer_sp(new DataBufferHeap(&obj_ptr, sizeof(obj_ptr)));
+        DataExtractor data(data_buffer_sp, process->GetByteOrder(), process->GetAddressByteSize());
+        obj_valobj_sp = ValueObject::CreateValueObjectFromData("member", data, exe_ctx, id_type);
+      } else {
+        // For regular objects, create from address
+        obj_valobj_sp = ValueObject::CreateValueObjectFromAddress("member", obj_ptr, exe_ctx, id_type);
+      }
+      
+      if (obj_valobj_sp) {
+        // Get dynamic value for regular objects
+        if (!is_tagged_pointer) {
+          ValueObjectSP dynamic_valobj_sp = obj_valobj_sp->GetDynamicValue(eDynamicCanRunTarget);
+          if (dynamic_valobj_sp) {
+            obj_valobj_sp = dynamic_valobj_sp;
+          }
+        }
+        
+        // Use the ID dispatcher to get proper formatting
+        StreamString format_stream;
+        TypeSummaryOptions format_options;
+        
+        if (GNUstepIdDispatcherFunction(*obj_valobj_sp, format_stream, format_options)) {
+          std::string formatted_result = format_stream.GetString().str();
+          
+          // For collections showing in custom class members, we want to be more concise
+          // but still informative (e.g., show count or first few items)
+          if (formatted_result.find("@[") == 0 || formatted_result.find("@{") == 0) {
+            // Collections: truncate if too long but preserve the collection type indicator
+            if (formatted_result.length() > 60) {
+              size_t comma_pos = formatted_result.find(",");
+              if (comma_pos != std::string::npos) {
+                size_t second_comma = formatted_result.find(",", comma_pos + 1);
+                if (second_comma != std::string::npos) {
+                  // Keep first two items and add ellipsis
+                  std::string end_char = formatted_result.back() == '}' ? "}" : "]";
+                  formatted_result = formatted_result.substr(0, second_comma) + ", ..." + end_char;
+                }
+              }
+            }
+          }
+          
+          return formatted_result;
+        }
+      }
+    }
+  }
+  
   // Check if this is a tagged string
   if ((obj_ptr & 0x8000000000000000ULL) != 0) {
     // This is a tagged string
@@ -514,21 +588,27 @@ std::string GNUstepGenericFormatter::FormatObjectIvar(Process *process,
     // Could extract number value
     return "<" + class_name + ">";
   } else if (class_name.find("NSArray") != std::string::npos ||
-             class_name.find("GSArray") != std::string::npos) {
-    // Try to get count
-    uint32_t addr_size = GNUstepRuntimeHelper::GetAddressByteSize(process);
-    lldb::addr_t count_addr = obj_ptr + addr_size; // Count is usually after isa
-    uint32_t count = 0;
-    GNUstepRuntimeHelper::ReadMemory(process, count_addr, &count, 4);
-    std::stringstream ss;
-    ss << "<" << count << " items>";
-    return ss.str();
+             class_name.find("GSArray") != std::string::npos ||
+             class_name.find("NSMutableArray") != std::string::npos ||
+             class_name.find("GSMutableArray") != std::string::npos) {
+    // For arrays, show a generic indicator rather than trying to read count
+    // The memory layout varies too much between different array implementations
+    return "@[]";
   } else if (class_name.find("NSDictionary") != std::string::npos ||
-             class_name.find("GSDictionary") != std::string::npos) {
-    return "<" + class_name + ">";
+             class_name.find("GSDictionary") != std::string::npos ||
+             class_name.find("NSMutableDictionary") != std::string::npos ||
+             class_name.find("GSMutableDictionary") != std::string::npos) {
+    // For dictionaries, show a generic indicator
+    return "@{}";
+  } else if (class_name.find("NSSet") != std::string::npos ||
+             class_name.find("GSSet") != std::string::npos ||
+             class_name.find("NSMutableSet") != std::string::npos ||
+             class_name.find("GSMutableSet") != std::string::npos) {
+    // For sets, show a generic indicator
+    return "{...}";
   }
   
-  // For other objects, just show the class name
+  // FALLBACK: For other objects when ID dispatcher fails, show class name but try to be informative
   std::stringstream ss;
   ss << "<" << class_name << " 0x" << std::hex << obj_ptr << ">";
   return ss.str();

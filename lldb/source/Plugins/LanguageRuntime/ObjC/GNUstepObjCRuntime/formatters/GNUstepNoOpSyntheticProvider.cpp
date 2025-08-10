@@ -19,7 +19,8 @@ GNUstepNoOpSyntheticProvider::GNUstepNoOpSyntheticProvider(lldb::ValueObjectSP v
 
 lldb::ChildCacheState GNUstepNoOpSyntheticProvider::Update() {
   // Always return that we're up to date - nothing to update
-  return lldb::ChildCacheState::eRefetch;
+  // Return eReuse to indicate the cache should be reused (no changes)
+  return lldb::ChildCacheState::eReuse;
 }
 
 bool GNUstepNoOpSyntheticProvider::MightHaveChildren() {

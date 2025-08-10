@@ -1,0 +1,239 @@
+# LLDB Script for Comprehensive NSNumber Formatter Testing
+# 
+# This script automatically tests all aspects of the GNUstep NSNumber formatter
+# Run with: lldb -s test_nsnumber_script.lldb test_nsnumber_comprehensive
+#
+# Expected output validation:
+# - Tagged pointer integers should show as plain numbers (42, -17, etc.)
+# - Tagged pointer floats should show with decimal format (3.14159, etc.)
+# - Boolean numbers should show as YES/NO
+# - Special values should show as nan, inf, -inf
+# - nil should show as "nil"
+
+# Load the test program
+file test_nsnumber_comprehensive
+
+# Set breakpoint at the main testing location
+breakpoint set --file test_nsnumber_comprehensive.m --line 244
+
+# Run the program
+run
+
+# Test Section 1: Tagged Pointer Integers
+echo ""
+echo "=== TESTING TAGGED POINTER INTEGERS (Tag 1) ==="
+po tagged_ints[0]
+po tagged_ints[1] 
+po tagged_ints[2]
+po tagged_ints[3]
+po tagged_ints[4]
+po tagged_ints[5]
+po tagged_ints[6]
+po tagged_ints[7]
+po tagged_ints[8]
+
+echo ""
+echo "Expected results:"
+echo "tagged_ints[0] = 0"
+echo "tagged_ints[1] = 1" 
+echo "tagged_ints[2] = -1"
+echo "tagged_ints[3] = 42"
+echo "tagged_ints[4] = -42"
+echo "tagged_ints[5] = 127"
+echo "tagged_ints[6] = -128"
+echo "tagged_ints[7] = 1024"
+echo "tagged_ints[8] = -1024"
+
+# Test Section 2: Tagged Pointer Floats  
+echo ""
+echo "=== TESTING TAGGED POINTER FLOATS (Tag 5) ==="
+po tagged_floats[0]
+po tagged_floats[1]
+po tagged_floats[2]
+po tagged_floats[3]
+po tagged_floats[4]
+po tagged_floats[5]
+po tagged_floats[6]
+po tagged_floats[7]
+
+echo ""
+echo "Expected results:"
+echo "tagged_floats[0] = 0"
+echo "tagged_floats[1] = 1"
+echo "tagged_floats[2] = -1"
+echo "tagged_floats[3] = 3.14159"
+echo "tagged_floats[4] = -3.14159" 
+echo "tagged_floats[5] = 1.5"
+echo "tagged_floats[6] = 0.5"
+echo "tagged_floats[7] = 0.25"
+
+# Test Section 3: Tagged Pointer Doubles
+echo ""
+echo "=== TESTING TAGGED POINTER DOUBLES (Tags 2 & 3) ==="
+po tagged_doubles[0]
+po tagged_doubles[1]
+po tagged_doubles[2]
+po tagged_doubles[3]
+po tagged_doubles[4]
+po tagged_doubles[5]
+
+echo ""
+echo "Expected results:"
+echo "tagged_doubles[0] = 0"
+echo "tagged_doubles[1] = 1"
+echo "tagged_doubles[2] = -1"
+echo "tagged_doubles[3] = 2.71828"
+echo "tagged_doubles[4] = -2.71828"
+echo "tagged_doubles[5] = 0.123457"
+
+# Test Section 4: Regular Heap NSNumber Objects
+echo ""
+echo "=== TESTING HEAP NSNUMBER OBJECTS ==="
+po heap_numbers[0]
+po heap_numbers[1]
+po heap_numbers[2]
+po heap_numbers[3]
+po heap_numbers[4]
+
+echo ""
+echo "Expected results:"
+echo "heap_numbers[0] = 9223372036854775807 (max int64)"
+echo "heap_numbers[1] = -9223372036854775808 (min int64)"
+echo "heap_numbers[2] = 18446744073709551615 (max uint64)"
+echo "heap_numbers[3] = 1.79769e+308 (or similar large double)"
+echo "heap_numbers[4] = -1.79769e+308 (or similar large negative double)"
+
+# Test Section 5: Special Values
+echo ""
+echo "=== TESTING SPECIAL VALUES ==="
+po heap_numbers[5]
+po heap_numbers[6]
+po heap_numbers[7]
+po heap_numbers[8]
+po heap_numbers[9]
+po heap_numbers[10]
+
+echo ""
+echo "Expected results:"
+echo "heap_numbers[5] = nan"
+echo "heap_numbers[6] = inf"
+echo "heap_numbers[7] = -inf"
+echo "heap_numbers[8] = nan"
+echo "heap_numbers[9] = inf"
+echo "heap_numbers[10] = -inf"
+
+# Test Section 6: Boolean NSNumbers
+echo ""
+echo "=== TESTING BOOLEAN NSNUMBERS ==="
+po bool_numbers[0]
+po bool_numbers[1]
+po bool_numbers[2]
+po bool_numbers[3]
+
+echo ""
+echo "Expected results:"
+echo "bool_numbers[0] = YES"
+echo "bool_numbers[1] = NO"  
+echo "bool_numbers[2] = YES"
+echo "bool_numbers[3] = NO"
+
+# Test Section 7: Literal Numbers
+echo ""
+echo "=== TESTING LITERAL NUMBERS ==="
+po literal_numbers[0]
+po literal_numbers[1]
+po literal_numbers[2]
+po literal_numbers[3]
+po literal_numbers[4]
+po literal_numbers[5]
+po literal_numbers[6]
+
+echo ""
+echo "Expected results:"
+echo "literal_numbers[0] = 0"
+echo "literal_numbers[1] = 42"
+echo "literal_numbers[2] = -17"
+echo "literal_numbers[3] = 3.14"
+echo "literal_numbers[4] = 2.71828"
+echo "literal_numbers[5] = 255"
+echo "literal_numbers[6] = 63"
+
+# Test Section 8: Specific Type Analysis  
+echo ""
+echo "=== TESTING SPECIFIC TYPES ==="
+po type_test_numbers[0]
+po type_test_numbers[1]
+po type_test_numbers[4]
+po type_test_numbers[8]
+po type_test_numbers[10]
+po type_test_numbers[11]
+
+echo ""
+echo "Expected results:"
+echo "type_test_numbers[0] = 65 (char 'A')"
+echo "type_test_numbers[1] = 255"
+echo "type_test_numbers[4] = 123456"
+echo "type_test_numbers[8] = 123456789012345"
+echo "type_test_numbers[10] = 1.234"
+echo "type_test_numbers[11] = 5.6789"
+
+# Test Section 9: Nil Handling
+echo ""
+echo "=== TESTING NIL HANDLING ==="
+po nil_number
+
+echo ""
+echo "Expected results:"
+echo "nil_number = nil"
+
+# Test Section 10: Performance Test with Large Array
+echo ""
+echo "=== TESTING PERFORMANCE WITH LARGE ARRAY ==="
+po [large_number_array objectAtIndex:0]
+po [large_number_array objectAtIndex:1000]
+po [large_number_array objectAtIndex:5000]
+po [large_number_array objectAtIndex:9999]
+
+echo ""
+echo "Expected results:"
+echo "Element 0 = 0"
+echo "Element 1000 = 1000" 
+echo "Element 5000 = 5000"
+echo "Element 9999 = 9999"
+
+# Test array element access performance
+echo ""
+echo "=== PERFORMANCE TEST: Array Element Formatting Speed ==="
+echo "Testing first 10 elements of large array:"
+po [large_number_array objectAtIndex:0]
+po [large_number_array objectAtIndex:1]
+po [large_number_array objectAtIndex:2]
+po [large_number_array objectAtIndex:3]
+po [large_number_array objectAtIndex:4]
+po [large_number_array objectAtIndex:5]
+po [large_number_array objectAtIndex:6] 
+po [large_number_array objectAtIndex:7]
+po [large_number_array objectAtIndex:8]
+po [large_number_array objectAtIndex:9]
+
+echo ""
+echo "=== CLASS NAME INSPECTION ==="
+echo "Checking class names for different NSNumber types:"
+print (char*)[tagged_ints[3] class]
+print (char*)[tagged_floats[3] class]
+print (char*)[bool_numbers[0] class]
+print (char*)[heap_numbers[0] class]
+
+echo ""
+echo "=== FORMATTER VALIDATION COMPLETE ==="
+echo "Review the output above to validate that:"
+echo "1. Tagged pointer integers display as plain numbers"
+echo "2. Tagged pointer floats show proper decimal format"
+echo "3. Booleans show as YES/NO"
+echo "4. Special values show as nan/inf/-inf"
+echo "5. nil shows as 'nil'"
+echo "6. Large numbers format correctly"
+echo "7. All formatting completes within reasonable time"
+
+# Exit
+quit

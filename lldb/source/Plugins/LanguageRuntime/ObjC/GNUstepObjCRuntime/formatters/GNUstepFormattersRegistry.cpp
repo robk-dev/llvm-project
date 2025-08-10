@@ -28,6 +28,13 @@
 #include "GNUstepIndexSetFormatters.h"
 #include "GNUstepDecimalNumberFormatters.h"
 #include "GNUstepCharacterSetFormatters.h"
+#include "GNUstepOrderedSetFormatters.h"
+#include "GNUstepBundleFormatters.h"
+#include "GNUstepScannerFormatters.h"
+#include "GNUstepLocaleFormatters.h"
+#include "GNUstepUserDefaultsFormatters.h"
+#include "GNUstepCalendarFormatters.h"
+#include "GNUstepProcessInfoFormatters.h"
 #include "lldb/DataFormatters/DataVisualization.h"
 #include "lldb/DataFormatters/TypeCategory.h"
 #include "lldb/DataFormatters/TypeSummary.h"
@@ -148,6 +155,27 @@ void GNUstepFormattersRegistry::RegisterNumberFormatters(TypeCategoryImpl &categ
   category.AddTypeSummary("NSSmallFloat", eFormatterMatchExact, number_summary);
   category.AddTypeSummary("NSSmallExtendedDouble", eFormatterMatchExact, number_summary);
   category.AddTypeSummary("NSSmallRepeatingDouble", eFormatterMatchExact, number_summary);
+  
+  // CRITICAL FIX: Register for common tagged pointer address patterns in LLDB po
+  // LLDB might see tagged pointers as raw addresses or generic pointer types
+  // This ensures our NSNumber formatter catches them regardless of type name
+  TypeSummaryImpl::Flags fallback_flags;
+  fallback_flags.SetCascades(false)  // Don't cascade to avoid infinite loops
+               .SetSkipPointers(true)   // We handle the pointer dereferencing
+               .SetSkipReferences(false)
+               .SetDontShowChildren(true)
+               .SetDontShowValue(true)
+               .SetShowMembersOneLiner(false)
+               .SetHideItemNames(true);
+  
+  // Create a fallback summary that checks for tagged pointers
+  auto fallback_summary = std::make_shared<CXXFunctionSummaryFormat>(
+      fallback_flags, GNUstepIdDispatcherFunction, "Tagged pointer fallback");
+  
+  // Register for generic pointer patterns that might represent tagged NSNumbers
+  // This catches cases where LLDB shows "(NSNumber *) 0x151" instead of calling our formatter
+  category.AddTypeSummary("^NSNumber \\* const$", eFormatterMatchRegex, fallback_summary);
+  category.AddTypeSummary("^const NSNumber \\*$", eFormatterMatchRegex, fallback_summary);
 }
 
 void GNUstepFormattersRegistry::RegisterCollectionFormatters(TypeCategoryImpl &category) {
@@ -159,6 +187,9 @@ void GNUstepFormattersRegistry::RegisterCollectionFormatters(TypeCategoryImpl &c
   
   // Register NSSet formatters
   RegisterSetFormatters(category);
+  
+  // Register NSOrderedSet formatters - TODO: implement when files available
+  // RegisterOrderedSetFormatters(category);
 }
 
 void GNUstepFormattersRegistry::RegisterArrayFormatters(TypeCategoryImpl &category) {
@@ -334,6 +365,9 @@ void GNUstepFormattersRegistry::RegisterFoundationFormatters(TypeCategoryImpl &c
   // Enable NSDate formatter - it's implemented
   RegisterDateFormatters(category);
   
+  // TEMPORARILY DISABLED - function not implemented yet
+  // RegisterCalendarFormatters(category);
+  
   // Enable additional Foundation formatters - all are implemented and ready
   RegisterURLFormatters(category);
   RegisterErrorFormatters(category);
@@ -352,6 +386,24 @@ void GNUstepFormattersRegistry::RegisterFoundationFormatters(TypeCategoryImpl &c
   
   // Re-enabled with NoOp synthetic to prevent recursion
   RegisterNotificationFormatter(category);
+  
+  // Register NSBundle formatter
+  RegisterBundleFormatters(category);
+  
+  // Register NSScanner formatter
+  RegisterScannerFormatters(category);
+  
+  // Register NSLocale formatter
+  RegisterLocaleFormatters(category);
+  
+  // TEMPORARILY DISABLED - functions not implemented yet
+  // RegisterUserDefaultsFormatters(category);
+  
+  // Register NSProcessInfo formatter  
+  // RegisterProcessInfoFormatters(category);
+  
+  // Register NSProxy formatter - TODO: implement function
+  // RegisterProxyFormatters(category);
 }
 
 void GNUstepFormattersRegistry::RegisterDateFormatters(TypeCategoryImpl &category) {
@@ -380,6 +432,57 @@ void GNUstepFormattersRegistry::RegisterDateFormatters(TypeCategoryImpl &categor
   category.AddTypeSummary("NSCalendarDate *", eFormatterMatchExact, date_summary);
   category.AddTypeSummary("GSDate *", eFormatterMatchExact, date_summary);
   category.AddTypeSummary("GSCalendarDate *", eFormatterMatchExact, date_summary);
+
+  // Register NSTimeZone summary provider
+  TypeSummaryImpl::Flags tz_flags;
+  tz_flags.SetCascades(true)
+          .SetSkipPointers(false)
+          .SetSkipReferences(false)
+          .SetDontShowChildren(true)
+          .SetDontShowValue(true)
+          .SetShowMembersOneLiner(false)
+          .SetHideItemNames(true);
+
+  auto tz_summary = std::make_shared<CXXFunctionSummaryFormat>(
+      tz_flags, GNUstepNSTimeZoneFormatterFunction, "NSTimeZone summary provider");
+
+  // Register for various NSTimeZone type names
+  category.AddTypeSummary("NSTimeZone", eFormatterMatchExact, tz_summary);
+  category.AddTypeSummary("GSTimeZone", eFormatterMatchExact, tz_summary);
+  category.AddTypeSummary("GSAbsTimeZone", eFormatterMatchExact, tz_summary);
+  category.AddTypeSummary("NSLocalTimeZone", eFormatterMatchExact, tz_summary);
+  category.AddTypeSummary("GSWindowsTimeZone", eFormatterMatchExact, tz_summary);
+  
+  // Also register with pointer types
+  category.AddTypeSummary("NSTimeZone *", eFormatterMatchExact, tz_summary);
+  category.AddTypeSummary("GSTimeZone *", eFormatterMatchExact, tz_summary);
+  category.AddTypeSummary("GSAbsTimeZone *", eFormatterMatchExact, tz_summary);
+  category.AddTypeSummary("NSLocalTimeZone *", eFormatterMatchExact, tz_summary);
+  category.AddTypeSummary("GSWindowsTimeZone *", eFormatterMatchExact, tz_summary);
+}
+
+void GNUstepFormattersRegistry::RegisterCalendarFormatters(TypeCategoryImpl &category) {
+  // Register NSCalendar summary provider
+  TypeSummaryImpl::Flags calendar_flags;
+  calendar_flags.SetCascades(true)
+               .SetSkipPointers(false)
+               .SetSkipReferences(false)
+               .SetDontShowChildren(true)
+               .SetDontShowValue(true)
+               .SetShowMembersOneLiner(false)
+               .SetHideItemNames(true);
+
+  // Create the summary provider
+  auto calendar_summary = std::make_shared<CXXFunctionSummaryFormat>(
+      calendar_flags, GNUstepNSCalendarFormatterFunction, "NSCalendar summary provider");
+
+  // Register for various NSCalendar type names
+  category.AddTypeSummary("NSCalendar", eFormatterMatchExact, calendar_summary);
+  category.AddTypeSummary("GSCalendar", eFormatterMatchExact, calendar_summary);
+  
+  // Also register with pointer types
+  category.AddTypeSummary("NSCalendar *", eFormatterMatchExact, calendar_summary);
+  category.AddTypeSummary("GSCalendar *", eFormatterMatchExact, calendar_summary);
 }
 
 void GNUstepFormattersRegistry::RegisterURLFormatters(TypeCategoryImpl &category) {
@@ -801,4 +904,177 @@ void GNUstepFormattersRegistry::RegisterCharacterSetFormatters(TypeCategoryImpl 
   category.AddTypeSummary("NSMutableCharacterSet *", eFormatterMatchExact, charset_summary);
   category.AddTypeSummary("GSCharacterSet *", eFormatterMatchExact, charset_summary);
   category.AddTypeSummary("GSMutableCharacterSet *", eFormatterMatchExact, charset_summary);
+}
+
+void GNUstepFormattersRegistry::RegisterOrderedSetFormatters(TypeCategoryImpl &category) {
+  // Register NSOrderedSet summary provider
+  TypeSummaryImpl::Flags orderedset_flags;
+  orderedset_flags.SetCascades(true)
+                  .SetSkipPointers(false)
+                  .SetSkipReferences(false)
+                  .SetDontShowChildren(false)  // We want to show children
+                  .SetDontShowValue(true)
+                  .SetShowMembersOneLiner(false)
+                  .SetHideItemNames(false);
+
+  // Create the summary provider
+  auto orderedset_summary = std::make_shared<CXXFunctionSummaryFormat>(
+      orderedset_flags, GNUstepNSOrderedSetFormatterFunction, "NSOrderedSet summary provider");
+
+  // Register for various NSOrderedSet type names
+  category.AddTypeSummary("NSOrderedSet", eFormatterMatchExact, orderedset_summary);
+  category.AddTypeSummary("NSMutableOrderedSet", eFormatterMatchExact, orderedset_summary);
+  category.AddTypeSummary("GSOrderedSet", eFormatterMatchExact, orderedset_summary);
+  category.AddTypeSummary("GSMutableOrderedSet", eFormatterMatchExact, orderedset_summary);
+  
+  // Also register with pointer types
+  category.AddTypeSummary("NSOrderedSet *", eFormatterMatchExact, orderedset_summary);
+  category.AddTypeSummary("NSMutableOrderedSet *", eFormatterMatchExact, orderedset_summary);
+  category.AddTypeSummary("GSOrderedSet *", eFormatterMatchExact, orderedset_summary);
+  category.AddTypeSummary("GSMutableOrderedSet *", eFormatterMatchExact, orderedset_summary);
+  
+  // Register synthetic children provider for ordered sets
+  SyntheticChildren::Flags orderedset_synth_flags;
+  orderedset_synth_flags.SetCascades(true)
+                        .SetSkipPointers(false)
+                        .SetSkipReferences(false)
+                        .SetNonCacheable(false);
+
+  auto orderedset_synth = std::make_shared<CXXSyntheticChildren>(
+      orderedset_synth_flags, "NSOrderedSet synthetic children", 
+      GNUstepNSOrderedSetSyntheticFrontEndCreator);
+
+  // Register synthetic provider for the same types
+  category.AddTypeSynthetic("NSOrderedSet", eFormatterMatchExact, orderedset_synth);
+  category.AddTypeSynthetic("NSMutableOrderedSet", eFormatterMatchExact, orderedset_synth);
+  category.AddTypeSynthetic("GSOrderedSet", eFormatterMatchExact, orderedset_synth);
+  category.AddTypeSynthetic("GSMutableOrderedSet", eFormatterMatchExact, orderedset_synth);
+  
+  // Also register with pointer types
+  category.AddTypeSynthetic("NSOrderedSet *", eFormatterMatchExact, orderedset_synth);
+  category.AddTypeSynthetic("NSMutableOrderedSet *", eFormatterMatchExact, orderedset_synth);
+  category.AddTypeSynthetic("GSOrderedSet *", eFormatterMatchExact, orderedset_synth);
+  category.AddTypeSynthetic("GSMutableOrderedSet *", eFormatterMatchExact, orderedset_synth);
+}
+
+// TODO: Implement RegisterProxyFormatters when GNUstepProxyFormatters are implemented
+
+void GNUstepFormattersRegistry::RegisterBundleFormatters(TypeCategoryImpl &category) {
+  // Register NSBundle summary provider
+  TypeSummaryImpl::Flags bundle_flags;
+  bundle_flags.SetCascades(true)
+              .SetSkipPointers(false)
+              .SetSkipReferences(false)
+              .SetDontShowChildren(true)
+              .SetDontShowValue(true)
+              .SetShowMembersOneLiner(false)
+              .SetHideItemNames(true);
+
+  // Create the summary provider
+  auto bundle_summary = std::make_shared<CXXFunctionSummaryFormat>(
+      bundle_flags, GNUstepNSBundleFormatterFunction, "NSBundle summary provider");
+
+  // Register for various NSBundle type names
+  category.AddTypeSummary("NSBundle", eFormatterMatchExact, bundle_summary);
+  category.AddTypeSummary("GSBundle", eFormatterMatchExact, bundle_summary);
+  
+  // Also register with pointer types
+  category.AddTypeSummary("NSBundle *", eFormatterMatchExact, bundle_summary);
+  category.AddTypeSummary("GSBundle *", eFormatterMatchExact, bundle_summary);
+}
+
+void GNUstepFormattersRegistry::RegisterScannerFormatters(TypeCategoryImpl &category) {
+  // Register NSScanner summary provider
+  TypeSummaryImpl::Flags scanner_flags;
+  scanner_flags.SetCascades(true)
+               .SetSkipPointers(false)
+               .SetSkipReferences(false)
+               .SetDontShowChildren(true)
+               .SetDontShowValue(true)
+               .SetShowMembersOneLiner(false)
+               .SetHideItemNames(true);
+
+  // Create the summary provider
+  auto scanner_summary = std::make_shared<CXXFunctionSummaryFormat>(
+      scanner_flags, GNUstepNSScannerFormatterFunction, "NSScanner summary provider");
+
+  // Register for various NSScanner type names
+  category.AddTypeSummary("NSScanner", eFormatterMatchExact, scanner_summary);
+  category.AddTypeSummary("GSScanner", eFormatterMatchExact, scanner_summary);
+  
+  // Also register with pointer types
+  category.AddTypeSummary("NSScanner *", eFormatterMatchExact, scanner_summary);
+  category.AddTypeSummary("GSScanner *", eFormatterMatchExact, scanner_summary);
+}
+
+void GNUstepFormattersRegistry::RegisterLocaleFormatters(TypeCategoryImpl &category) {
+  // Register NSLocale summary provider
+  TypeSummaryImpl::Flags locale_flags;
+  locale_flags.SetCascades(true)
+              .SetSkipPointers(false)
+              .SetSkipReferences(false)
+              .SetDontShowChildren(true)
+              .SetDontShowValue(true)
+              .SetShowMembersOneLiner(false)
+              .SetHideItemNames(true);
+
+  // Create the summary provider
+  auto locale_summary = std::make_shared<CXXFunctionSummaryFormat>(
+      locale_flags, GNUstepNSLocaleFormatterFunction, "NSLocale summary provider");
+
+  // Register for various NSLocale type names
+  category.AddTypeSummary("NSLocale", eFormatterMatchExact, locale_summary);
+  category.AddTypeSummary("GSLocale", eFormatterMatchExact, locale_summary);
+  
+  // Also register with pointer types
+  category.AddTypeSummary("NSLocale *", eFormatterMatchExact, locale_summary);
+  category.AddTypeSummary("GSLocale *", eFormatterMatchExact, locale_summary);
+}
+
+void GNUstepFormattersRegistry::RegisterUserDefaultsFormatters(TypeCategoryImpl &category) {
+  // Register NSUserDefaults summary provider
+  TypeSummaryImpl::Flags userdefaults_flags;
+  userdefaults_flags.SetCascades(true)
+                    .SetSkipPointers(false)
+                    .SetSkipReferences(false)
+                    .SetDontShowChildren(true)
+                    .SetDontShowValue(true)
+                    .SetShowMembersOneLiner(false)
+                    .SetHideItemNames(true);
+
+  // Create the summary provider
+  auto userdefaults_summary = std::make_shared<CXXFunctionSummaryFormat>(
+      userdefaults_flags, GNUstepNSUserDefaultsFormatterFunction, "NSUserDefaults summary provider");
+
+  // Register for various NSUserDefaults type names
+  category.AddTypeSummary("NSUserDefaults", eFormatterMatchExact, userdefaults_summary);
+  category.AddTypeSummary("GSUserDefaults", eFormatterMatchExact, userdefaults_summary);
+  
+  // Also register with pointer types
+  category.AddTypeSummary("NSUserDefaults *", eFormatterMatchExact, userdefaults_summary);
+  category.AddTypeSummary("GSUserDefaults *", eFormatterMatchExact, userdefaults_summary);
+}
+
+void GNUstepFormattersRegistry::RegisterProcessInfoFormatters(TypeCategoryImpl &category) {
+  // Register NSProcessInfo summary provider
+  TypeSummaryImpl::Flags processinfo_flags;
+  processinfo_flags.SetCascades(true)
+                   .SetSkipPointers(false)
+                   .SetSkipReferences(false)
+                   .SetDontShowChildren(true)
+                   .SetDontShowValue(true)
+                   .SetShowMembersOneLiner(false)
+                   .SetHideItemNames(true);
+  
+  // Create the summary provider
+  auto processinfo_summary = std::make_shared<CXXFunctionSummaryFormat>(
+      processinfo_flags, GNUstepNSProcessInfoFormatterFunction, "NSProcessInfo summary provider");
+  
+  // Register for various NSProcessInfo type names
+  category.AddTypeSummary("NSProcessInfo", eFormatterMatchExact, processinfo_summary);
+  category.AddTypeSummary("_NSConcreteProcessInfo", eFormatterMatchExact, processinfo_summary);
+  
+  // Also register with pointer types  
+  category.AddTypeSummary("NSProcessInfo *", eFormatterMatchExact, processinfo_summary);
+  category.AddTypeSummary("_NSConcreteProcessInfo *", eFormatterMatchExact, processinfo_summary);
 }

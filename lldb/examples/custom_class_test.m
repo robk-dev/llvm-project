@@ -222,13 +222,73 @@ int main(int argc, const char *argv[]) {
       }
     };
 
+    // === ADDITIONAL FOUNDATION TYPES FOR COMPREHENSIVE TESTING ===
+    
+    // Test NSScanner variations (text parsing debugging)
+    NSString *testString = @"Hello 123 World 456.78 End";
+    NSScanner *stringScanner = [NSScanner scannerWithString:testString];
+    NSString *numberString = @"123.456 789 -42.5";
+    NSScanner *numberScanner = [NSScanner scannerWithString:numberString];
+    NSScanner *emptyScanner = [NSScanner scannerWithString:@""];
+    
+    // Perform some scanning operations to test state
+    NSString *scannedWord = nil;
+    NSInteger scannedInt = 0;
+    double scannedDouble = 0.0;
+    
+    [stringScanner scanUpToCharactersFromSet:[NSCharacterSet decimalDigitCharacterSet] intoString:&scannedWord];
+    [stringScanner scanInteger:&scannedInt];
+    [numberScanner scanDouble:&scannedDouble];
+    
+    NSScanner *nilScanner = nil; // Edge case: nil scanner
+    
+    // Test NSBundle variations (app/framework debugging)
+    NSBundle *mainBundle = [NSBundle mainBundle];
+    NSBundle *foundationBundle = [NSBundle bundleWithPath:@"/usr/local/lib/GNUstep/Libraries/gnustep-base/Versions/1.29/libgnustep-base.so"];
+    NSBundle *invalidBundle = [NSBundle bundleWithPath:@"/nonexistent/path"];
+    NSBundle *nilBundle = nil; // Edge case: nil bundle
+    
+    // Test NSProcessInfo variations (system debugging)
+    NSProcessInfo *processInfo = [NSProcessInfo processInfo];
+    NSProcessInfo *nilProcessInfo = nil; // Edge case: nil process info
+    
+    // Test NSUserDefaults variations (preferences debugging)
+    NSUserDefaults *standardDefaults = [NSUserDefaults standardUserDefaults];
+    NSUserDefaults *customDefaults = [[NSUserDefaults alloc] init];
+    
+    // Set some test values for UserDefaults testing
+    [standardDefaults setObject:@"test_value" forKey:@"test_key"];
+    [standardDefaults setInteger:42 forKey:@"test_number"];
+    [standardDefaults setBool:YES forKey:@"test_bool"];
+    [standardDefaults synchronize];
+    
+    if (customDefaults) {
+        [customDefaults setObject:@"custom_value" forKey:@"custom_key"];
+        [customDefaults synchronize];
+    }
+    
+    NSUserDefaults *nilDefaults = nil; // Edge case: nil defaults
+    
+    // Test NSLocale variations (internationalization debugging)
+    NSLocale *currentLocale = [NSLocale currentLocale];
+    NSLocale *systemLocale = [NSLocale systemLocale];
+    NSLocale *usLocale = [[NSLocale alloc] initWithLocaleIdentifier:@"en_US"];
+    NSLocale *frenchLocale = [[NSLocale alloc] initWithLocaleIdentifier:@"fr_FR"];
+    NSLocale *invalidLocale = [[NSLocale alloc] initWithLocaleIdentifier:@"invalid_locale"];
+    NSLocale *nilLocale = nil; // Edge case: nil locale
+    
+    // Test NSCalendar variations (date/time system debugging)
+    NSCalendar *currentCalendar = [NSCalendar currentCalendar];
+    NSCalendar *gregorianCalendar = [[NSCalendar alloc] initWithCalendarIdentifier:NSGregorianCalendar];
+    NSCalendar *autoupdatingCalendar = [NSCalendar autoupdatingCurrentCalendar];
+
     // Set breakpoint here to inspect complex nested structures
     NSLog(@"Complex custom class debugging test");
     NSLog(@"Account: %@", account);
     NSLog(@"Account summary: %@", accountSummary);
     
     // Log the new high-priority objects for testing
-    NSLog(@"NSNull: %@", nullObject);
+    // NSLog(@"NSNull: %@", nullObject);
     NSLog(@"NSException: %@", testException);
     NSLog(@"NSAttributedString: %@", attrString);
     NSLog(@"NSIndexPath: %@", indexPath);
@@ -259,6 +319,10 @@ int main(int argc, const char *argv[]) {
     NSLog(@"NSUUID - random: %@", randomUUID);
     NSLog(@"NSUUID - specific: %@", specificUUID);
     
+    NSLog(@"NSCalendar - current: %@", currentCalendar);
+    NSLog(@"NSCalendar - gregorian: %@", gregorianCalendar);
+    NSLog(@"NSCalendar - autoupdating: %@", autoupdatingCalendar);
+    
     // === PRIORITY 1 FORMATTERS OUTPUT ===
     NSLog(@"=== PRIORITY 1 FORMATTERS: NSIndexSet, NSDecimalNumber, NSCharacterSet ===");
     
@@ -286,9 +350,246 @@ int main(int argc, const char *argv[]) {
     // Set a breakpoint here to test all Foundation formatters
     NSLog(@"Foundation formatter test breakpoint"); // Line for setting breakpoint
     
-    // Add a simple pause to allow debugging
-    printf("Press Enter to continue...\n");
-    getchar();
+    // === SECTION 5: Comprehensive Formatter Testing ===
+    NSLog(@"=== Comprehensive Formatter Demo ===");
+    
+    // === NSString Comprehensive Testing ===
+    NSLog(@"--- NSString Formatter Tests ---");
+    NSString *emptyString = @"";
+    NSString *unicodeString = @"Hello 世界 🌍 Émoji";
+    NSString *longString = @"This is a very long string that tests how our formatter handles extended content and whether it truncates or displays properly in the debugger view.";
+    NSMutableString *mutableString = [NSMutableString stringWithString:@"Mutable"];
+    [mutableString appendString:@" String"];
+    NSString *nilString = nil;
+    
+    // === NSNumber Comprehensive Testing ===
+    NSLog(@"--- NSNumber Formatter Tests ---");
+    NSNumber *positiveInt = @(12345);
+    NSNumber *negativeInt = @(-9876);
+    NSNumber *largeInt = @(9223372036854775807LL); // LLONG_MAX
+    NSNumber *floatNum = @(3.14159f);
+    NSNumber *doubleNum = @(2.718281828459045);
+    NSNumber *boolYES = @(YES);
+    NSNumber *boolNO = @(NO);
+    NSNumber *charNum = @('A');
+    NSNumber *zeroNum = @(0);
+    NSNumber *nilNumber = nil;
+    
+    // === NSArray Comprehensive Testing ===
+    NSLog(@"--- NSArray Formatter Tests ---");
+    NSArray *emptyArray = @[];
+    NSArray *mixedTypeArray = @[@"string", @42, @3.14, @YES, [NSDate date]];
+    NSArray *stringArray = @[@"First", @"Second", @"Third", @"Fourth", @"Fifth"];
+    NSArray *numberArray = @[@1, @2, @3, @4, @5, @6, @7, @8, @9, @10];
+    NSMutableArray *growingArray = [[NSMutableArray alloc] init];
+    for (int i = 0; i < 5; i++) {
+        [growingArray addObject:[NSString stringWithFormat:@"Item %d", i]];
+    }
+    
+    // Nested arrays
+    NSArray *nestedArray = @[
+        @[@"Level1-A", @"Level1-B"],
+        @[@"Level2-A", @"Level2-B", @"Level2-C"],
+        @[@42, @3.14, @YES]
+    ];
+    NSArray *nilArray = nil;
+    
+    // === NSSet Comprehensive Testing ===
+    NSLog(@"--- NSSet Formatter Tests ---");
+    NSSet *emptySet = [NSSet set];
+    NSSet *mixedSet = [NSSet setWithObjects:@"String", @42, @3.14, @YES, nil];
+    NSSet *stringSet = [NSSet setWithObjects:@"Alpha", @"Beta", @"Gamma", @"Delta", nil];
+    NSSet *numberSet = [NSSet setWithObjects:@1, @2, @3, @4, @5, nil];
+    NSMutableSet *growingSet = [[NSMutableSet alloc] init];
+    [growingSet addObject:@"Dynamic"];
+    [growingSet addObject:@"Content"];
+    [growingSet addObject:@"Added"];
+    
+    // Set with duplicate attempts (should remain unique)
+    NSMutableSet *uniqueSet = [[NSMutableSet alloc] init];
+    [uniqueSet addObject:@"Unique"];
+    [uniqueSet addObject:@"Unique"]; // Duplicate - should not add
+    [uniqueSet addObject:@"Different"];
+    NSSet *nilSet = nil;
+    
+    // === NSDictionary Comprehensive Testing ===
+    NSLog(@"--- NSDictionary Formatter Tests ---");
+    NSDictionary *emptyDict = @{};
+    NSDictionary *simpleDict = @{@"key1": @"value1", @"key2": @"value2"};
+    NSDictionary *mixedDict = @{
+        @"string": @"text",
+        @"number": @42,
+        @"bool": @YES,
+        @"array": @[@1, @2, @3],
+        @"nested": @{@"inner": @"value"}
+    };
+    
+    // Complex nested dictionary
+    NSDictionary *complexDict = @{
+        @"user": @{
+            @"id": @12345,
+            @"name": @"John Doe",
+            @"preferences": @{
+                @"theme": @"dark",
+                @"notifications": @YES,
+                @"languages": @[@"en", @"es", @"fr"]
+            }
+        },
+        @"session": @{
+            @"token": @"abc123def456",
+            @"expires": currentTime,
+            @"permissions": [NSSet setWithObjects:@"read", @"write", @"admin", nil]
+        }
+    };
+    
+    NSMutableDictionary *mutableDict = [[NSMutableDictionary alloc] init];
+    [mutableDict setObject:@"Initial" forKey:@"status"];
+    [mutableDict setObject:@42 forKey:@"count"];
+    NSDictionary *nilDict = nil;
+    
+    // === NSIndexSet Comprehensive Testing ===
+    NSLog(@"--- NSIndexSet Formatter Tests ---");
+    NSMutableIndexSet *complexIndexSet = [[NSMutableIndexSet alloc] init];
+    [complexIndexSet addIndex:0];
+    [complexIndexSet addIndex:2];
+    [complexIndexSet addIndex:4];
+    [complexIndexSet addIndexesInRange:NSMakeRange(10, 5)]; // 10-14
+    [complexIndexSet addIndexesInRange:NSMakeRange(100, 10)]; // 100-109
+    [complexIndexSet addIndex:1000];
+    
+    NSIndexSet *largeRangeSet = [NSIndexSet indexSetWithIndexesInRange:NSMakeRange(50, 20)];
+    NSMutableIndexSet *scatteredSet = [[NSMutableIndexSet alloc] init];
+    [scatteredSet addIndex:1];
+    [scatteredSet addIndex:7];
+    [scatteredSet addIndex:42];
+    [scatteredSet addIndex:100];
+    [scatteredSet addIndex:999];
+    
+    // === NSDecimalNumber Comprehensive Testing ===
+    NSLog(@"--- NSDecimalNumber Formatter Tests ---");
+    NSDecimalNumber *precisionDecimal = [NSDecimalNumber decimalNumberWithString:@"123.456789012345"];
+    NSDecimalNumber *scientificDecimal = [NSDecimalNumber decimalNumberWithString:@"1.23E+10"];
+    NSDecimalNumber *veryLargeDecimal = [NSDecimalNumber decimalNumberWithString:@"999999999999999999999999999999.999999"];
+    NSDecimalNumber *verySmallDecimal = [NSDecimalNumber decimalNumberWithString:@"0.000000000000000001"];
+    NSDecimalNumber *currencyDecimal = [NSDecimalNumber decimalNumberWithString:@"1299.99"];
+    
+    // Decimal arithmetic results
+    NSDecimalNumber *sum = [integerDecimal decimalNumberByAdding:floatDecimal];
+    NSDecimalNumber *product = [currencyDecimal decimalNumberByMultiplyingBy:[NSDecimalNumber decimalNumberWithString:@"1.08"]]; // With tax
+    
+    // === NSCharacterSet Comprehensive Testing ===
+    NSLog(@"--- NSCharacterSet Formatter Tests ---");
+    NSCharacterSet *alphanumericSet = [NSCharacterSet alphanumericCharacterSet];
+    NSCharacterSet *controlSet = [NSCharacterSet controlCharacterSet];
+    NSCharacterSet *symbolSet = [NSCharacterSet symbolCharacterSet];
+    NSCharacterSet *newlineSet = [NSCharacterSet newlineCharacterSet];
+    
+    NSMutableCharacterSet *customCombinedSet = [[NSMutableCharacterSet alloc] init];
+    [customCombinedSet formUnionWithCharacterSet:[NSCharacterSet letterCharacterSet]];
+    [customCombinedSet formUnionWithCharacterSet:[NSCharacterSet decimalDigitCharacterSet]];
+    [customCombinedSet addCharactersInString:@"!@#$%"];
+    
+    NSCharacterSet *rangeSet = [NSCharacterSet characterSetWithRange:NSMakeRange('A', 26)];
+    
+    // === Performance Testing with Large Collections ===
+    NSLog(@"--- Performance Test Collections (Large Objects) ---");
+    
+    // Large array (100 elements)
+    NSMutableArray *largeArray = [[NSMutableArray alloc] initWithCapacity:100];
+    for (int i = 0; i < 100; i++) {
+        [largeArray addObject:[NSString stringWithFormat:@"Item_%03d", i]];
+    }
+    
+    // Large set (50 unique elements)
+    NSMutableSet *largeSet = [[NSMutableSet alloc] initWithCapacity:50];
+    for (int i = 0; i < 50; i++) {
+        [largeSet addObject:[NSString stringWithFormat:@"SetItem_%02d", i]];
+    }
+    
+    // Large dictionary (30 key-value pairs)
+    NSMutableDictionary *largeDictionary = [[NSMutableDictionary alloc] initWithCapacity:30];
+    for (int i = 0; i < 30; i++) {
+        NSString *key = [NSString stringWithFormat:@"key_%02d", i];
+        NSDictionary *value = @{
+            @"index": @(i),
+            @"name": [NSString stringWithFormat:@"Value %d", i],
+            @"timestamp": [NSDate dateWithTimeIntervalSinceNow:i]
+        };
+        [largeDictionary setObject:value forKey:key];
+    }
+    
+    // Complex nested structure for performance testing
+    NSDictionary *performanceTestStructure = @{
+        @"metadata": @{
+            @"version": @"1.0",
+            @"created": currentTime,
+            @"elements": @(100)
+        },
+        @"large_array": largeArray,
+        @"large_set": largeSet,
+        @"large_dictionary": largeDictionary,
+        @"nested_collections": @{
+            @"arrays": @[
+                @[@"A1", @"A2", @"A3"],
+                @[@"B1", @"B2", @"B3", @"B4"],
+                @[@"C1", @"C2"]
+            ],
+            @"sets": @[
+                [NSSet setWithObjects:@"Set1A", @"Set1B", nil],
+                [NSSet setWithObjects:@"Set2A", @"Set2B", @"Set2C", nil]
+            ]
+        }
+    };
+    
+    // === Edge Case Testing ===
+    NSLog(@"--- Edge Case Testing ---");
+    
+    // Arrays with nil elements (should handle gracefully)
+    NSMutableArray *arrayWithNils = [[NSMutableArray alloc] init];
+    [arrayWithNils addObject:@"Valid"];
+    [arrayWithNils addObject:[NSNull null]]; // NSNull instead of nil
+    [arrayWithNils addObject:@"AnotherValid"];
+    
+    // Dictionary with NSNull values
+    NSDictionary *dictWithNulls = @{
+        @"validKey": @"validValue",
+        @"nullKey": [NSNull null],
+        @"anotherKey": @"anotherValue"
+    };
+    
+    // Large index set for boundary testing (but within reasonable bounds)
+    NSMutableIndexSet *boundaryIndexSet = [[NSMutableIndexSet alloc] init];
+    [boundaryIndexSet addIndex:0]; // First possible index
+    [boundaryIndexSet addIndex:1000000]; // Large but reasonable index
+    [boundaryIndexSet addIndexesInRange:NSMakeRange(999990, 5)]; // 999990-999994
+    
+    // Decimal numbers at boundaries
+    NSDecimalNumber *maxDecimal = [NSDecimalNumber maximumDecimalNumber];
+    NSDecimalNumber *minDecimal = [NSDecimalNumber minimumDecimalNumber];
+    
+    NSLog(@"=== Comprehensive Formatter Test Objects Created ===");
+    NSLog(@"String tests: empty=%@, unicode=%@, long=%@, mutable=%@", 
+          emptyString, unicodeString, longString, mutableString);
+    NSLog(@"Number tests: positive=%@, negative=%@, float=%@, bool=%@", 
+          positiveInt, negativeInt, floatNum, boolYES);
+    NSLog(@"Array tests: empty=%@, mixed=%@, nested=%@", 
+          emptyArray, mixedTypeArray, nestedArray);
+    NSLog(@"Set tests: empty=%@, mixed=%@, unique=%@", 
+          emptySet, mixedSet, uniqueSet);
+    NSLog(@"Dictionary tests: simple=%@, complex structure ready", simpleDict);
+    NSLog(@"IndexSet tests: complex=%@, scattered=%@", complexIndexSet, scatteredSet);
+    NSLog(@"DecimalNumber tests: precision=%@, currency=%@, sum=%@", 
+          precisionDecimal, currencyDecimal, sum);
+    NSLog(@"CharacterSet tests: alphanumeric=%@, custom=%@", 
+          alphanumericSet, customCombinedSet);
+    NSLog(@"Performance tests: large_array(%ld), large_set(%ld), large_dict(%ld)", 
+          (long)largeArray.count, (long)largeSet.count, (long)largeDictionary.count);
+    
+    NSLog(@"=== End Formatter Demo - Set Breakpoint Here ===");
+    
+    // // Add a simple pause to allow debugging
+    // printf("Press Enter to continue...\n");
+    // getchar();
 
     return 0;
   }

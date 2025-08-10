@@ -1,0 +1,57 @@
+b test_timezone_comprehensive.m:41
+run
+
+echo "=== NSTimeZone Enhanced Formatter Comprehensive Test ==="
+echo ""
+echo "Testing ALL timezone types with enhanced formatter..."
+echo ""
+
+echo "1. SIMPLE FIXED OFFSET TIMEZONES (GSAbsTimeZone):"
+echo "   Expected format: GSAbsTimeZone(name=\"...\", offset=N)"
+po gmtTimeZone
+po utcTimeZone  
+po posOffsetTZ
+po negOffsetTZ
+po halfHourTZ
+echo ""
+
+echo "2. COMPLEX ZONEINFO TIMEZONES (GSTimeZone) - MAIN ENHANCEMENT:"
+echo "   Expected format: GSTimeZone(name=\"America/New_York\", offset=N, dst=true/false)"
+po newYorkTZ
+po losAngelesTZ
+po tokyoTZ
+po londonTZ
+po sydneyTZ
+echo ""
+
+echo "3. SPECIAL TIMEZONE TYPES:"
+echo "   Expected format: NSLocalTimeZone(name=\"...\", current_offset=N)"
+po localTZ
+po systemTZ
+po defaultTZ
+echo ""
+
+echo "4. EDGE CASES:"
+po nilTimeZone
+po invalidTZ
+echo ""
+
+echo "5. MEMORY INSPECTION FOR DEBUGGING:"
+p newYorkTZ
+p tokyoTZ
+p localTZ
+echo ""
+
+echo "6. FRAME VARIABLE OVERVIEW:"
+frame variable -O
+echo ""
+
+echo "=== VALIDATION CHECKLIST ==="
+echo "✓ GSAbsTimeZone objects should show clear name and offset"
+echo "✓ GSTimeZone objects should show timezone name (NOT raw memory pointer)"  
+echo "✓ Complex timezones (America/New_York, Asia/Tokyo) should be readable"
+echo "✓ NSLocalTimeZone should show meaningful information"
+echo "✓ No crashes or errors during formatting"
+echo ""
+
+quit

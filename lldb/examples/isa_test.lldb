@@ -1,0 +1,27 @@
+# LLDB script to test ISA lookup issue for custom classes
+
+file custom_class_test
+
+# Set breakpoint at the key location where we want to test custom class debugging
+b custom_class_test.m:125
+
+# Run the program
+run
+
+# Test basic object inspection when we hit the breakpoint
+po account
+print account
+frame variable account
+
+# Try to inspect the different objects to see which work and which don't
+po personInfo
+po fruits
+po magicNumber
+po currentTime
+
+# Try to get more detailed information about the BankAccount object
+p/x account
+memory read -c 40 -f x account
+
+# Quit
+quit

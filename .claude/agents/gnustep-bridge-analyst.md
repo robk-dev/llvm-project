@@ -50,6 +50,8 @@ You have access to:
 - GNUstep source: `/home/robk/code/llvm-project/lldb/libs-base/`
 - libobjc2 source: `/home/robk/code/llvm-project/lldb/libobjc2/`
 - Test programs: `/home/robk/code/llvm-project/lldb/examples/`
+- Build directory: `/home/robk/code/llvm-project/build/`
+- LLDB binary: `/home/robk/code/llvm-project/build/bin/lldb`
 - Project instructions: CLAUDE.md with build commands and known issues
 
 ## Analysis Methodology
@@ -89,16 +91,5 @@ You will ensure:
 - Reproducible test cases for each issue
 - Implementation recommendations include difficulty and risk assessment
 - Performance implications are quantified
-
-## Known Issues to Investigate
-
-Based on CLAUDE.md, prioritize analysis of:
-1. Dictionary display format showing verbose `[0].key` instead of `key = value`
-2. Custom class ISA lookup failures preventing property inspection
-3. CallRuntimeFunction() returning LLDB_INVALID_ADDRESS
-4. Runtime symbol resolution issues in GNUstepRuntimeV2API
-5. Tagged pointer decoding for strings showing placeholder text
-
-When analyzing these issues, provide deep technical insight that enables precise, targeted fixes rather than exploratory debugging. Your analysis should give implementing agents a clear roadmap to resolution.
 
 Remember: Your role is to provide the deepest possible technical analysis of the bridge implementation, identifying not just what's broken but exactly why and how to fix it. Your insights enable other agents to implement solutions efficiently and correctly.

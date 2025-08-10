@@ -11,6 +11,7 @@ add_lldb_library(lldbPluginGNUstepObjCRuntime PLUGIN
   formatters/GNUstepArrayFormatters.cpp
   formatters/GNUstepDictionaryFormatters.cpp
   formatters/GNUstepSetFormatters.cpp
+  formatters/GNUstepOrderedSetFormatters.cpp
   formatters/GNUstepDateFormatters.cpp
   formatters/GNUstepURLFormatters.cpp
   formatters/GNUstepErrorFormatters.cpp
@@ -24,8 +25,15 @@ add_lldb_library(lldbPluginGNUstepObjCRuntime PLUGIN
   formatters/GNUstepGenericFormatter.cpp
   formatters/GNUstepNoOpSyntheticProvider.cpp
   formatters/GNUstepIndexSetFormatters.cpp
+  formatters/GNUstepJSONSerializationFormatters.cpp
   formatters/GNUstepDecimalNumberFormatters.cpp
   formatters/GNUstepCharacterSetFormatters.cpp
+  formatters/GNUstepBundleFormatters.cpp
+  formatters/GNUstepScannerFormatters.cpp
+  formatters/GNUstepLocaleFormatters.cpp
+  formatters/GNUstepUserDefaultsFormatters.cpp
+  formatters/GNUstepCalendarFormatters.cpp
+  formatters/GNUstepProcessInfoFormatters.cpp
   formatters/GNUstepFormattersRegistry.cpp
 
   LINK_LIBS

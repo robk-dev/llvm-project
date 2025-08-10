@@ -15,7 +15,7 @@ cmake -G Ninja ../llvm \
 
 # For intensive LLVM development
 ```bash
-ccache --max-size=20G
+ccache --max-size=30G
 ccache --set-config max_files=0  # No file limit, just size limit
 ccache --set-config compression=true
 ccache --set-config compression_level=6
@@ -25,7 +25,7 @@ ccache --set-config compression_level=6
 
 ```bash
 # Build both LLDB and LLDB-server (required for debugging)
-cd /home/robk/code/llvm-project/build && ninja lldb lldb-argdumper -j$(nproc)
+cd /home/robk/code/llvm-project/build && ninja lldb lldb-server -j$(nproc)
 
 # Alternative: Build all LLDB tools at once
 cd /home/robk/code/llvm-project/build && ninja install-lldb install-lldb-server -j$(nproc)

@@ -121,34 +121,10 @@
             "problemMatcher": "$gcc"
         },
         {
-            "label": "build-custom-class-test",
-            "type": "shell",
-            "command": "make",
-            "args": ["custom_class_test"],
-            "options": {
-                "cwd": "${workspaceFolder}/examples"
-            },
-            "dependsOn": ["build-plugin"],
-            "group": "build",
-            "problemMatcher": "$gcc"
-        },
-        {
-            "label": "build-custom-class-test-with-custom-gnustep",
-            "type": "shell",
-            "command": "make",
-            "args": ["custom_class_test_custom"],
-            "options": {
-                "cwd": "${workspaceFolder}/examples"
-            },
-            "dependsOn": ["build-plugin"],
-            "group": "build",
-            "problemMatcher": "$gcc"
-        },
-        {
             "label": "build-unit-tests",
             "type": "shell",
             "command": "ninja",
-            "args": ["LanguageObjCGNUstepTests"],
+            "args": ["lldbPluginGNUstepObjCRuntime", "lldb"],
             "options": {
                 "cwd": "${workspaceFolder}/../build"
             },
@@ -240,6 +216,31 @@
             },
             "dependsOn": ["build-plugin"],
             "group": "build",
+            "problemMatcher": "$gcc"
+        },
+        {
+            "label": "build-api-tests",
+            "type": "shell",
+            "command": "ninja",
+            "args": ["lldbPluginGNUstepObjCRuntime", "lldb", "clang"],
+            "options": {
+                "cwd": "${workspaceFolder}/../build"
+            },
+            "group": "build",
+            "problemMatcher": "$gcc"
+        },
+        {
+            "label": "build-full-development",
+            "type": "shell",
+            "command": "ninja",
+            "args": ["lldbPluginGNUstepObjCRuntime", "lldb", "lldb-server", "clang"],
+            "options": {
+                "cwd": "${workspaceFolder}/../build"
+            },
+            "group": {
+                "kind": "build",
+                "isDefault": false
+            },
             "problemMatcher": "$gcc"
         }
     ]

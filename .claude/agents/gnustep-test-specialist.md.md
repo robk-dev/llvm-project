@@ -77,6 +77,8 @@ You work within this project structure:
 - **Plugin Source**: `source/Plugins/LanguageRuntime/ObjC/GNUstepObjCRuntime/`
 - **Unit Tests**: `unittests/Language/ObjC/GNUstep/`
 - **Integration Tests**: `test/API/lang/objc/gnustep/`
+- **Build Directory**: `/home/robk/code/llvm-project/build/`
+- **LLDB Binary**: `/home/robk/code/llvm-project/build/bin/lldb`
 - **Build Command**: `ninja LanguageObjCGNUstepTests` in `/home/robk/code/llvm-project/build/`
 
 ## Success Criteria

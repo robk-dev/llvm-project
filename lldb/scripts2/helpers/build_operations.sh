@@ -16,7 +16,7 @@ build_lldb() {
     
     print_progress "Starting build with $PARALLEL_JOBS parallel jobs..."
     echo -e "${YELLOW}Note: This is a large build. You can monitor progress with:${NC}"
-    echo -e "${YELLOW}  tail -f $LLVM_BUILD_DIR/build/build.log${NC}"
+    echo -e "${YELLOW}  tail -f $LLVM_BUILD_DIR/build.log${NC}"
     echo ""
     
     # Start time tracking
@@ -221,7 +221,7 @@ show_build_status() {
     print_section "💡 Performance Tips"
     echo -e "${CYAN}• Use ccache for faster rebuilds: export CCACHE_DIR=~/.ccache${NC}"
     echo -e "${CYAN}• Incremental builds: cd $LLVM_BUILD_DIR/build && ninja lldb${NC}"
-    echo -e "${CYAN}• Monitor build: tail -f $LLVM_BUILD_DIR/build/build.log${NC}"
+    echo -e "${CYAN}• Monitor build: tail -f $LLVM_BUILD_DIR/build.log${NC}"
     echo -e "${CYAN}• Memory usage: Use fewer parallel jobs if running out of RAM${NC}"
 }
 

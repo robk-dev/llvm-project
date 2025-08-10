@@ -41,11 +41,17 @@ public:
   /// Register set formatters
   static void RegisterSetFormatters(TypeCategoryImpl &category);
   
+  /// Register NSOrderedSet formatters
+  static void RegisterOrderedSetFormatters(TypeCategoryImpl &category);
+  
   /// Register foundation formatters
   static void RegisterFoundationFormatters(TypeCategoryImpl &category);
   
   /// Register date formatters (NSDate, NSCalendarDate)
   static void RegisterDateFormatters(TypeCategoryImpl &category);
+  
+  /// Register calendar formatters (NSCalendar)
+  static void RegisterCalendarFormatters(TypeCategoryImpl &category);
   
   /// Register URL formatters (NSURL)
   static void RegisterURLFormatters(TypeCategoryImpl &category);
@@ -88,6 +94,27 @@ public:
   
   /// Register NSCharacterSet and NSMutableCharacterSet formatters
   static void RegisterCharacterSetFormatters(TypeCategoryImpl &category);
+  
+  /// Register NSBundle formatters
+  static void RegisterBundleFormatters(TypeCategoryImpl &category);
+
+  /// Register NSScanner formatters
+  static void RegisterScannerFormatters(TypeCategoryImpl &category);
+
+  /// Register NSLocale formatters
+  static void RegisterLocaleFormatters(TypeCategoryImpl &category);
+
+  /// Register NSProcessInfo formatters
+  static void RegisterProcessInfoFormatters(TypeCategoryImpl &category);
+
+  /// Register NSUserDefaults formatters
+  static void RegisterUserDefaultsFormatters(TypeCategoryImpl &category);
+
+  /// Register NSJSONSerialization formatter
+  static void RegisterJSONSerializationFormatters(TypeCategoryImpl &category);
+  
+  /// Register NSProxy formatters
+  static void RegisterProxyFormatters(TypeCategoryImpl &category);
 
 private:
   GNUstepFormattersRegistry() = delete; // Static class only

@@ -1,0 +1,13 @@
+b test_timezone_basic.m:19
+run
+po localTimeZone
+po gmtTimeZone
+po utcTimeZone
+po offsetTimeZone
+po nyTimeZone
+po tokyoTimeZone
+po nilTimeZone
+p localTimeZone
+p gmtTimeZone
+frame variable -O
+quit

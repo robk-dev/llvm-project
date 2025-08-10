@@ -146,6 +146,57 @@ std::string GNUstepObjCRuntimeIntrospector::GetClassNameFromObject(ValueObject &
   return GetClassName(isa_addr);
 }
 
+ConstString GNUstepObjCRuntimeIntrospector::GetClassNameFromISA(lldb::addr_t isa_addr) {
+  // Handle nil ISA
+  if (!isa_addr || isa_addr == LLDB_INVALID_ADDRESS) {
+    return ConstString();
+  }
+  
+  // Check cache first
+  auto it = m_isa_to_name_cache.find(isa_addr);
+  if (it != m_isa_to_name_cache.end()) {
+    return it->second;
+  }
+  
+  // Read class structure to get the name
+  if (!m_process) {
+    return ConstString();
+  }
+  
+  Status error;
+  
+  // GNUstep class layout (from libobjc2/runtime.h):
+  // struct objc_class {
+  //     Class isa;          // offset 0: Metaclass pointer
+  //     Class super_class;  // offset 8: Superclass pointer  
+  //     const char *name;   // offset 16: Class name
+  //     ...
+  // };
+  
+  // Read the class name pointer at offset 16
+  lldb::addr_t name_ptr_addr = isa_addr + 16;
+  lldb::addr_t name_ptr = m_process->ReadPointerFromMemory(name_ptr_addr, error);
+  
+  if (error.Fail() || name_ptr == 0 || name_ptr == LLDB_INVALID_ADDRESS) {
+    return ConstString();
+  }
+  
+  // Read the class name string
+  char name_buffer[256];
+  size_t bytes_read = m_process->ReadCStringFromMemory(
+      name_ptr, name_buffer, sizeof(name_buffer), error);
+  
+  if (error.Fail() || bytes_read == 0) {
+    return ConstString();
+  }
+  
+  // Cache and return the result
+  ConstString class_name(name_buffer);
+  m_isa_to_name_cache[isa_addr] = class_name;
+  
+  return class_name;
+}
+
 lldb::addr_t GNUstepObjCRuntimeIntrospector::FindClass(const std::string &class_name) {
   if (!m_process || class_name.empty()) {
     return LLDB_INVALID_ADDRESS;
@@ -403,6 +454,9 @@ lldb::addr_t GNUstepObjCRuntimeIntrospector::CallRuntimeFunctionImpl(
       GetOrCreateFunctionCaller(function_name, return_type, args, 
                                 exe_ctx, error);
   if (!caller || error.Fail()) {
+    Log *log = GetLog(LLDBLog::Language);
+    LLDB_LOG(log, "[GNUstep] Failed to get/create function caller for {0}: {1}",
+             function_name, error.Fail() ? error.AsCString() : "null caller");
     return LLDB_INVALID_ADDRESS;
   }
   
@@ -443,6 +497,20 @@ lldb::addr_t GNUstepObjCRuntimeIntrospector::CallRuntimeFunctionImpl(
   
   // Check execution results
   if (results != eExpressionCompleted) {
+    Log *log = GetLog(LLDBLog::Language);
+    LLDB_LOG(log, "[GNUstep] Function execution failed for {0}: result={1}",
+             function_name, results);
+    
+    // Log diagnostics for debugging
+    std::string diagnostic_str;
+    for (const auto &diag : diagnostics.Diagnostics()) {
+      diagnostic_str += diag->GetMessage();
+      diagnostic_str += "; ";
+    }
+    if (!diagnostic_str.empty()) {
+      LLDB_LOG(log, "[GNUstep] Diagnostics: {0}", diagnostic_str);
+    }
+    
     error = Status::FromError(diagnostics.GetAsError(
         lldb::eExpressionParseError,
         "Function execution failed"));

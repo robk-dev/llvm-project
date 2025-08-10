@@ -17,6 +17,7 @@
 #include "GNUstepErrorFormatters.h"
 #include "GNUstepDataFormatters.h"
 #include "GNUstepUUIDFormatters.h"
+#include "GNUstepJSONSerializationFormatters.h"
 #include "GNUstepGenericFormatter.h"
 #include "../GNUstepObjCRuntimeIntrospector.h"
 #include "Plugins/LanguageRuntime/ObjC/ObjCLanguageRuntime.h"
@@ -29,8 +30,8 @@ using namespace lldb_private::formatters;
 // Helper function to check if address is a tagged pointer
 static bool IsTaggedPointer(lldb::addr_t addr) {
   // GNUstep uses the lower 3 bits for tagging
-  // Bit 0 set = small object (tagged pointer)
-  return (addr & 0x1) != 0;
+  // Any of the low 3 bits set = small object (tagged pointer)
+  return (addr & 0x7) != 0;
 }
 
 // Helper function to decode tagged pointer type
@@ -45,11 +46,13 @@ static TaggedPointerType GetTaggedPointerType(lldb::addr_t addr) {
   switch (tag) {
     case 1:  // NSSmallInt
       return TaggedPointerType::NSSmallInt;
-    case 3:  // NSSmallFloat
+    case 4:  // NSSmallString - CRITICAL FIX: Added missing tag 4 handling
+      return TaggedPointerType::NSSmallString;
+    case 5:  // NSSmallFloat 
       return TaggedPointerType::NSSmallFloat;
-    case 5:  // NSSmallExtendedDouble
+    case 2:  // NSSmallExtendedDouble
       return TaggedPointerType::NSSmallExtendedDouble;
-    case 7:  // NSSmallRepeatingDouble
+    case 3:  // NSSmallRepeatingDouble
       return TaggedPointerType::NSSmallRepeatingDouble;
     default:
       return TaggedPointerType::Unknown;
@@ -67,11 +70,12 @@ bool lldb_private::formatters::GNUstepIdDispatcherFunction(ValueObject &valobj, 
     return true;
   }
   
-  // Check if it's a tagged pointer first
+  // CRITICAL FIX: Enhanced tagged pointer handling for LLDB po commands
+  // Check if it's a tagged pointer first - this is crucial for NSNumber @42 etc.
   if (IsTaggedPointer(obj_addr)) {
     TaggedPointerType tag_type = GetTaggedPointerType(obj_addr);
     
-    // Handle tagged pointers directly
+    // Handle tagged pointers directly with proper formatting
     switch (tag_type) {
       case TaggedPointerType::NSSmallInt: {
         // Decode small int value (shift right by 3 bits)
@@ -79,19 +83,24 @@ bool lldb_private::formatters::GNUstepIdDispatcherFunction(ValueObject &valobj, 
         stream.Printf("%lld", value);
         return true;
       }
+      case TaggedPointerType::NSSmallString: {
+        // CRITICAL FIX: Handle tagged strings properly
+        return GNUstepNSStringFormatterFunction(valobj, stream, options);
+      }
       case TaggedPointerType::NSSmallFloat: {
-        // Handle small float
+        // Use the full NSNumber formatter for proper float handling
         return GNUstepNSNumberFormatterFunction(valobj, stream, options);
       }
       case TaggedPointerType::NSSmallExtendedDouble:
       case TaggedPointerType::NSSmallRepeatingDouble: {
-        // Handle small double variants
+        // Use the full NSNumber formatter for proper double handling
         return GNUstepNSNumberFormatterFunction(valobj, stream, options);
       }
       default:
-        // Unknown tagged pointer type
-        stream.Printf("0x%llx (unknown tagged pointer)", obj_addr);
-        return true;
+        // For unknown tagged pointer types, DO NOT try NSNumber formatter
+        // This was causing the "tagged_number:tag=X" fallback display
+        // Instead, return false to let LLDB handle it
+        return false;
     }
   }
   
@@ -179,6 +188,11 @@ bool lldb_private::formatters::GNUstepIdDispatcherFunction(ValueObject &valobj, 
   // Check for NSUUID and variants
   if (class_name.find("UUID") != std::string::npos) {
     return GNUstepNSUUIDFormatterFunction(valobj, stream, options);
+  }
+  
+  // Check for NSJSONSerialization and JSON-related classes
+  if (class_name.find("JSON") != std::string::npos) {
+    return GNUstepNSJSONSerializationFormatterFunction(valobj, stream, options);
   }
   
   // Check for NSValue (including NSNumber which inherits from NSValue)

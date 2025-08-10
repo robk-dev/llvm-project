@@ -1,427 +1,73 @@
-robk@robk:~/code/llvm-project/lldb$ cd /home/robk/code/llvm-project/lldb && /home/robk/code/llvm-project/build/bin/lldb examples/custom_class_test
-[DEBUG] GNUstepObjCRuntime::Initialize() called
-🎯 Global .lldbinit loaded - project-specific .lldbinit files will now be read
-(lldb) target create "examples/custom_class_test"
-Current executable set to '/home/robk/code/llvm-project/lldb/examples/custom_class_test' (x86_64).
-(lldb) GNUstepObjCRuntime::Initialize() called^C
-(lldb) b main
-Breakpoint 1: where = custom_class_test`main + 25 at custom_class_test.m:75:20, address = 0x0000000000002969
-(lldb) r
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 16
-[DEBUG] GNUstepObjCRuntime: No GNUstep runtime found, not creating instance
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 16
-[DEBUG] GNUstepObjCRuntime: No GNUstep runtime found, not creating instance
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 16
-[DEBUG] GNUstepObjCRuntime: No GNUstep runtime found, not creating instance
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-Process 189724 launched: '/home/robk/code/llvm-project/lldb/examples/custom_class_test' (x86_64)
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 16
-[DEBUG] GNUstepObjCRuntime: No GNUstep runtime found, not creating instance
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 16
-[DEBUG] GNUstepObjCRuntime: No GNUstep runtime found, not creating instance
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 16
-[DEBUG] GNUstepObjCRuntime: No GNUstep runtime found, not creating instance
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 16
-[DEBUG] GNUstepObjCRuntime: No GNUstep runtime found, not creating instance
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 16
-[DEBUG] GNUstepObjCRuntime: No GNUstep runtime found, not creating instance
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 16
-[DEBUG] GNUstepObjCRuntime: No GNUstep runtime found, not creating instance
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 16
-[DEBUG] GNUstepObjCRuntime: No GNUstep runtime found, not creating instance
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 16
-[DEBUG] GNUstepObjCRuntime: No GNUstep runtime found, not creating instance
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 16
-[DEBUG] GNUstepObjCRuntime: No GNUstep runtime found, not creating instance
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-5 locations added to breakpoint 1
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 16
-[DEBUG] GNUstepObjCRuntime: Found GNUstep runtime module: libgnustep-base.so.1.31
-[DEBUG] GNUstepObjCRuntime: Creating instance for GNUstep runtime
-[DEBUG] GNUstepObjCRuntime constructor called
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 2
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 2
-Process 189724 stopped
-* thread #1, name = 'custom_class_te', stop reason = breakpoint 1.1
-    frame #0: 0x0000555555556969 custom_class_test`main(argc=1, argv=0x00007fffffffcb88) at custom_class_test.m:75:20
-   72   @end
-   73  
-   74   int main(int argc, const char *argv[]) {
--> 75     @autoreleasepool {
-   76       // === SECTION 1: Basic Objects ===
-   77       NSString *greeting2 = @"Hello, Enhanced Debugging!";
-   78       NSNumber *magicNumber = @42;
-(lldb) r set -l 128
-There is a running process, kill it and restart?: [Y/n] y
-Process 189724 exited with status = 9 (0x00000009) killed
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 16
-[DEBUG] GNUstepObjCRuntime: Found GNUstep runtime module: libgnustep-base.so.1.31
-[DEBUG] GNUstepObjCRuntime: Creating instance for GNUstep runtime
-[DEBUG] GNUstepObjCRuntime constructor called
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-Process 189787 launched: '/home/robk/code/llvm-project/lldb/examples/custom_class_test' (x86_64)
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 2
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 2
-Process 189787 stopped
-* thread #1, name = 'custom_class_te', stop reason = breakpoint 1.1
-    frame #0: 0x0000555555556969 custom_class_test`main(argc=4, argv=0x00007fffffffcb78) at custom_class_test.m:75:20
-   72   @end
-   73  
-   74   int main(int argc, const char *argv[]) {
--> 75     @autoreleasepool {
-   76       // === SECTION 1: Basic Objects ===
-   77       NSString *greeting2 = @"Hello, Enhanced Debugging!";
-   78       NSNumber *magicNumber = @42;
-(lldb) br set -l 128
-Breakpoint 2: where = custom_class_test`main + 1687 at custom_class_test.m:128:5, address = 0x0000555555556fe7
-(lldb) c
-Process 189787 resuming
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-
-
-...1000 lines of this...
-
-
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 2
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 2
-Process 189787 stopped
-* thread #1, name = 'custom_class_te', stop reason = breakpoint 2.1
-    frame #0: 0x0000555555556fe7 custom_class_test`main(argc=4, argv=0x00007fffffffcb78) at custom_class_test.m:128:5
-   125      };
-   126 
-   127      // Set breakpoint here to inspect complex nested structures
--> 128      NSLog(@"Complex custom class debugging test");
-   129      NSLog(@"Account: %@", account);
-   130      NSLog(@"Account summary: %@", accountSummary);
-   131 
-(lldb) frame variable
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 2
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 2
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 17
-[DEBUG] GNUstepObjCRuntime::CreateInstance() called for language 2
-(int) argc = 4
-(const char **) argv = 0x00007fffffffcb78
-(NSString *) greeting2 = 0x000055555555a748
-(NSNumber *) magicNumber = 0x0000000000000151
-(NSDate *) currentTime = 0x16b91365034a3a96
-(NSArray *) fruits = 0x0000555555852908
-(NSMutableArray *) colors = 0x0000555555852958
-(NSDictionary *) personInfo = 0x0000555555852a08
-(NSSet *) availableLanguages = 0x00005555558709b8
-(NSMutableSet *) preferences = 0x0000555555870ae8
-(BankAccount *) account = 0x0000555555871ea8
-(NSDictionary *) accountSummary = 0x000055555587a258
-(lldb) p myString
-         ˄
-         ╰─ error: use of undeclared identifier 'myString'
-(lldb) p fruits
-(NSArray *) 0x0000555555852908
-(lldb) p currentTime
-(NSDate *) 0x16b91365034a3a96
-(lldb) p myString
-         ˄
-         ╰─ error: use of undeclared identifier 'myString'
-(lldb) p fruits
-(NSArray *) 0x0000555555852908
-(lldb) settings show target.language
-target.language (language) = objective-c
-(lldb) po myString
-          ˄
-          ╰─ error: use of undeclared identifier 'myString'
-(lldb) po fruits
-[DEBUG] GNUstepObjCRuntime::GetObjectDescription called
-[DEBUG] GNUstepObjCRuntime::GetObjectDescription called
-0x0000555555852908
-
-(lldb) image list -b
-[  0] custom_class_test
-[  1] ld-linux-x86-64.so.2
-[  2] [vdso](0x00007ffff7fc1000)
-[  3] libgnustep-base.so.1.31
-[  4] libobjc.so.4.6
-[  5] libBlocksRuntime.so.0
-[  6] libm.so.6
-[  7] libc.so.6
-[  8] libgmp.so.10
-[  9] libavahi-common.so.3
-[ 10] libavahi-client.so.3
-[ 11] libgnutls.so.30
-[ 12] libxslt.so.1
-[ 13] libxml2.so.2
-[ 14] libffi.so.8
-[ 15] libz.so.1
-[ 16] libresolv.so.2
-[ 17] libicui18n.so.70
-[ 18] libicuuc.so.70
-[ 19] libicudata.so.70
-[ 20] libdispatch.so.0
-[ 21] libcurl-gnutls.so.4
-[ 22] libgcc_s.so.1
-[ 23] libstdc++.so.6
-[ 24] libdbus-1.so.3
-[ 25] libp11-kit.so.0
-[ 26] libidn2.so.0
-[ 27] libunistring.so.2
-[ 28] libtasn1.so.6
-[ 29] libnettle.so.8
-[ 30] libhogweed.so.6
-[ 31] liblzma.so.5
-[ 32] libkqueue.so.0
-[ 33] libpthread_workqueue.so.0
-[ 34] libpthread.so.0
-[ 35] libnghttp2.so.14
-[ 36] librtmp.so.1
-[ 37] libssh.so.4
-[ 38] libpsl.so.5
-[ 39] libgssapi_krb5.so.2
-[ 40] libldap-2.5.so.0
-[ 41] liblber-2.5.so.0
-[ 42] libzstd.so.1
-[ 43] libbrotlidec.so.1
-[ 44] libsystemd.so.0
-[ 45] librt.so.1
-[ 46] libcrypto.so.3
-[ 47] libkrb5.so.3
-[ 48] libk5crypto.so.3
-[ 49] libcom_err.so.2
-[ 50] libkrb5support.so.0
-[ 51] libsasl2.so.2
-[ 52] libbrotlicommon.so.1
-[ 53] liblz4.so.1
-[ 54] libcap.so.2
-[ 55] libgcrypt.so.20
-[ 56] libkeyutils.so.1
-[ 57] libgpg-error.so.0
-[ 58] ld-linux-x86-64.so.2
-[ 59] [vdso](0x00007ffff7fc1000)
-[ 60] UTF-16.so
-[ 61] UTF-32.so
+    {
+      "name": "EUREKA_MOMENT_T010",
+      "type": "CriticalBreakthrough",
+      "observations": [
+        "CONFIRMED: Recursive drill-down of dictionaries now works in VS Code!",
+        "The fix was changing expression evaluation from generic (id) cast to specific type casts",
+        "User confirmed: nested object expansion is finally working!",
+        "This solves Epic E002 - the critical nested object expansion issue",
+        "The key insight: VS Code/CodeLLDB requires specific types to determine expandability",
+        "Generic 'id' type returns 0 children, preventing expansion UI",
+        "All previous attempts focused on CreateChildAtOffset, provider registration, and complex architectural changes",
+        "The actual fix was a simple type cast change in expression evaluation",
+        "This demonstrates the importance of tracing the actual code path rather than assuming",
+        "Command-line LLDB worked all along - the issue was VS Code/DAP specific",
+        "The fix preserves all existing functionality while enabling nested expansion",
+        "The type casting pattern applies to THREE places: _try_expression_evaluation, _create_child_value, and object properties",
+        "Each fix builds on the same insight: VS Code needs specific types to show expandability",
+        "The pattern is: detect runtime class \u2192 use specific type cast \u2192 enable expansion",
+        "CRITICAL EXTENSION: The type casting insight applies beyond expression evaluation to runtime introspection",
+        "Agent Gamma research confirms: expression evaluation failure is due to missing runtime context",
+        "Solution: Replace class_copyIvarList() expressions with LLDB SBType.GetFieldAtIndex() API",
+        "This extends the EUREKA pattern: detect runtime class \u2192 use LLDB native type API \u2192 avoid expression evaluation",
+        "The 'unknown error' validates that expression evaluation is fundamentally wrong approach",
+        "SBType approach aligns with LLVM GNUstepObjCRuntime.cpp which uses native LLDB APIs",
+        "Research confirms: OBJC_RUNTIME_INSIGHTS.md warns against expression evaluation for recursive structures",
+        "The pattern now covers both synthetic children AND runtime introspection via native LLDB APIs",
+        "NSNumber Fix Complete: GetValueAsUnsigned() on id types returns ISA pointer, not object address",
+        "Solution: Check if value is synthetic child (name starts with '[' or '.'), use GetLoadAddress() for children",
+        "This fixed arrayWithNil[2] showing 140737351961376 instead of 42",
+        "Root cause: LLDB dereferences id pointers, returning first 8 bytes (ISA) instead of address",
+        "Memory confirmed: NSNumber at 0x555555712af0 has ISA 0x7ffff7decc60 and value 42 at offset 8",
+        "Stack Address Validation Fix: Removed overly restrictive stack address rejection (0x7FFF00000000 range). Stack addresses are legitimate for local objects.",
+        "Address Validation Strategy: Instead of rejecting based on address range, validate by reading ISA pointer at offset 0. Valid objects have non-zero ISA pointers > 0x1000.",
+        "ISA Pointer Detection: If obj_addr == isa_ptr, we accidentally got the ISA pointer instead of object address. This is a key validation check.",
+        "Memory Validation Pattern: Try to read 8 bytes at obj_addr. If successful and ISA > 0x1000, it's likely a valid object. If read fails, mark as unreadable.",
+        "Ivar Access Dereferencing: When accessing obj->_ivar, LLDB creates SBValue at ivar storage location, not the object it points to",
+        "Fix implemented: Detect ivar access pattern (name starts with '_' and type contains '*')",
+        "Dereference by reading 8 bytes at ivar location to get actual object address",
+        "Pattern: obj->_name at 0x555555565458 dereferenced to NSString at 0x7ffff7d7be40",
+        "Ivar dereferencing fixed but string reading still needs work",
+        "Enhanced _read_pointer_string with comprehensive debug logging",
+        "Multiple approaches: exact length read, C string API, manual memory decode",
+        "CRITICAL REGRESSION LESSON: Never modify core address resolution without thorough testing",
+        "ROOT CAUSE: Complex ivar dereferencing logic in universal_summary broke ALL object display",
+        "SYMPTOM: Objects showed {0x...} format (LLDB default) instead of proper summaries",
+        "SEPARATION OF CONCERNS: Summary providers handle display only, synthetic providers handle children/ivars",
+        "PROPER IVAR SOLUTION: Create CustomObjectSyntheticProvider, don't detect ivars in summary providers",
+        "EMERGENCY REVERT: Removed lines 185-226 (ivar detection) and 264-292 (complex runtime class detection)",
+        "WORKING PATTERN: gnustep_lldb_bridge had correct separation - summary for display, synthetic for structure",
+        "GSCBufferString Fix Complete: GSCBufferString was incorrectly configured as inline string, actually uses pointer-based layout at offsets 8 (string_ptr) and 16 (length_uint32)",
+        "Root cause: KNOWN_LAYOUTS had 'hints' instead of explicit 'storage': 'pointer' layout",
+        "Fix: Changed GSCBufferString to explicit pointer layout: {'string_ptr_offset': 8, 'length_offset': 16, 'length_type': 'uint32', 'storage': 'pointer'}",
+        "Result: String reading now works correctly - '@\"Hello, LLDB Bridge!\"' instead of garbled '@\"\ufffd\ufffdYUUU\"'",
+        "Pattern: When string classes use pointer storage, configure them explicitly rather than using hints that can try wrong approaches first",
+        "Runtime Class Approach Success: Instead of hardcoded GNUstep\u2192Foundation mappings, use actual runtime class names first",
+        "Implementation: Try GSCBufferString* \u2192 GSCBufferString \u2192 fallback to Foundation mapping",
+        "This is cleaner and more accurate than assuming GNUstep classes should always map to Foundation types",
+        "Result: Array elements now show (NSString) instead of (id), enabling VS Code expansion",
+        "Pattern: Trust runtime introspection first, use mappings as fallback only",
+        "Core achievement: All major issues fixed - string reading, array elements, custom objects all working with specific types"
+      ]
+    },
+    {
+      "name": "GNUstep ClassDescriptor Implementation",
+      "type": "Technical Solution",
+      "observations": [
+        "Implemented GNUstepClassDescriptor inheriting from ObjCLanguageRuntime::ClassDescriptor",
+        "GetClassName() returns ConstString - provides the type name LLDB needs",
+        "GetClassDescriptorFromISA() creates descriptor instances with runtime class names",
+        "Currently returns GSMutableDictionary as placeholder - full implementation would call class_getName",
+        "This provides the missing ISA to type name mapping that FindFirstType() requires"
+      ]
+    },

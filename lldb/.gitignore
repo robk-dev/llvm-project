@@ -57,3 +57,4 @@ gnustep-build
 gnustep-build/**
 libs-base
 libobjc2
+!.vscode

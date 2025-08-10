@@ -21,7 +21,8 @@ enum class TaggedPointerType {
   NSSmallInt,
   NSSmallFloat,
   NSSmallExtendedDouble,
-  NSSmallRepeatingDouble
+  NSSmallRepeatingDouble,
+  NSSmallString  // CRITICAL FIX: Added missing tag 4 for strings
 };
 
 /// Dispatcher function for id types that delegates to appropriate formatter based on runtime type

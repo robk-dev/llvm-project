@@ -15,7 +15,7 @@ create_helper_scripts() {
 #!/bin/bash
 # Verify GNUstep Runtime Patch Installation
 
-LLDB_BIN="${1:-$HOME/llvm-build/build/bin/lldb}"
+LLDB_BIN="${1:-$HOME/llvm-build/bin/lldb}"
 
 echo "=== GNUstep Runtime Patch Verification ==="
 echo ""
@@ -88,10 +88,10 @@ ENV_EOF
     # Create VS Code settings helper
     cat > "$LLVM_BUILD_DIR/vscode_settings.json" << 'VSCODE_EOF'
 {
-    "lldb.library": "$HOME/llvm-build/build/lib/liblldb.so",
+    "lldb.library": "$HOME/llvm-build/lib/liblldb.so",
     "lldb.adapterEnv": {
-        "LLDB_DEBUGSERVER_PATH": "$HOME/llvm-build/build/bin/lldb-server",
-        "LD_LIBRARY_PATH": "$HOME/llvm-build/build/lib:/usr/local/lib",
+        "LLDB_DEBUGSERVER_PATH": "$HOME/llvm-build/bin/lldb-server",
+        "LD_LIBRARY_PATH": "$HOME/llvm-build/lib:/usr/local/lib",
         "GNUSTEP_NEW_STRING_ABI": "1"
     },
     "lldb.verboseLogging": true,
