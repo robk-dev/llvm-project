@@ -7,6 +7,92 @@
 HELPERS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$HELPERS_DIR/common.sh"
 
+# Function to setup MSYS2 UCRT64 PATH
+setup_msys2_path() {
+    print_progress "Setting up MSYS2 UCRT64 PATH..."
+    
+    # Find MSYS2 installation root
+    local msys_root=$(find_msys2_root)
+    print_info "MSYS2 root: $msys_root"
+    
+    # Set up proper PATH for UCRT64 environment
+    local ucrt64_paths=(
+        "$msys_root/ucrt64/bin"
+        "$msys_root/usr/bin"
+        "$msys_root/bin"
+        "/ucrt64/bin"
+        "/usr/bin"
+        "/bin"
+    )
+    
+    # Add UCRT64 paths to beginning of PATH if not already there
+    for ucrt_path in "${ucrt64_paths[@]}"; do
+        if [ -d "$ucrt_path" ] && [[ ":$PATH:" != *":$ucrt_path:"* ]]; then
+            export PATH="$ucrt_path:$PATH"
+            print_info "Added to PATH: $ucrt_path"
+        fi
+    done
+    
+    # Also check /mingw64/bin as fallback
+    if [ -d "/mingw64/bin" ] && [[ ":$PATH:" != *":/mingw64/bin:"* ]]; then
+        export PATH="/mingw64/bin:$PATH"
+        print_info "Added to PATH (fallback): /mingw64/bin"
+    fi
+    
+    print_info "Current PATH (first 5 entries):"
+    echo "$PATH" | tr ':' '\n' | head -5 | sed 's/^/  /'
+}
+
+# Function to diagnose missing tools
+diagnose_missing_tools() {
+    local missing_tools=("$@")
+    
+    print_warning "Diagnosing missing tools..."
+    
+    for tool in "${missing_tools[@]}"; do
+        print_info "Looking for $tool..."
+        
+        # Check common MSYS2 locations
+        local possible_locations=(
+            "/ucrt64/bin/$tool"
+            "/ucrt64/bin/$tool.exe"
+            "/mingw64/bin/$tool"
+            "/mingw64/bin/$tool.exe"
+            "/usr/bin/$tool"
+            "/usr/bin/$tool.exe"
+        )
+        
+        local found=false
+        for location in "${possible_locations[@]}"; do
+            if [ -f "$location" ]; then
+                print_info "  Found at: $location"
+                found=true
+                break
+            fi
+        done
+        
+        if [ "$found" = false ]; then
+            print_info "  Not found in standard locations"
+            
+            # Suggest packages to install
+            case $tool in
+                cmake)
+                    print_info "  Install with: pacman -S mingw-w64-ucrt-x86_64-cmake"
+                    ;;
+                ninja)
+                    print_info "  Install with: pacman -S mingw-w64-ucrt-x86_64-ninja"
+                    ;;
+                clang|clang++)
+                    print_info "  Install with: pacman -S mingw-w64-ucrt-x86_64-clang"
+                    ;;
+                gcc|g++)
+                    print_info "  Install with: pacman -S mingw-w64-ucrt-x86_64-gcc"
+                    ;;
+            esac
+        fi
+    done
+}
+
 # Function to check Windows environment
 check_windows_environment() {
     print_progress "Checking Windows MSYS2/UCRT64 environment..."
@@ -15,6 +101,12 @@ check_windows_environment() {
     if [[ "$OSTYPE" != "msys" ]] && [[ "$OSTYPE" != "cygwin" ]]; then
         print_warning "Not running in MSYS2/Cygwin environment"
         print_info "Detected OS type: $OSTYPE"
+        print_info ""
+        print_info "To fix this:"
+        print_info "1. Open MSYS2 UCRT64 terminal (not regular Command Prompt)"
+        print_info "2. Navigate to your script directory"
+        print_info "3. Run the script again"
+        print_info ""
     fi
     
     # Check MSYSTEM environment
@@ -22,16 +114,26 @@ check_windows_environment() {
         print_success "Running in UCRT64 environment (recommended)"
     elif [[ "$MSYSTEM" == "MINGW64" ]]; then
         print_warning "Running in MINGW64 environment (UCRT64 recommended)"
+        print_info "For best compatibility, use MSYS2 UCRT64 terminal"
     elif [[ "$MSYSTEM" == "MINGW32" ]]; then
         print_error "32-bit environment not supported. Please use UCRT64 or MINGW64"
     else
         print_warning "Unknown MSYSTEM: ${MSYSTEM:-not set}"
+        print_info ""
+        print_info "To fix this:"
+        print_info "1. Close this terminal"
+        print_info "2. Open 'MSYS2 UCRT64' from Start Menu (not 'MSYS2')"
+        print_info "3. Run the script again"
+        print_info ""
     fi
     
     # Check for pacman
     if ! command_exists pacman; then
         print_error "pacman not found. Are you running in MSYS2?"
     fi
+    
+    # Setup PATH for MSYS2 tools
+    setup_msys2_path
     
     print_success "Windows MSYS2 environment check passed"
 }
@@ -184,19 +286,73 @@ install_windows_dependencies() {
     # Setup ccache
     setup_ccache_windows
     
+    # Force refresh PATH after package installation
+    print_progress "Refreshing PATH after package installation..."
+    setup_msys2_path
+    
+    # Wait a moment for filesystem to sync
+    sleep 2
+    
     # Verify critical tools
     print_progress "Verifying installed tools..."
     local required_tools=(cmake ninja clang clang++ git make)
     local missing_tools=()
+    local found_tools=()
     
     for tool in "${required_tools[@]}"; do
-        if ! command_exists $tool; then
+        # Try multiple ways to find the tool
+        local tool_found=false
+        
+        # Method 1: command -v
+        if command -v $tool >/dev/null 2>&1; then
+            tool_found=true
+            local tool_path=$(command -v $tool)
+        # Method 2: which
+        elif which $tool >/dev/null 2>&1; then
+            tool_found=true
+            local tool_path=$(which $tool)
+        # Method 3: direct path check
+        elif [ -f "/ucrt64/bin/$tool" ] || [ -f "/ucrt64/bin/$tool.exe" ]; then
+            tool_found=true
+            local tool_path="/ucrt64/bin/$tool"
+        elif [ -f "/mingw64/bin/$tool" ] || [ -f "/mingw64/bin/$tool.exe" ]; then
+            tool_found=true
+            local tool_path="/mingw64/bin/$tool"
+        fi
+        
+        if [ "$tool_found" = true ]; then
+            found_tools+=("$tool")
+            print_success "$tool found at: ${tool_path:-unknown}"
+        else
             missing_tools+=("$tool")
         fi
     done
     
     if [ ${#missing_tools[@]} -gt 0 ]; then
-        print_error "Missing required tools: ${missing_tools[*]}"
+        print_warning "Missing tools: ${missing_tools[*]}"
+        diagnose_missing_tools "${missing_tools[@]}"
+        
+        print_info ""
+        print_info "Manual PATH setup (if tools are installed but not found):"
+        print_info "Run these commands in your terminal before running the script:"
+        print_info ""
+        print_info "  export PATH=\"/ucrt64/bin:/usr/bin:\$PATH\""
+        print_info "  # Or for MINGW64:"
+        print_info "  export PATH=\"/mingw64/bin:/usr/bin:\$PATH\""
+        print_info ""
+        print_info "Then verify with: which cmake ninja clang"
+        print_info ""
+        
+        # Don't immediately exit, let user decide
+        read -p "Continue anyway? Some tools might be found during the build. (y/N): " -n 1 -r
+        echo ""
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            print_error "Build cancelled by user. Please install missing tools and try again."
+        else
+            print_warning "Continuing with missing tools - build may fail"
+        fi
+    else
+        print_success "All required tools found!"
     fi
     
     # Check CMake version
@@ -250,5 +406,5 @@ verify_python_windows() {
 }
 
 # Export functions
-export -f check_windows_environment check_disk_space setup_ccache_windows
+export -f setup_msys2_path diagnose_missing_tools check_windows_environment check_disk_space setup_ccache_windows
 export -f install_windows_dependencies verify_python_windows

@@ -125,6 +125,7 @@ main() {
     GNUSTEP_ONLY=false
     SKIP_PATH_REPLACE=false
     DEV_MODE=false
+    FORCE_PATH_SETUP=false
     
     while [[ $# -gt 0 ]]; do
         case $1 in
@@ -158,6 +159,10 @@ main() {
                 FORCE_CLEAN=true
                 shift
                 ;;
+            --force-path-setup)
+                FORCE_PATH_SETUP=true
+                shift
+                ;;
             --help)
                 echo "Usage: $0 [OPTIONS]"
                 echo ""
@@ -169,6 +174,7 @@ main() {
                 echo "  --gnustep-only      Build only GNUstep environment (skip LLVM)"
                 echo "  --skip-path-replace Skip path replacement step"
                 echo "  --force-clean       Clean existing build directory"
+                echo "  --force-path-setup  Force PATH setup and tool verification"
                 echo "  --help              Show this help"
                 echo ""
                 echo "Environment variables:"
@@ -190,6 +196,9 @@ main() {
                 echo ""
                 echo "  # Build only GNUstep environment"
                 echo "  ./setup.sh --gnustep-only"
+                echo ""
+                echo "  # Fix PATH issues (if tools installed but not found)"
+                echo "  ./setup.sh --force-path-setup"
                 echo ""
                 exit 0
                 ;;
@@ -240,6 +249,26 @@ main() {
     
     # Execute normal build steps
     print_section "Step 1: System Checks"
+    
+    # Force PATH setup if requested
+    if $FORCE_PATH_SETUP; then
+        print_info "Force PATH setup requested..."
+        # This will be called in check_windows_environment, but we call it early
+        setup_msys2_path
+        
+        print_info "Current PATH (first 10 entries):"
+        echo "$PATH" | tr ':' '\n' | head -10 | sed 's/^/  /'
+        
+        print_info "Tool locations:"
+        for tool in cmake ninja clang clang++ git make; do
+            if command -v "$tool" >/dev/null 2>&1; then
+                echo "  $tool: $(command -v "$tool")"
+            else
+                echo "  $tool: NOT FOUND"
+            fi
+        done
+    fi
+    
     check_windows_environment
     check_disk_space
     
