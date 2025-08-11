@@ -75,3 +75,5 @@ pythonenv*
 /lldb/docs/python_api/
 
 /gnustep-*/
+/.ccache/
+/build-windows/
