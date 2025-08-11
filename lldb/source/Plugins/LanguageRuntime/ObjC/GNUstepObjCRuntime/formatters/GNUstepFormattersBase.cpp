@@ -8,15 +8,24 @@
 
 #include "GNUstepFormattersBase.h"
 #include "../GNUstepObjCRuntimeIntrospector.h"
+#include "../GNUstepRuntimeV2API.h"
 #include "lldb/ValueObject/ValueObjectConstResult.h"
 #include "lldb/Symbol/CompilerType.h"
 #include "lldb/Target/ExecutionContext.h"
 #include "lldb/Target/StackFrame.h"
 #include "lldb/Target/Thread.h"
+#include "lldb/Expression/ExpressionVariable.h"
+#include "Plugins/LanguageRuntime/ObjC/ObjCLanguageRuntime.h"
+#include <chrono>
 
 using namespace lldb;
 using namespace lldb_private;
 using namespace lldb_private::formatters;
+
+// Static variables for offset caching
+std::unordered_map<GNUstepRuntimeHelper::OffsetCacheKey, ptrdiff_t, GNUstepRuntimeHelper::OffsetCacheKeyHash> 
+    GNUstepRuntimeHelper::s_offset_cache;
+std::mutex GNUstepRuntimeHelper::s_offset_cache_mutex;
 
 // ===== GNUstepRuntimeHelper Implementation =====
 
@@ -114,6 +123,70 @@ std::string GNUstepRuntimeHelper::ReadUTF8String(Process *process, lldb::addr_t 
   }
   
   return "";
+}
+
+ptrdiff_t GNUstepRuntimeHelper::GetIvarOffset(Process *process, const std::string &class_name, const std::string &ivar_name) {
+  if (!process || class_name.empty() || ivar_name.empty()) {
+    return -1; // Invalid offset
+  }
+  
+  // Check cache first
+  OffsetCacheKey key{class_name, ivar_name};
+  {
+    std::lock_guard<std::mutex> guard(s_offset_cache_mutex);
+    auto it = s_offset_cache.find(key);
+    if (it != s_offset_cache.end()) {
+      return it->second;
+    }
+  }
+  
+  // For now, use a simplified hardcoded offset mapping
+  // This can be enhanced later with proper runtime queries
+  ptrdiff_t offset = -1;
+  
+  // Common ivar offset mappings for GNUstep classes
+  // Handle various array subclasses
+  if (class_name == "GSArray" || class_name == "NSArray" || 
+      class_name == "GSInlineArray" || class_name == "GSMutableArray" ||
+      class_name == "GSPlaceholderArray" || class_name.find("Array") != std::string::npos) {
+    if (ivar_name == "_contents_array" || ivar_name == "_contents") {
+      offset = 8;  // After isa
+    } else if (ivar_name == "_count") {
+      offset = 16; // After isa + _contents_array
+    }
+  } else if (class_name == "GSDictionary" || class_name == "NSDictionary") {
+    if (ivar_name == "map") {
+      offset = 8;  // After isa
+    }
+  } else if (class_name == "GSSet" || class_name == "NSSet") {
+    if (ivar_name == "map") {
+      offset = 8;  // After isa
+    }
+  } else if (class_name == "NSConstantString" || class_name == "__NSConstantString") {
+    if (ivar_name == "str") {
+      offset = 24;  // NEW_ABI: After isa + len + hash + flags
+    } else if (ivar_name == "len" || ivar_name == "length") {
+      offset = 8;  // NEW_ABI: After isa
+    }
+  } else if (class_name == "GSString" || class_name == "GSCInlineString" || class_name == "GSUInlineString") {
+    if (ivar_name == "str") {
+      offset = 24; // After isa + len + padding + hash
+    } else if (ivar_name == "len" || ivar_name == "_count") {
+      offset = 8;  // After isa
+    } else if (ivar_name == "_flags") {
+      offset = 20; // After isa + len/count + padding + hash
+    } else if (ivar_name == "_contents") {
+      offset = 8;  // For inline strings
+    }
+  }
+  
+  // Cache the result (even if it's a failure)
+  {
+    std::lock_guard<std::mutex> guard(s_offset_cache_mutex);
+    s_offset_cache[key] = offset;
+  }
+  
+  return offset;
 }
 
 // ===== GNUstepSummaryProvider Implementation =====

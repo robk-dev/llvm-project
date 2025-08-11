@@ -11,6 +11,7 @@
 #include "GNUstepArrayFormatters.h"
 #include "GNUstepSetFormatters.h"
 #include "GNUstepIdDispatcher.h"
+#include "GNUstepPerformanceTimer.h"
 #include "../GNUstepObjCRuntimeIntrospector.h"
 #include "lldb/ValueObject/ValueObject.h"
 #include "lldb/ValueObject/ValueObjectConstResult.h"
@@ -18,6 +19,7 @@
 #include "lldb/DataFormatters/DumpValueObjectOptions.h"
 #include "lldb/Symbol/CompilerType.h"
 #include "lldb/Target/ExecutionContext.h"
+#include "lldb/Expression/UserExpression.h"
 #include "Plugins/LanguageRuntime/ObjC/ObjCLanguageRuntime.h"
 #include "lldb/lldb-enumerations.h"
 #include "Plugins/TypeSystem/Clang/TypeSystemClang.h"
@@ -27,6 +29,7 @@
 #include "lldb/Utility/Stream.h"
 
 #include <sstream>
+#include <algorithm>
 
 // GNUstep small object (tagged pointer) detection
 // On 64-bit systems, the low 3 bits are used
@@ -43,6 +46,8 @@ using namespace lldb_private::formatters;
 bool GNUstepNSDictionarySummaryProvider::FormatObject(ValueObject &valobj, 
                                                       Stream &stream, 
                                                       const TypeSummaryOptions &options) {
+  GNUSTEP_PERFORMANCE_TIMER("NSDictionarySummary");
+  
   if (!GNUstepRuntimeHelper::IsValidGNUstepObject(valobj)) {
     WriteErrorSummary(stream, "invalid object");
     return false;
@@ -71,19 +76,21 @@ bool GNUstepNSDictionarySummaryProvider::FormatObject(ValueObject &valobj,
 uint32_t GNUstepNSDictionarySummaryProvider::ExtractDictionaryCount(ValueObject &valobj) {
   Process *process = GNUstepRuntimeHelper::GetProcessFromValueObject(valobj);
   if (!process) {
+    // No process available
     return 0;
   }
   
   lldb::addr_t obj_addr = valobj.GetPointerValue();
   if (obj_addr == 0 || obj_addr == LLDB_INVALID_ADDRESS) {
+    // Invalid object address
     return 0;
   }
-  
+
   // GNUstep GSDictionary structure (from GSDictionary.m):
   // @interface GSDictionary : NSDictionary
   // {
   // @public
-  //   GSIMapTable_t map;  // offset 8 (after isa)
+  //   GSIMapTable_t map;
   // }
   // @end
   //
@@ -96,10 +103,23 @@ uint32_t GNUstepNSDictionarySummaryProvider::ExtractDictionaryCount(ValueObject 
   //   ...
   // }
   
-  // The map field starts at offset 8 (after isa)
-  // nodeCount is at offset 8 within the map structure
-  // So total offset is 8 + 8 = 16
-  lldb::addr_t count_addr = obj_addr + 16;
+  // Get dynamic offset for map field
+  std::string class_name = GNUstepRuntimeHelper::GetGNUstepClassName(valobj);
+  // Class name retrieved
+  if (class_name.empty() || class_name == "<unknown>") {
+    class_name = "GSDictionary"; // Fallback to most common dictionary class
+  }
+  
+  ptrdiff_t map_offset = GNUstepRuntimeHelper::GetIvarOffset(process, class_name, "map");
+  // Map offset found
+  if (map_offset < 0) {
+    map_offset = 8; // Fallback to hardcoded offset (after isa)
+    // Using fallback offset
+  }
+  
+  // The nodeCount is at offset 8 within the GSIMapTable_t structure
+  // So total offset is map_offset + 8
+  lldb::addr_t count_addr = obj_addr + map_offset + 8;
   uint64_t count = 0;
   
   if (!GNUstepRuntimeHelper::ReadMemory(process, count_addr, &count, sizeof(count))) {
@@ -145,9 +165,14 @@ std::string GNUstepNSDictionarySummaryProvider::GetInlinePairsPreview(ValueObjec
     return "";
   }
   
-  // Build inline preview showing first pairs
+  // Build inline preview showing first pairs  
   uint32_t preview_limit = std::min(static_cast<uint32_t>(pairs.size()), MAX_COLLECTION_ELEMENTS_INLINE);
-  std::string result = "@{";
+  
+  // PERFORMANCE OPTIMIZATION: Pre-allocate string with estimated capacity
+  size_t estimated_capacity = 2 + (preview_limit * 20) + 10; // "@{" + key:value pairs + margin
+  std::string result;
+  result.reserve(estimated_capacity);
+  result = "@{";
   
   // Create formatter context to prevent infinite recursion
   FormatterContext context;
@@ -157,19 +182,14 @@ std::string GNUstepNSDictionarySummaryProvider::GetInlinePairsPreview(ValueObjec
       result += ", ";
     }
     
-    // Read the actual key and value pointers from storage addresses
-    lldb::addr_t key_ptr = 0, value_ptr = 0;
-    GNUstepRuntimeHelper::ReadMemory(process, pairs[i].key_addr, &key_ptr, sizeof(key_ptr));
-    GNUstepRuntimeHelper::ReadMemory(process, pairs[i].value_addr, &value_ptr, sizeof(value_ptr));
-    
-    // Get key summary
-    std::string key_summary = GetElementSummary(process, key_ptr, context);
+    // Get key summary - pass storage address directly
+    std::string key_summary = GetElementSummary(process, pairs[i].key_addr, context);
     if (key_summary.empty()) {
       key_summary = "<key>";
     }
     
-    // Get value summary  
-    std::string value_summary = GetElementSummary(process, value_ptr, context);
+    // Get value summary - pass storage address directly
+    std::string value_summary = GetElementSummary(process, pairs[i].value_addr, context);
     if (value_summary.empty()) {
       value_summary = "<value>";
     }
@@ -189,8 +209,14 @@ std::string GNUstepNSDictionarySummaryProvider::GetInlinePairsPreview(ValueObjec
 bool GNUstepNSDictionarySummaryProvider::ReadMapTableInfo(Process *process, 
                                                           lldb::addr_t obj_addr, 
                                                           MapTableInfo &map_info) {
-  // GSDictionary has GSIMapTable_t at offset 8 (after isa)
-  lldb::addr_t map_addr = obj_addr + 8;
+  // Get dynamic offset for map field
+  std::string class_name = "GSDictionary"; // Default to most common class
+  ptrdiff_t map_offset = GNUstepRuntimeHelper::GetIvarOffset(process, class_name, "map");
+  if (map_offset < 0) {
+    map_offset = 8; // Fallback to hardcoded offset (after isa)
+  }
+  
+  lldb::addr_t map_addr = obj_addr + map_offset;
   
   // Read nodeCount
   lldb::addr_t node_count_addr = map_addr + 8;
@@ -290,9 +316,45 @@ bool GNUstepNSDictionarySummaryProvider::ExtractKeyValuePairsForPreview(Process 
   return true;
 }
 
-std::string GNUstepNSDictionarySummaryProvider::GetElementSummary(Process *process, lldb::addr_t element_addr, FormatterContext &context) {
-  if (!process || element_addr == 0 || element_addr == LLDB_INVALID_ADDRESS) {
+std::string GNUstepNSDictionarySummaryProvider::GetElementSummary(Process *process, lldb::addr_t storage_addr, FormatterContext &context) {
+  if (!process || storage_addr == 0 || storage_addr == LLDB_INVALID_ADDRESS) {
     return "nil";
+  }
+  
+  // Read the actual element pointer from the storage address
+  Status error;
+  lldb::addr_t element_addr = GNUstepRuntimeHelper::ReadPointer(process, storage_addr, error);
+  if (error.Fail() || element_addr == 0 || element_addr == LLDB_INVALID_ADDRESS) {
+    return "nil";
+  }
+  
+  
+  // Check for GSTinyString first (tagged pointer with tag 4)
+  if ((element_addr & 0x7) == 4) {
+    // This is a GSTinyString - decode it directly
+    // Length is in bits 3-7 (5 bits)
+    int length = (element_addr >> 3) & 0x1F;
+    
+    if (length > 0 && length <= 9) {
+      std::string result;
+      // Characters are extracted using the TINY_STRING_CHAR macro:
+      // ((s & (0xFE00000000000000 >> (x*7))) >> (57-(x*7)))
+      for (int i = 0; i < length; i++) {
+        uint64_t mask = 0xFE00000000000000ULL >> (i * 7);
+        char c = (element_addr & mask) >> (57 - (i * 7));
+        if (c >= 0x20 && c <= 0x7e) {
+          result += c;
+        } else if (c != 0) {
+          // Non-printable character
+          result += '?';
+        }
+      }
+      
+      if (!result.empty()) {
+        // Return with quotes for string display
+        return "\"" + result + "\"";
+      }
+    }
   }
   
   // Check for recursion depth limit and cycle detection
@@ -306,11 +368,53 @@ std::string GNUstepNSDictionarySummaryProvider::GetElementSummary(Process *proce
   // First attempt: Try to directly extract string content for NSConstantString
   // This is more reliable than going through the ID dispatcher for simple strings
   GNUstepObjCRuntimeIntrospector introspector(process);
-  Status error;
-  lldb::addr_t isa_addr = GNUstepRuntimeHelper::ReadPointer(process, element_addr, error);
+  Status isa_error;
+  lldb::addr_t isa_addr = GNUstepRuntimeHelper::ReadPointer(process, element_addr, isa_error);
   std::string class_name;
-  if (error.Success() && isa_addr != 0) {
+  if (isa_error.Success() && isa_addr != 0) {
     class_name = introspector.GetClassName(isa_addr);
+  }
+  
+  // CRITICAL FIX: Handle arrays and numbers directly without creating ValueObjects
+  // This avoids issues with GetSummaryAsCString() on nested objects
+  
+  // Handle arrays directly  
+  if (class_name.find("Array") != std::string::npos || class_name.find("GSInlineArray") != std::string::npos) {
+    // Read array count directly using the same logic as GNUstepNSArraySummaryProvider
+    ptrdiff_t count_offset = GNUstepRuntimeHelper::GetIvarOffset(process, class_name, "_count");
+    if (count_offset < 0) {
+      count_offset = 16; // Fallback to hardcoded offset
+    }
+    
+    lldb::addr_t count_addr = element_addr + count_offset;
+    uint32_t array_count = 0;
+    if (GNUstepRuntimeHelper::ReadMemory(process, count_addr, &array_count, sizeof(array_count))) {
+      if (array_count < 10000000) { // Sanity check
+        context.ExitObject(element_addr);
+        if (array_count == 0) {
+          return "@[]";
+        } else if (array_count == 1) {
+          return "@[1 object]";
+        } else {
+          return "@[" + std::to_string(array_count) + " objects]";
+        }
+      }
+    }
+    // If we failed to read count, fall through to try other methods
+  }
+  
+  // Handle NSNumber directly for tagged pointers
+  if (class_name.find("Number") != std::string::npos) {
+    // Check if it's a tagged number
+    uint8_t tag = element_addr & 0x7;
+    if (tag == 1) {
+      // NSSmallInt - integer value is ptr >> 3
+      int64_t int_value = ((int64_t)element_addr) >> 3;
+      context.ExitObject(element_addr);
+      return std::to_string(int_value);
+    }
+    // For non-tagged numbers, try to extract value
+    // This is complex, so we'll fall through to the ValueObject approach
   }
   
   // Handle NSConstantString specially as it's very common in dictionaries
@@ -353,9 +457,11 @@ std::string GNUstepNSDictionarySummaryProvider::GetElementSummary(Process *proce
                           process->GetAddressByteSize());
         element_valobj_sp = ValueObject::CreateValueObjectFromData("element", data, exe_ctx, id_type);
       } else {
-        // For regular objects, create from address
+        // For regular objects, create from storage address (not the object address!)
+        // CRITICAL FIX: Use storage_addr which contains the pointer, not element_addr which IS the pointer
+        // This matches how arrays and dictionaries create their synthetic children
         element_valobj_sp = ValueObject::CreateValueObjectFromAddress("element", 
-                                                                      element_addr, 
+                                                                      storage_addr,  // Use storage address!
                                                                       exe_ctx, id_type);
       }
       
@@ -810,21 +916,25 @@ std::string GNUstepNSDictionarySummaryProvider::TryExtractStringContent(Process 
   if (class_name.find("NSConstantString") != std::string::npos || 
       class_name.find("__NSConstantString") != std::string::npos) {
     // NSConstantString layout (compile-time constant strings that aren't tagged):
+    // NEW_ABI (GNUstep 2.1+):
     // struct {
     //   Class isa;          // offset 0
-    //   const char *_bytes; // offset 8
-    //   uint32_t _length;   // offset 16
-    // }
+    //   uint32_t flags;     // offset 8
+    //   uint32_t length;    // offset 12 <-- String length
+    //   uint32_t size;      // offset 16
+    //   uint32_t hash;      // offset 20
+    //   const char *str;    // offset 24 <-- String pointer
+    // };
     
-    // Read the string pointer
-    lldb::addr_t str_ptr_addr = obj_addr + 8;
+    // Read the string pointer at correct offset 24
+    lldb::addr_t str_ptr_addr = obj_addr + 24;
     lldb::addr_t str_data_addr = GNUstepRuntimeHelper::ReadPointer(process, str_ptr_addr, error);
     if (error.Fail() || str_data_addr == 0) {
       return "";
     }
     
-    // Read the length
-    lldb::addr_t len_addr = obj_addr + 16;
+    // Read the length at correct offset 12
+    lldb::addr_t len_addr = obj_addr + 12;
     uint32_t string_length = 0;
     if (!GNUstepRuntimeHelper::ReadMemory(process, len_addr, &string_length, sizeof(string_length))) {
       string_length = 0;
@@ -949,11 +1059,13 @@ GNUstepNSDictionarySyntheticProvider::GNUstepNSDictionarySyntheticProvider(
 }
 
 bool GNUstepNSDictionarySyntheticProvider::UpdateImpl() {
+  
   // Update execution context reference
   m_exe_ctx_ref = m_backend.GetExecutionContextRef();
   
   Process *process = GNUstepRuntimeHelper::GetProcessFromValueObject(m_backend);
   if (!process) {
+    // Process validation failed
     return false;
   }
   
@@ -992,8 +1104,26 @@ bool GNUstepNSDictionarySyntheticProvider::UpdateImpl() {
 
 bool GNUstepNSDictionarySyntheticProvider::ReadMapTableInfo(Process *process, 
                                                             lldb::addr_t obj_addr) {
-  // GSDictionary has GSIMapTable_t at offset 8 (after isa)
-  lldb::addr_t map_addr = obj_addr + 8;
+  // Get dynamic offset for map field like we do in the summary provider
+  // Get class name from the object itself
+  std::string class_name;
+  GNUstepObjCRuntimeIntrospector introspector(process);
+  Status isa_error;
+  lldb::addr_t isa_addr = GNUstepRuntimeHelper::ReadPointer(process, obj_addr, isa_error);
+  if (isa_error.Success() && isa_addr != 0) {
+    class_name = introspector.GetClassName(isa_addr);
+  }
+  
+  if (class_name.empty() || class_name == "<unknown>") {
+    class_name = "GSDictionary"; // Fallback to most common dictionary class
+  }
+  
+  ptrdiff_t map_offset = GNUstepRuntimeHelper::GetIvarOffset(process, class_name, "map");
+  if (map_offset < 0) {
+    map_offset = 8; // Fallback to hardcoded offset (after isa)
+  }
+  
+  lldb::addr_t map_addr = obj_addr + map_offset;
   
   // Read GSIMapTable fields:
   // struct _GSIMapTable {
@@ -1123,9 +1253,277 @@ CompilerType GNUstepNSDictionarySyntheticProvider::GetConcreteTypeForObject(lldb
 }
 
 llvm::Expected<uint32_t> GNUstepNSDictionarySyntheticProvider::CalculateNumChildren() {
-  // Return twice the number of pairs (one child for key, one for value)
-  // Plus optionally show count as first child
-  return static_cast<uint32_t>(m_pairs.size() * 2 + 1); // +1 for count
+  // Return two children per key-value pair (key and value shown separately)
+  // Plus count as first child
+  return static_cast<uint32_t>(m_pairs.size() * 2 + 1); // *2 for key+value, +1 for count
+}
+
+std::string GNUstepNSDictionarySyntheticProvider::GetElementSummary(Process *process, lldb::addr_t storage_addr, FormatterContext &context) {
+  // Performance optimized - removed debug file I/O
+  
+  if (!process || storage_addr == 0 || storage_addr == LLDB_INVALID_ADDRESS) {
+    return "";
+  }
+  
+  // Read the actual element pointer from the storage address
+  Status read_error;
+  lldb::addr_t element_addr = GNUstepRuntimeHelper::ReadPointer(process, storage_addr, read_error);
+  if (read_error.Fail() || element_addr == 0 || element_addr == LLDB_INVALID_ADDRESS) {
+    return "<invalid>";
+  }
+  
+  // Element address read successfully
+  
+  // For GSTinyString (tagged pointer with tag 4), decode directly
+  // GSTinyString uses tag 4 in the low 3 bits
+  if ((element_addr & 0x7) == 4) {
+    // GSTinyString tagged pointer detected
+    // This is a GSTinyString - decode it directly using the correct encoding
+    // Length is in bits 3-7 (5 bits)
+    int length = (element_addr >> 3) & 0x1F;
+    
+    // Decoding GSTinyString with optimized bit operations
+    
+    if (length > 0 && length <= 9) {
+      std::string result;
+      // Characters are extracted using the TINY_STRING_CHAR macro:
+      // ((s & (0xFE00000000000000 >> (x*7))) >> (57-(x*7)))
+      for (int i = 0; i < length; i++) {
+        uint64_t mask = 0xFE00000000000000ULL >> (i * 7);
+        char c = (element_addr & mask) >> (57 - (i * 7));
+        if (c >= 0x20 && c <= 0x7e) {
+          result += c;
+        } else if (c != 0) {
+          // Non-printable character
+          result += '?';
+        }
+      }
+      
+      if (!result.empty()) {
+        return result;
+      }
+    }
+    
+    // GSTinyString decoding failed, continuing with fallback
+  }
+  
+  // Try expression evaluation as a fallback
+  // This is more reliable but slower
+  ExecutionContext exe_ctx(process);
+  Target *target = exe_ctx.GetTargetPtr();
+  if (target) {
+    // Call -UTF8String on the object to get its string representation
+    std::string expr = llvm::formatv("(const char*)[(id)0x{0:x} UTF8String]", element_addr).str();
+    
+    ValueObjectSP result_sp;
+    EvaluateExpressionOptions options;
+    options.SetUnwindOnError(true);
+    options.SetTryAllThreads(false);
+    options.SetTimeout(std::chrono::milliseconds(500));
+    
+    target->EvaluateExpression(expr.c_str(), exe_ctx.GetFramePtr(), result_sp, options);
+    
+    if (result_sp && result_sp->GetError().Success()) {
+      // Get the actual C string value
+      lldb::addr_t str_addr = result_sp->GetValueAsUnsigned(0);
+      if (str_addr && str_addr != LLDB_INVALID_ADDRESS) {
+        std::string result = GNUstepRuntimeHelper::ReadUTF8String(process, str_addr, 100);
+        if (!result.empty()) {
+          return result;
+        }
+      }
+    }
+  }
+  
+  // Fallback to the original implementation
+  
+  // Check if this is a tagged pointer first
+  bool is_tagged = (element_addr & 0x7) != 0;
+  
+  if (is_tagged) {
+    // Handle tagged pointers directly
+    uint64_t tag = element_addr & 0x7;
+    
+    // Tagged strings (tag 4)
+    if (tag == 4) {
+      // GNUstep tiny string - extract characters from the pointer bits
+      int length = (element_addr >> 3) & 0x1F;
+      if (length > 0 && length <= 8) {
+        std::string result;
+        for (int i = 0; i < length; i++) {
+          uint64_t mask = 0xFE00000000000000ULL >> (i * 7);
+          char c = (element_addr & mask) >> (57 - (i * 7));
+          if (c >= 0x20 && c <= 0x7e) {
+            result += c;
+          } else {
+            break;
+          }
+        }
+        if (!result.empty()) {
+          return result; // Return without quotes for use as key name
+        }
+      }
+    }
+    // Tagged numbers (tags 1-3)
+    else if (tag >= 1 && tag <= 3) {
+      // Simple integer extraction for tagged numbers
+      int64_t value = static_cast<int64_t>(element_addr) >> 4;
+      return std::to_string(value);
+    }
+    
+    return "<tagged>";
+  }
+  
+  // For non-tagged pointers, try to extract string content directly
+  // This is faster than going through the full summary provider
+  GNUstepObjCRuntimeIntrospector introspector(process);
+  Status error;
+  lldb::addr_t isa_addr = GNUstepRuntimeHelper::ReadPointer(process, element_addr, error);
+  // ISA address read
+  if (error.Success() && isa_addr != 0) {
+    std::string class_name = introspector.GetClassName(isa_addr);
+    // Class name retrieved
+    // Class name introspection completed
+    
+    // Handle different string types
+    if (class_name.find("String") != std::string::npos) {
+      // Check if it's GSCInlineString
+      if (class_name == "GSCInlineString" || class_name == "GSUInlineString") {
+        // GSCInlineString stores data inline after the object structure
+        // Structure: isa(8) + _contents(8) + _count(4) + _flags(4) + inline_data
+        
+        // Read string length
+        uint32_t string_length = 0;
+        lldb::addr_t count_addr = element_addr + 16;
+        size_t bytes_read = process->ReadMemory(count_addr, &string_length, sizeof(string_length), error);
+        
+        if (error.Success() && string_length > 0 && string_length < 1000) {
+          // Read flags to check if wide characters
+          uint32_t flags = 0;
+          lldb::addr_t flags_addr = element_addr + 20;
+          bytes_read = process->ReadMemory(flags_addr, &flags, sizeof(flags), error);
+          
+          if (error.Success()) {
+            bool is_wide = (flags & 0x1) != 0;
+            
+            // Data starts at offset 24
+            lldb::addr_t data_addr = element_addr + 24;
+            
+            if (!is_wide) {
+              // 8-bit characters
+              std::vector<char> buffer(string_length + 1, 0);
+              bytes_read = process->ReadMemory(data_addr, buffer.data(), string_length, error);
+              if (error.Success() && bytes_read > 0) {
+                return std::string(buffer.data(), bytes_read);
+              }
+            } else {
+              // 16-bit Unicode characters - convert to UTF-8
+              std::vector<uint16_t> wide_buffer(string_length);
+              bytes_read = process->ReadMemory(data_addr, wide_buffer.data(), 
+                                         string_length * sizeof(uint16_t), error);
+              if (error.Success() && bytes_read > 0) {
+                std::string result;
+                for (size_t i = 0; i < string_length; i++) {
+                  if (wide_buffer[i] < 128) {
+                    result += static_cast<char>(wide_buffer[i]);
+                  } else {
+                    // Simple UTF-8 encoding for non-ASCII
+                    result += '?'; // Placeholder for complex Unicode
+                  }
+                }
+                return result;
+              }
+            }
+          }
+        }
+      }
+      // Handle NSConstantString
+      else if (class_name.find("ConstantString") != std::string::npos) {
+        // NSConstantString layout in GNUstep: {isa(8), flags/hash(8), char*(8), length(8)}
+        // The string pointer is at offset 16, not 8
+        lldb::addr_t str_ptr_addr = element_addr + 16;
+        lldb::addr_t str_data_addr = GNUstepRuntimeHelper::ReadPointer(process, str_ptr_addr, error);
+        if (error.Success() && str_data_addr != 0) {
+          std::string content = GNUstepRuntimeHelper::ReadUTF8String(process, str_data_addr, 50);
+          // String content read
+          if (!content.empty()) {
+            return content; // Return without quotes for use as key name
+          }
+        }
+      }
+      // Generic string handling fallback
+      else {
+        // Try NSConstantString layout first (string pointer at offset 16)
+        lldb::addr_t str_ptr_addr = element_addr + 16;
+        lldb::addr_t str_data_addr = GNUstepRuntimeHelper::ReadPointer(process, str_ptr_addr, error);
+        if (error.Success() && str_data_addr != 0) {
+          std::string content = GNUstepRuntimeHelper::ReadUTF8String(process, str_data_addr, 50);
+          if (!content.empty()) {
+            return content;
+          }
+        }
+        // If that fails, try offset 8 (older layout)
+        str_ptr_addr = element_addr + 8;
+        str_data_addr = GNUstepRuntimeHelper::ReadPointer(process, str_ptr_addr, error);
+        if (error.Success() && str_data_addr != 0) {
+          std::string content = GNUstepRuntimeHelper::ReadUTF8String(process, str_data_addr, 50);
+          if (!content.empty()) {
+            return content;
+          }
+        }
+      }
+    }
+    
+    // For numbers
+    if (class_name.find("Number") != std::string::npos) {
+      return "<NSNumber>";
+    }
+  }
+  
+  // Returning fallback key representation
+  return "<key>";
+}
+
+// Helper function to get summary for tagged pointers without creating ValueObjects
+static std::string GetTaggedPointerSummary(Process *process, lldb::addr_t tagged_ptr) {
+  if (!process || tagged_ptr == 0) {
+    return "<nil>";
+  }
+  
+  // Check the tag in the low 3 bits
+  uint8_t tag = tagged_ptr & 0x7;
+  
+  // GSTinyString (tag 4)
+  if (tag == 4) {
+    // Length is in bits 3-7 (5 bits)
+    int length = (tagged_ptr >> 3) & 0x1F;
+    
+    if (length > 0 && length <= 9) {
+      std::string result = "\"";
+      // Characters are extracted using the TINY_STRING_CHAR macro
+      for (int i = 0; i < length; i++) {
+        uint64_t mask = 0xFE00000000000000ULL >> (i * 7);
+        char c = (tagged_ptr & mask) >> (57 - (i * 7));
+        if (c >= 0x20 && c <= 0x7e) {
+          result += c;
+        } else if (c != 0) {
+          result += '?';
+        }
+      }
+      result += "\"";
+      return result;
+    }
+  }
+  
+  // GSTaggedNumber (tag 1 or 3)
+  if (tag == 1 || tag == 3) {
+    // For tagged numbers, extract the value
+    int64_t value = (int64_t)(tagged_ptr >> 3);  // Remove tag bits
+    return std::to_string(value);
+  }
+  
+  // Other tagged types - show raw value for debugging
+  return llvm::formatv("<tagged:0x{0:x}>", tagged_ptr);
 }
 
 lldb::ValueObjectSP GNUstepNSDictionarySyntheticProvider::GetChildAtIndex(uint32_t idx) {
@@ -1150,9 +1548,10 @@ lldb::ValueObjectSP GNUstepNSDictionarySyntheticProvider::GetChildAtIndex(uint32
     return CreateValueObjectFromData("count", data, uint_type);
   }
   
-  // Adjust index for key-value pairs
+  // Adjust index for key-value pairs (skip count)
   idx--;
   
+  // Determine which pair and whether it's key or value
   size_t pair_idx = idx / 2;
   bool is_key = (idx % 2) == 0;
   
@@ -1202,22 +1601,78 @@ lldb::ValueObjectSP GNUstepNSDictionarySyntheticProvider::GetChildAtIndex(uint32
   // Create execution context
   ExecutionContext exe_ctx(m_exe_ctx_ref);
   
-  // Use the generic 'id' type for all synthetic children.
-  // LLDB's dynamic type resolution will automatically determine and apply
-  // the correct concrete type (NSString, NSNumber, etc.) via the runtime.
+  // Check if it's a tagged pointer
+  bool is_tagged = (object_ptr & 0x7) != 0;
+  
+  // Handle the value based on whether it's a tagged pointer
   CompilerType element_type = GetConcreteTypeForObject(object_ptr);
   if (!element_type.IsValid()) {
     element_type = id_type;
   }
   
-  // CRITICAL FIX: Always use CreateValueObjectFromAddress with storage address
-  // This allows LLDB to properly handle both tagged pointers and regular objects
-  // The storage_addr is where the pointer/tagged value is stored in memory
-  // LLDB will read from this address and properly handle tagged pointers vs regular objects
-  
-  return ValueObject::CreateValueObjectFromAddress(name_stream.GetString(), 
-                                                   storage_addr, 
-                                                   exe_ctx, element_type);
+  if (is_tagged) {
+    // Handle tagged pointers specially - they ARE the data, not pointers to data
+    uint8_t tag = object_ptr & 0x7;
+    
+    if (tag == 4) {
+      // GSTinyString - create a ValueObject with the tagged pointer as NSString* type
+      // This allows LLDB to properly display it as an NSString instead of generic id
+      
+      // Try to get NSString* type from the runtime
+      CompilerType nsstring_type = id_type; // Default to id if we can't get NSString*
+      
+      // Attempt to get the NSString class type
+      ObjCLanguageRuntime *runtime = ObjCLanguageRuntime::Get(*m_process);
+      if (runtime) {
+        // Look for NSString class in the runtime
+        ConstString nsstring_name("NSString");
+        
+        // Try to get the class descriptor for NSString
+        ObjCLanguageRuntime::ClassDescriptorSP nsstring_class = 
+            runtime->GetClassDescriptorFromClassName(nsstring_name);
+        
+        if (nsstring_class) {
+          // Get the CompilerType for NSString*
+          TypeSP nsstring_type_sp = nsstring_class->GetType();
+          if (nsstring_type_sp) {
+            CompilerType nsstring_base_type = nsstring_type_sp->GetForwardCompilerType();
+            if (nsstring_base_type.IsValid()) {
+              // Make it a pointer type
+              nsstring_type = nsstring_base_type.GetPointerType();
+            }
+          }
+        }
+      }
+      
+      // Create an NSString* type ValueObject with the tagged pointer value
+      DataBufferSP ptr_buffer = std::make_shared<DataBufferHeap>(&object_ptr, sizeof(object_ptr));
+      DataExtractor ptr_data(ptr_buffer, exe_ctx.GetByteOrder(), exe_ctx.GetAddressByteSize());
+      
+      return ValueObjectConstResult::Create(exe_ctx.GetBestExecutionContextScope(),
+                                            nsstring_type,  // Use NSString* type instead of id
+                                            ConstString(name_stream.GetString()),
+                                            ptr_data);
+    } else {
+      // Other tagged pointers (numbers, etc) - create with appropriate type
+      DataBufferSP ptr_buffer = std::make_shared<DataBufferHeap>(&object_ptr, sizeof(object_ptr));
+      DataExtractor ptr_data(ptr_buffer, exe_ctx.GetByteOrder(), exe_ctx.GetAddressByteSize());
+      
+      return ValueObjectConstResult::Create(exe_ctx.GetBestExecutionContextScope(),
+                                            element_type,
+                                            ConstString(name_stream.GetString()),
+                                            ptr_data);
+    }
+  } else {
+    // For regular object pointers, create ValueObject from the storage address
+    // CRITICAL FIX: Use storage_addr (storage address) not object_ptr (actual object)
+    // This follows the same pattern as GNUstepNSArraySyntheticProvider - pass the address
+    // where the pointer is stored, not the pointer value itself. LLDB will read from this
+    // address and properly handle the object pointer (including dynamic type resolution).
+    return SyntheticChildrenFrontEnd::CreateValueObjectFromAddress(
+        name_stream.GetString(), 
+        storage_addr,  // Storage address where the pointer is stored
+        exe_ctx, element_type);
+  }
 }
 
 
@@ -1261,7 +1716,7 @@ std::string GNUstepNSDictionarySyntheticProvider::ExtractStringFromObject(lldb::
   if (!m_process || obj_addr == 0 || obj_addr == LLDB_INVALID_ADDRESS) {
     return "";
   }
-  
+
   // Check for tagged string first (GNUstep tiny strings)
   if ((obj_addr & 0x7) == 4) {
     // Tagged tiny string - extract directly
@@ -1295,28 +1750,49 @@ std::string GNUstepNSDictionarySyntheticProvider::ExtractStringFromObject(lldb::
   Status error;
   
   // Get class name to determine string type
-  ObjCLanguageRuntime *runtime = ObjCLanguageRuntime::Get(*m_process);
-  if (!runtime) {
+  GNUstepObjCRuntimeIntrospector introspector(m_process);
+  lldb::addr_t isa_addr = GNUstepRuntimeHelper::ReadPointer(m_process, obj_addr, error);
+  if (error.Fail() || isa_addr == 0) {
     return "";
   }
   
-  // Create a temporary ValueObject to get class info
-  ExecutionContext exe_ctx(m_exe_ctx_ref);
-  CompilerType id_type = m_id_type;
-  if (!id_type.IsValid()) {
+  std::string class_name = introspector.GetClassName(isa_addr);
+  
+  // Early exit for NSConstantString - always handle it first
+  if (class_name == "NSConstantString" || class_name.find("ConstantString") != std::string::npos) {
+    // NSConstantString layout: { Class isa; char *cString; unsigned int length; }
+    lldb::addr_t string_ptr = GNUstepRuntimeHelper::ReadPointer(m_process, obj_addr + 8, error);
+    if (!error.Fail() && string_ptr != 0 && string_ptr != LLDB_INVALID_ADDRESS) {
+      std::string result = GNUstepRuntimeHelper::ReadUTF8String(m_process, string_ptr, 256);
+      if (!result.empty()) {
+        return result;
+      }
+    }
+    // If we failed to read NSConstantString, don't try other approaches
     return "";
   }
   
-  // Try multiple approaches to extract string content
+  // Try multiple approaches based on class type
   
   // Approach 1: NSConstantString (most common for literal strings)
-  // Layout: { Class isa; char *cString; unsigned int length; }
-  lldb::addr_t string_ptr = GNUstepRuntimeHelper::ReadPointer(m_process, obj_addr + 8, error);
-  if (!error.Fail() && string_ptr != 0 && string_ptr != LLDB_INVALID_ADDRESS) {
-    // Read up to 256 bytes of the string
+  if (class_name.find("NSConstantString") != std::string::npos ||
+      class_name.find("NXConstantString") != std::string::npos ||
+      class_name.find("__NSConstantString") != std::string::npos) {
+    // Layout: { Class isa; char *cString; unsigned int length; }
+    lldb::addr_t string_ptr = GNUstepRuntimeHelper::ReadPointer(m_process, obj_addr + 8, error);
+    if (!error.Fail() && string_ptr != 0 && string_ptr != LLDB_INVALID_ADDRESS) {
+      return GNUstepRuntimeHelper::ReadUTF8String(m_process, string_ptr, 256);
+    }
+  }
+  
+  // Approach 2: GSCInlineString (common for dynamically created strings)
+  if (class_name.find("GSCInlineString") != std::string::npos ||
+      class_name.find("GSString") != std::string::npos) {
+    // Try reading inline string content
+    // GSCInlineString stores characters inline after the object header
+    // Layout differs but usually starts at offset 16 or 24
     char buffer[257] = {0};
-    size_t to_read = 256;
-    size_t bytes_read = m_process->ReadMemory(string_ptr, buffer, to_read, error);
+    size_t bytes_read = m_process->ReadMemory(obj_addr + 16, buffer, 256, error);
     if (!error.Fail() && bytes_read > 0) {
       // Ensure null termination at actual read position
       buffer[bytes_read] = '\0';

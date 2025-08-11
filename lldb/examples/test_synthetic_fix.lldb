@@ -1,0 +1,28 @@
+#!/usr/bin/env lldb -s
+
+# Test script to validate GetDynamicTypeAndAddress provides CompilerType for synthetic children
+file dict_test
+
+# Set breakpoint at the test point
+b dict_test.m:17
+
+# Run the program
+run
+
+# Enable comprehensive logging to see all GetDynamicTypeAndAddress details
+log enable lldb process types expressions
+
+# Test synthetic children access - this is the critical test
+# We want to verify that GetDynamicTypeAndAddress provides CompilerType so formatters work
+print "=== TESTING DICTIONARY EXPANSION ==="
+frame variable -A dict
+
+print "=== TESTING FIRST ELEMENT ACCESS ==="
+# This should trigger GetDynamicTypeAndAddress for synthetic child access
+expr -A -- dict[@"key1"]
+expr -A -- dict[@"key4"] 
+
+# These commands should show proper object formatting, not hex addresses
+print "Testing synthetic children object access completed"
+
+quit

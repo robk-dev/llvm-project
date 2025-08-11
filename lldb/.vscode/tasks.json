@@ -13,157 +13,14 @@
             "problemMatcher": "$gcc"
         },
         {
-            "label": "build-foundation-tests",
-            "type": "shell",
-            "command": "make",
-            "args": ["foundation_test_simple"],
-            "options": {
-                "cwd": "${workspaceFolder}/examples"
-            },
-            "dependsOn": ["build-plugin"],
-            "group": "build",
-            "problemMatcher": "$gcc"
-        },
-        {
-            "label": "build-string-tests",
-            "type": "shell",
-            "command": "make",
-            "args": ["string_test"],
-            "options": {
-                "cwd": "${workspaceFolder}/examples"
-            },
-            "dependsOn": ["build-plugin"],
-            "group": "build",
-            "problemMatcher": "$gcc"
-        },
-        {
-            "label": "build-number-tests",
-            "type": "shell",
-            "command": "make",
-            "args": ["test_nsnumber_comprehensive"],
-            "options": {
-                "cwd": "${workspaceFolder}/examples"
-            },
-            "dependsOn": ["build-plugin"],
-            "group": "build",
-            "problemMatcher": "$gcc"
-        },
-        {
-            "label": "build-collection-tests",
-            "type": "shell",
-            "command": "make",
-            "args": ["test_collections_formatter"],
-            "options": {
-                "cwd": "${workspaceFolder}/examples"
-            },
-            "dependsOn": ["build-plugin"],
-            "group": "build",
-            "problemMatcher": "$gcc"
-        },
-        {
-            "label": "build-error-test",
-            "type": "shell",
-            "command": "make",
-            "args": ["error_test"],
-            "options": {
-                "cwd": "${workspaceFolder}/examples"
-            },
-            "dependsOn": ["build-plugin"],
-            "group": "build",
-            "problemMatcher": "$gcc"
-        },
-        {
-            "label": "build-indexset-test",
-            "type": "shell",
-            "command": "make",
-            "args": ["test_indexset"],
-            "options": {
-                "cwd": "${workspaceFolder}/examples"
-            },
-            "dependsOn": ["build-plugin"],
-            "group": "build",
-            "problemMatcher": "$gcc"
-        },
-        {
-            "label": "build-characterset-test",
-            "type": "shell",
-            "command": "make",
-            "args": ["test_characterset"],
-            "options": {
-                "cwd": "${workspaceFolder}/examples"
-            },
-            "dependsOn": ["build-plugin"],
-            "group": "build",
-            "problemMatcher": "$gcc"
-        },
-        {
-            "label": "build-decimalnumber-test",
-            "type": "shell",
-            "command": "make",
-            "args": ["test_decimalnumber"],
-            "options": {
-                "cwd": "${workspaceFolder}/examples"
-            },
-            "dependsOn": ["build-plugin"],
-            "group": "build",
-            "problemMatcher": "$gcc"
-        },
-        {
-            "label": "build-synthetic-tests",
-            "type": "shell",
-            "command": "make",
-            "args": ["test_synthetic_children"],
-            "options": {
-                "cwd": "${workspaceFolder}/examples"
-            },
-            "dependsOn": ["build-plugin"],
-            "group": "build",
-            "problemMatcher": "$gcc"
-        },
-        {
-            "label": "build-unit-tests",
-            "type": "shell",
-            "command": "ninja",
-            "args": ["lldbPluginGNUstepObjCRuntime", "lldb"],
-            "options": {
-                "cwd": "${workspaceFolder}/../build"
-            },
-            "group": "build",
-            "problemMatcher": "$gcc"
-        },
-        {
-            "label": "build-integration-tests",
-            "type": "shell",
-            "command": "make",
-            "args": ["formatter_integration_test"],
-            "options": {
-                "cwd": "${workspaceFolder}/examples"
-            },
-            "dependsOn": ["build-plugin"],
-            "group": "build",
-            "problemMatcher": "$gcc"
-        },
-        {
-            "label": "build-current-test",
-            "type": "shell",
-            "command": "make",
-            "args": ["${fileBasenameNoExtension}"],
-            "options": {
-                "cwd": "${workspaceFolder}/examples"
-            },
-            "dependsOn": ["build-plugin"],
-            "group": "build",
-            "problemMatcher": "$gcc"
-        },
-        {
-            "label": "build-all-tests",
+            "label": "build-all-examples",
             "type": "shell",
             "command": "make",
             "args": ["all"],
             "options": {
                 "cwd": "${workspaceFolder}/examples"
             },
-            "dependsOn": ["build-plugin"],
+            "dependsOn": ["build-plugin", "build-full-development"],
             "group": {
                 "kind": "build",
                 "isDefault": true
@@ -171,69 +28,10 @@
             "problemMatcher": "$gcc"
         },
         {
-            "label": "build-date-test",
-            "type": "shell",
-            "command": "make",
-            "args": ["test_date"],
-            "options": {
-                "cwd": "${workspaceFolder}/examples"
-            },
-            "dependsOn": ["build-plugin"],
-            "group": "build",
-            "problemMatcher": "$gcc"
-        },
-        {
-            "label": "build-url-test",
-            "type": "shell",
-            "command": "make",
-            "args": ["test_url"],
-            "options": {
-                "cwd": "${workspaceFolder}/examples"
-            },
-            "dependsOn": ["build-plugin"],
-            "group": "build",
-            "problemMatcher": "$gcc"
-        },
-        {
-            "label": "build-data-test",
-            "type": "shell",
-            "command": "make",
-            "args": ["test_data"],
-            "options": {
-                "cwd": "${workspaceFolder}/examples"
-            },
-            "dependsOn": ["build-plugin"],
-            "group": "build",
-            "problemMatcher": "$gcc"
-        },
-        {
-            "label": "build-uuid-test",
-            "type": "shell",
-            "command": "make",
-            "args": ["test_uuid"],
-            "options": {
-                "cwd": "${workspaceFolder}/examples"
-            },
-            "dependsOn": ["build-plugin"],
-            "group": "build",
-            "problemMatcher": "$gcc"
-        },
-        {
-            "label": "build-api-tests",
-            "type": "shell",
-            "command": "ninja",
-            "args": ["lldbPluginGNUstepObjCRuntime", "lldb", "clang"],
-            "options": {
-                "cwd": "${workspaceFolder}/../build"
-            },
-            "group": "build",
-            "problemMatcher": "$gcc"
-        },
-        {
             "label": "build-full-development",
             "type": "shell",
             "command": "ninja",
-            "args": ["lldbPluginGNUstepObjCRuntime", "lldb", "lldb-server", "clang"],
+            "args": ["lldb", "lldb-server"],
             "options": {
                 "cwd": "${workspaceFolder}/../build"
             },

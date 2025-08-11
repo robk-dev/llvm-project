@@ -13,19 +13,56 @@ This is the LLVM project repository with a custom GNUstep/libobjc2 bridge implem
 - `/home/robk/code/llvm-project/lldb/examples/` - Test programs for validating the bridge
 - `/home/robk/code/llvm-project/build/` - Build directory for LLVM/LLDB
 
-## Build Commands
+### Dev script
 
-### Building LLDB with GNUstep Plugin
-```bash
-# Quick build (LLDB and required components only)
-cd /home/robk/code/llvm-project/build && ninja lldb lldb-server lldb-argdumper -j$(nproc)
+For quickly performing most actions that follow. We want to AVOID clean rebuilds and only use the incremental one!
 
-# Full LLDB installation
-cd /home/robk/code/llvm-project/build && ninja install-lldb install-lldb-server -j$(nproc)
-
-# Build only the GNUstep plugin (after changes)
-cd /home/robk/code/llvm-project/build && ninja lldbPluginGNUstepObjCRuntime
 ```
+$ cd /home/robk/code/llvm-project/lldb
+$ ./dev.sh --help
+GNUstep LLDB Plugin Development Script
+
+Usage:
+  ./dev.sh <command> [options]
+
+Build Commands:
+  clean-build     Clean and rebuild plugin (full rebuild)
+  build           Quick rebuild (incremental)
+  clean-examples  Clean example binaries and artifacts
+  build-example <name> Build specific example
+
+Test Commands:
+  test            Run all tests (unit + API + integration)
+  test-unit       Run unit tests only
+  test-api        Run API tests only
+  test-integration Run LLDB integration tests only
+
+Debug Commands:
+  debug [example] Start LLDB debug session with example
+
+Utility Commands:
+  full            Run full cycle: clean examples, clean build, test
+  status          Show development environment status
+  help            Show this help message
+
+Examples:
+  ./dev.sh clean-build                    # Full clean rebuild
+  ./dev.sh build                          # Quick incremental build
+  ./dev.sh test                           # Run all tests
+  ./dev.sh test-unit                      # Run just unit tests
+  ./dev.sh test-api                       # Test GNUstep program compilation
+  ./dev.sh test-integration               # Test formatters in LLDB
+  ./dev.sh debug custom_class_test        # Debug with custom class example
+  ./dev.sh full                           # Complete development cycle
+
+Available Examples:
+  custom_class_test, foundation_test, test_collections_formatter
+  test_nsnumber_comprehensive, simple_test, array_test
+  dictionary_test, nsset_test, test_data_url_uuid
+  (See /home/robk/code/llvm-project/lldb/examples/Makefile for complete list)
+```
+
+## Build Commands
 
 ### Initial CMake Configuration (if needed)
 ```bash
@@ -36,6 +73,12 @@ cmake -G Ninja ../llvm \
     -DLLDB_INCLUDE_TESTS=ON \
     -DLLVM_CCACHE_BUILD=ON \
     -DCMAKE_INSTALL_PREFIX=/usr/local/llvm-reldeb
+```
+
+### Building LLDB with GNUstep Plugin
+```bash
+# Quick build (LLDB and required components only)
+cd /home/robk/code/llvm-project/build && ninja lldb lldb-server -j$(nproc)
 ```
 
 ## Compiling GNUstep Test Programs
@@ -51,7 +94,7 @@ CFLAGS="-fobjc-runtime=gnustep-2.1 \
         -fno-strict-aliasing \
         -fexceptions \
         -fobjc-exceptions \
-        -g -gdwarf-5 -O0 \
+        -g -O0 \
         -fno-omit-frame-pointer \
         -I/usr/local/include/GNUstep \
         -I/usr/include/GNUstep \
@@ -164,11 +207,11 @@ The plugin follows LLDB's modular architecture:
 
 4. **Formatters System** (`formatters/` directory)
    - `GNUstepFormattersBase`: Base classes for all formatters
-   - `GNUstepStringFormatters`: NSString and variants (✅ Production-ready)
-   - `GNUstepNumberFormatters`: NSNumber with tagged pointer support (✅ Production-ready)
-   - `GNUstepCollectionFormatters`: NSArray, NSDictionary, NSSet (✅ Production-ready)
-   - `GNUstepValueFormatters`: NSValue generic wrapper (✅ Production-ready)
-   - `GNUstepFormattersRegistry`: Registration with LLDB's type system (✅ Production-ready)
+   - `GNUstepStringFormatters`: NSString and variants
+   - `GNUstepNumberFormatters`: NSNumber with tagged pointer support
+   - `GNUstepCollectionFormatters`: NSArray, NSDictionary, NSSet
+   - `GNUstepValueFormatters`: NSValue generic wrapper
+   - `GNUstepFormattersRegistry`: Registration with LLDB's type system
 
 ### Plugin Registration Flow
 1. `GNUstepObjCRuntime::Initialize()` registers with PluginManager
@@ -212,7 +255,7 @@ Enable debug output by checking for printf statements in the code (currently pre
 
 ## Current Implementation Status - 65% Complete
 
-### ✅ Completed (Production-Ready)
+### May need review
 - Basic plugin framework and registration
 - Runtime detection for GNUstep processes
 - Modular formatter architecture
@@ -227,33 +270,6 @@ Enable debug output by checking for printf statements in the code (currently pre
 - Formatter activation bug fixes
 - Performance optimizations (sub-50ms response times)
 
-### 🔧 Active Issues (As of 2025-08-08)
-
-#### Issue 1: Dictionary Display Format
-- **Problem**: Shows verbose `[0].key` and `[0].value` instead of concise `key = value`
-- **Location**: `GNUstepDictionaryFormatters.cpp` lines 1047-1050
-- **Fix**: Modify child naming in `GetChildAtIndex()` method
-- **Priority**: High (UX impact)
-
-#### Issue 2: Custom Class ISA Lookup
-- **Problem**: BankAccount and other custom classes not showing properties
-- **Location**: `GNUstepObjCRuntimeIntrospector.cpp` ISA resolution
-- **Root Cause**: `CallRuntimeFunction()` returns LLDB_INVALID_ADDRESS (stub implementation)
-- **Fix**: Implement proper runtime function calling via expression evaluator
-- **Priority**: Critical (core functionality)
-
-#### Issue 3: Runtime Symbol Resolution
-- **Problem**: Some runtime functions may not resolve correctly
-- **Location**: `GNUstepRuntimeV2API.cpp` line 193
-- **Fix**: Enhance symbol resolution with multiple strategies
-- **Priority**: Medium
-
-### 🔄 In Progress (Phase 4 - Advanced Features)
-- NSDate/NSCalendarDate formatters
-- NSURL formatter
-- NSData/NSMutableData formatter
-- NSUUID formatter
-- NSError formatter
 - **Custom class introspection** - Blocked by ISA lookup issue
 
 ### 📋 Planned (Phase 5)
@@ -266,7 +282,7 @@ Enable debug output by checking for printf statements in the code (currently pre
 
 1. **lldb-server Required**: Always build lldb-server to avoid "unable to locate lldb-server" errors
 2. **Runtime Version**: Target gnustep-2.1 runtime for modern features
-3. **Debug Symbols**: Always compile with `-g -gdwarf-5 -O0` for debugging
+3. **Debug Symbols**: Always compile with `-g -O0` for debugging
 4. **Memory Access**: Plugin uses direct memory reading - handle failures gracefully
 
 ## Common Issues and Solutions
@@ -285,8 +301,8 @@ Enable debug output by checking for printf statements in the code (currently pre
 ## LLDB MCP Tools
 
 For interactive debugging sessions, MCP tools are available:
-- `/home/robk/code/llvm-project/lldb/lldb_mcp/lldb_mcp.py` - MCP server for LLDB control
 - Use `mcp__llvm_lldb_debug__*` functions for debugging sessions
+- `/home/robk/code/llvm-project/lldb/lldb_mcp/lldb_mcp.py` - MCP server for LLDB control
 
 ## Code Style
 
@@ -295,3 +311,4 @@ Follow LLVM coding standards:
 - CamelCase for classes, camelCase for methods/variables
 - Use LLVM's error handling (llvm::Error, llvm::Expected)
 - Include proper LLVM license headers
+- Keep comments to a minimum

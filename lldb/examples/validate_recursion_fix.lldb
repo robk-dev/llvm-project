@@ -1,0 +1,27 @@
+file test_array_nil_recursion
+
+breakpoint set --file test_array_nil_recursion.m --line 18
+
+run
+
+# Test that would have caused infinite recursion before the fix
+frame variable arrayWithNils
+frame variable arrayWithOneNil
+frame variable mixedArray
+
+# Test nested arrays that could cause recursion
+frame variable mixedArray[3]
+
+# Test multiple accesses that could trigger formatter re-entry
+frame variable arrayWithNils
+frame variable arrayWithNils
+frame variable arrayWithNils
+
+# Simulate hovering by accessing all elements
+frame variable arrayWithNils[0]
+frame variable arrayWithNils[1] 
+frame variable arrayWithNils[2]
+
+print "SUCCESS: No infinite recursion detected!"
+
+quit

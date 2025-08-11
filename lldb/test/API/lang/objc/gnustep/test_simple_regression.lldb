@@ -1,0 +1,9 @@
+target create test_comprehensive_formatters
+breakpoint set --line 301
+run
+frame variable simpleArray
+frame variable simpleDict
+frame variable taggedInt
+frame variable taggedBool
+frame variable customObj
+quit

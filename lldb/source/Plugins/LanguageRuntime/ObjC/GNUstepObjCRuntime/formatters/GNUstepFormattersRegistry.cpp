@@ -35,6 +35,7 @@
 #include "GNUstepUserDefaultsFormatters.h"
 #include "GNUstepCalendarFormatters.h"
 #include "GNUstepProcessInfoFormatters.h"
+#include "GNUstepTimeIntervalFormatters.h"
 #include "lldb/DataFormatters/DataVisualization.h"
 #include "lldb/DataFormatters/TypeCategory.h"
 #include "lldb/DataFormatters/TypeSummary.h"
@@ -52,6 +53,9 @@ void GNUstepFormattersRegistry::RegisterFormatters(TypeCategoryImpl &category) {
   
   // Register Priority 1 Foundation formatters FIRST to ensure precedence over base classes
   RegisterPriority1Formatters(category);
+  
+  // Register NSTimeInterval formatter BEFORE NSNumber to ensure precedence for time intervals
+  RegisterTimeIntervalFormatters(category);
   
   RegisterNumberFormatters(category);
   
@@ -83,6 +87,7 @@ void GNUstepFormattersRegistry::RegisterStringFormatters(TypeCategoryImpl &categ
   // Register for various NSString type names
   category.AddTypeSummary("NSString", eFormatterMatchExact, string_summary);
   category.AddTypeSummary("NSMutableString", eFormatterMatchExact, string_summary);
+  category.AddTypeSummary("GSMutableString", eFormatterMatchExact, string_summary);
   category.AddTypeSummary("__NSCFString", eFormatterMatchExact, string_summary);
   category.AddTypeSummary("NSConstantString", eFormatterMatchExact, string_summary);
   category.AddTypeSummary("__NSConstantString", eFormatterMatchExact, string_summary);
@@ -94,6 +99,7 @@ void GNUstepFormattersRegistry::RegisterStringFormatters(TypeCategoryImpl &categ
   // Also register with pointer types
   category.AddTypeSummary("NSString *", eFormatterMatchExact, string_summary);
   category.AddTypeSummary("NSMutableString *", eFormatterMatchExact, string_summary);
+  category.AddTypeSummary("GSMutableString *", eFormatterMatchExact, string_summary);
   category.AddTypeSummary("__NSCFString *", eFormatterMatchExact, string_summary);
   category.AddTypeSummary("NSConstantString *", eFormatterMatchExact, string_summary);
   category.AddTypeSummary("__NSConstantString *", eFormatterMatchExact, string_summary);
@@ -119,6 +125,22 @@ void GNUstepFormattersRegistry::RegisterStringFormatters(TypeCategoryImpl &categ
       GNUstepIdSyntheticFrontEndCreator);
       
   category.AddTypeSynthetic("id", eFormatterMatchExact, id_synth);
+  
+  // Register synthetic children provider for GSCInlineString to show proper field expansion
+  SyntheticChildren::Flags inline_string_synth_flags;
+  inline_string_synth_flags.SetCascades(true)
+                           .SetSkipPointers(false)
+                           .SetSkipReferences(false)
+                           .SetNonCacheable(false);
+                           
+  auto inline_string_synth = std::make_shared<CXXSyntheticChildren>(
+      inline_string_synth_flags, "GSCInlineString synthetic children", 
+      GSCInlineStringSyntheticFrontEndCreator);
+      
+  category.AddTypeSynthetic("GSCInlineString", eFormatterMatchExact, inline_string_synth);
+  category.AddTypeSynthetic("GSUInlineString", eFormatterMatchExact, inline_string_synth);
+  category.AddTypeSynthetic("GSCInlineString *", eFormatterMatchExact, inline_string_synth);
+  category.AddTypeSynthetic("GSUInlineString *", eFormatterMatchExact, inline_string_synth);
   
   // NOTE: Generic synthetic providers moved to RegisterGenericFormatter()
   // to ensure they don't override specific formatters
@@ -1085,4 +1107,29 @@ void GNUstepFormattersRegistry::RegisterProcessInfoFormatters(TypeCategoryImpl &
   // Also register with pointer types  
   category.AddTypeSummary("NSProcessInfo *", eFormatterMatchExact, processinfo_summary);
   category.AddTypeSummary("_NSConcreteProcessInfo *", eFormatterMatchExact, processinfo_summary);
+}
+
+void GNUstepFormattersRegistry::RegisterTimeIntervalFormatters(TypeCategoryImpl &category) {
+  // Register NSTimeInterval summary provider
+  TypeSummaryImpl::Flags timeinterval_flags;
+  timeinterval_flags.SetCascades(true)
+                    .SetSkipPointers(false)
+                    .SetSkipReferences(false)
+                    .SetDontShowChildren(true)
+                    .SetDontShowValue(true)
+                    .SetShowMembersOneLiner(false)
+                    .SetHideItemNames(true);
+  
+  // Create the summary provider
+  auto timeinterval_summary = std::make_shared<CXXFunctionSummaryFormat>(
+      timeinterval_flags, GNUstepNSTimeIntervalFormatterFunction, "NSTimeInterval summary provider");
+  
+  // IMPORTANT: Only register for explicit NSTimeInterval types to avoid interfering 
+  // with NSNumber formatters and tagged pointer handling
+  category.AddTypeSummary("NSTimeInterval", eFormatterMatchExact, timeinterval_summary);
+  category.AddTypeSummary("NSTimeInterval *", eFormatterMatchExact, timeinterval_summary);
+  
+  // Also handle common typedef variations that might appear in debug info
+  category.AddTypeSummary("CFTimeInterval", eFormatterMatchExact, timeinterval_summary);
+  category.AddTypeSummary("CFTimeInterval *", eFormatterMatchExact, timeinterval_summary);
 }

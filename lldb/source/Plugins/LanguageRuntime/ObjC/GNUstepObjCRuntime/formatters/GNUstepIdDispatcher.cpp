@@ -6,6 +6,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include <cinttypes>
 #include "GNUstepIdDispatcher.h"
 #include "GNUstepStringFormatters.h"
 #include "GNUstepNumberFormatters.h"
@@ -86,7 +87,7 @@ bool lldb_private::formatters::GNUstepIdDispatcherFunction(ValueObject &valobj, 
       case TaggedPointerType::NSSmallInt: {
         // Decode small int value (shift right by 3 bits)
         int64_t value = ((int64_t)obj_addr) >> 3;
-        stream.Printf("%lld", value);
+        stream.Printf("%" PRId64, value);
         return true;
       }
       case TaggedPointerType::NSSmallString: {
@@ -120,7 +121,7 @@ bool lldb_private::formatters::GNUstepIdDispatcherFunction(ValueObject &valobj, 
   
   Log *log = GetLog(LLDBLog::DataFormatters);
   if (log) {
-    log->Printf("GNUstepIdDispatcher: Object at 0x%llx has runtime class: %s", 
+    log->Printf("GNUstepIdDispatcher: Object at 0x%" PRIx64 " has runtime class: %s", 
                 obj_addr, class_name.c_str());
   }
   

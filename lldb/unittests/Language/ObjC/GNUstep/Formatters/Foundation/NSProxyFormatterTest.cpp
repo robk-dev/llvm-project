@@ -137,7 +137,7 @@ TEST_F(NSProxyFormatterTest, CommonProxySubclasses) {
   
   for (const auto& test : proxy_tests) {
     const std::string& class_name = test.first;
-    const std::string& description = test.second;
+    // const std::string& description = test.second;  // Unused
     
     // Create proxy object with minimal structure
     struct {
@@ -185,7 +185,7 @@ TEST_F(NSProxyFormatterTest, MemoryLayoutAnalysis) {
   const size_t EXPECTED_MINIMAL_SIZE = EXPECTED_PTR_SIZE; // Just isa for base class
   
   // NSProxy is intentionally minimal - subclasses add specific data
-  EXPECT_EQ(EXPECTED_ISA_OFFSET, 0) << "isa pointer always at offset 0";
+  EXPECT_EQ(EXPECTED_ISA_OFFSET, 0u) << "isa pointer always at offset 0";
   EXPECT_GE(EXPECTED_MINIMAL_SIZE, EXPECTED_PTR_SIZE) << "At least isa pointer required";
   
   // Subclass layouts (examples):
@@ -334,7 +334,7 @@ TEST_F(NSProxyFormatterTest, MethodForwardingDetection) {
   const std::string DOES_NOT_RESPOND = "doesNotRecognizeSelector:";
   
   // These methods are critical for proxy operation:
-  EXPECT_EQ(FORWARD_INVOCATION.length(), 18) << "forwardInvocation: is key method";
+  EXPECT_EQ(FORWARD_INVOCATION.length(), 18u) << "forwardInvocation: is key method";
   EXPECT_TRUE(METHOD_SIGNATURE.find("Selector") != std::string::npos) << "methodSignatureForSelector: enables forwarding";
   EXPECT_TRUE(RESPONDS_TO.find("Selector") != std::string::npos) << "respondsToSelector: must handle forwarding";
   
@@ -390,7 +390,7 @@ TEST_F(NSProxyFormatterTest, MethodForwardingDetection) {
   }
   
   // Verify key forwarding method names are handled correctly
-  EXPECT_EQ(FORWARD_INVOCATION.length(), 18) << "forwardInvocation: is key method";
+  EXPECT_EQ(FORWARD_INVOCATION.length(), 18u) << "forwardInvocation: is key method";
   EXPECT_TRUE(METHOD_SIGNATURE.find("Selector") != std::string::npos) 
     << "methodSignatureForSelector: enables forwarding";
   EXPECT_TRUE(RESPONDS_TO.find("Selector") != std::string::npos) 
@@ -478,7 +478,7 @@ TEST_F(NSProxyFormatterTest, FormatterOutputExpectations) {
         << "Proxy output for '" << test_case.class_name << "' should indicate type: " << output;
       
       // Should be reasonably concise
-      EXPECT_LT(output.length(), 150) 
+      EXPECT_LT(output.length(), 150u) 
         << "Proxy output should be concise: " << output;
     }
   }
@@ -498,7 +498,7 @@ TEST_F(NSProxyFormatterTest, ErrorHandlingScenarios) {
   const lldb::addr_t NULL_ADDR = 0;
   const lldb::addr_t INVALID_ADDR = LLDB_INVALID_ADDRESS;
   
-  EXPECT_EQ(NULL_ADDR, 0) << "Null proxy should be handled";
+  EXPECT_EQ(NULL_ADDR, 0u) << "Null proxy should be handled";
   EXPECT_NE(INVALID_ADDR, NULL_ADDR) << "Invalid address should be detected";
   
   // Error message patterns for different failure modes:
@@ -697,7 +697,7 @@ TEST_F(NSProxyFormatterTest, EdgeCaseHandling) {
   
   // Test invalid target scenarios
   const lldb::addr_t DEALLOCATED_TARGET = 0xdeadbeef;  // Common pattern for deallocated objects
-  EXPECT_NE(DEALLOCATED_TARGET, 0) << "Should detect potentially invalid target addresses";
+  EXPECT_NE(DEALLOCATED_TARGET, 0u) << "Should detect potentially invalid target addresses";
   
   // Test actual edge case handling for proxy objects
   lldb::TargetSP target = std::make_shared<MockTarget>(*Debugger::CreateInstance(), ArchSpec("x86_64"), 
@@ -754,7 +754,7 @@ TEST_F(NSProxyFormatterTest, EdgeCaseHandling) {
   
   // Test proxy chain detection (unusual but possible)
   // Using the previously declared DEALLOCATED_TARGET constant
-  EXPECT_NE(DEALLOCATED_TARGET, 0) << "Should detect potentially invalid target addresses";
+  EXPECT_NE(DEALLOCATED_TARGET, 0u) << "Should detect potentially invalid target addresses";
 }
 
 TEST_F(NSProxyFormatterTest, GNUstepSpecificBehavior) {

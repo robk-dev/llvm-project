@@ -65,6 +65,10 @@ public:
 
   llvm::Expected<std::unique_ptr<UtilityFunction>>
   CreateObjectChecker(std::string name, ExecutionContext &exe_ctx) override;
+  
+  // Create utility functions for modern subscript syntax support
+  llvm::Expected<std::unique_ptr<UtilityFunction>>
+  CreateSubscriptUtilityFunctions(ExecutionContext &exe_ctx);
 
   void UpdateISAToDescriptorMapIfNeeded() override;
   
@@ -93,12 +97,19 @@ private:
   bool m_has_read_objc_library = false;
   bool m_formatters_registered = false;
   bool m_gnustep_library_loaded = false;
+  bool m_subscript_mapping_enabled = false;
   
   // Helper method to register formatters
   void RegisterFormatters();
   
   // Initialize runtime API
   void InitializeRuntimeAPI();
+  
+  // Install subscript method mapping
+  void InstallSubscriptMethodMapping();
+  
+  // Install expression evaluation hooks for subscript forwarding
+  void InstallExpressionEvaluationHooks();
 };
 
 } // namespace lldb_private

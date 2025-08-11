@@ -110,6 +110,9 @@ public:
   /// Register NSUserDefaults formatters
   static void RegisterUserDefaultsFormatters(TypeCategoryImpl &category);
 
+  /// Register NSTimeInterval formatters
+  static void RegisterTimeIntervalFormatters(TypeCategoryImpl &category);
+
   /// Register NSJSONSerialization formatter
   static void RegisterJSONSerializationFormatters(TypeCategoryImpl &category);
   

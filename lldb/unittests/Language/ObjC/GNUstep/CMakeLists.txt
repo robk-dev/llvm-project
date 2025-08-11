@@ -22,18 +22,31 @@ add_lldb_unittest(LanguageObjCGNUstepTests
   Formatters/Text/NSCharacterSetFormatterTest.cpp         # Now has real character set tests
   Formatters/Foundation/NSBundleFormatterTest.cpp         # New comprehensive Bundle formatter test
   
-  # Foundation Formatter Tests - Temporarily disabled while fixing compilation issues
-  Formatters/Foundation/NSValueFormatterTest.cpp          # IdDispatcher routing & generic formatter tests - ENABLED FOR TESTING
-  Formatters/Foundation/NSJSONSerializationFormatterTest.cpp  # JSON formatting & options tests - ENABLED FOR TESTING
-  Formatters/Foundation/NSProxyFormatterTest.cpp          # Proxy type detection & target identification tests - ENABLED FOR TESTING
+  # Foundation Formatter Tests - Comprehensive validation enabled
+  Formatters/Foundation/NSValueFormatterTest.cpp          # IdDispatcher routing & generic formatter tests
+  Formatters/Foundation/NSJSONSerializationFormatterTest.cpp  # JSON formatting & options tests
+  Formatters/Foundation/NSProxyFormatterTest.cpp          # Proxy type detection & target identification tests
   
-  # New Comprehensive Foundation Formatter Tests - Fixed compilation issues and re-enabled
-  Formatters/Foundation/NSDataFormatterTest.cpp           # Data length, preview, & performance tests - ENABLED FOR TESTING
-  Formatters/Foundation/NSURLFormatterTest.cpp            # URL string extraction & scheme handling tests - ENABLED FOR TESTING
-  Formatters/Foundation/NSUUIDFormatterTest.cpp           # UUID formatting & special value tests - RE-ENABLED
-  Formatters/Foundation/NSErrorFormatterTest.cpp          # Error domain, code, & userInfo tests - RE-ENABLED
-  Formatters/Foundation/NSDateFormatterTest.cpp           # Date interval & timezone handling tests - RE-ENABLED
+  # Comprehensive Foundation Formatter Tests - Production ready
+  Formatters/Foundation/NSDataFormatterTest.cpp           # Data length, preview, & performance tests
+  Formatters/Foundation/NSURLFormatterTest.cpp            # URL string extraction & scheme handling tests
+  Formatters/Foundation/NSUUIDFormatterTest.cpp           # UUID formatting & special value tests
+  Formatters/Foundation/NSErrorFormatterTest.cpp          # Error domain, code, & userInfo tests
+  Formatters/Foundation/NSDateFormatterTest.cpp           # Date interval & timezone handling tests
   Formatters/Foundation/NSLocaleFormatterTest.cpp         # Locale identifier & property extraction tests
+  
+  # NEW: Performance and Stress Testing Framework
+  Formatters/Performance/PerformanceBenchmarkTest.cpp     # <50ms requirement validation, concurrent access
+  Formatters/Performance/StressTest.cpp                   # Large datasets, deep nesting, memory pressure
+  
+  # NEW: Comprehensive Edge Case Testing
+  Formatters/EdgeCaseTest.cpp                             # Boundary conditions, malformed data, corruption resistance
+  
+  # NEW: Cross-platform Compatibility Testing  
+  CrossPlatform/EndiannessTest.cpp                        # Endianness handling, memory layout validation
+  
+  # NEW: Regression Testing Suite
+  RegressionTest.cpp                                       # Ensures no functionality breaks, performance regression
   
   # Integration tests - Disabled: requires liblldb linkage (SB API)
   # Integration/EndToEndFormatterTest.cpp                   # Requires SB API - temporarily disabled

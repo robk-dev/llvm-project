@@ -1,0 +1,67 @@
+# Set breakpoints at test locations
+b test_enhanced_dictionary.m:57
+b test_enhanced_dictionary.m:88
+b test_enhanced_dictionary.m:107
+b test_enhanced_dictionary.m:138
+b test_enhanced_dictionary.m:151
+b test_enhanced_dictionary.m:177
+b test_enhanced_dictionary.m:210
+b test_enhanced_dictionary.m:245
+
+# Run the program
+run
+
+# Test empty dictionary
+frame variable empty
+frame variable mutableEmpty
+po empty
+po mutableEmpty
+continue
+
+# Test simple dictionaries
+frame variable stringDict
+frame variable numberDict
+frame variable mixedDict
+po stringDict
+po numberDict
+po mixedDict
+continue
+
+# Test nested dictionary
+frame variable nestedDict
+po nestedDict
+continue
+
+# Test custom objects dictionary
+frame variable customDict
+frame variable reverseCustomDict
+po customDict
+po reverseCustomDict
+continue
+
+# Test large dictionary
+frame variable largeDict
+po largeDict
+continue
+
+# Test mutable dictionary
+frame variable mutableDict
+po mutableDict
+continue
+
+# Test edge cases
+frame variable dictWithNulls
+frame variable dupKeys
+frame variable specialKeys
+po dictWithNulls
+po dupKeys
+po specialKeys
+continue
+
+# Test performance dictionary
+frame variable perfDict
+po perfDict
+continue
+
+# Exit
+quit

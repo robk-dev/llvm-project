@@ -1,0 +1,17 @@
+# Test class hierarchy introspection
+target create ./custom_class_test
+breakpoint set --name main
+run
+
+# Test basic objects
+frame variable -O account
+frame variable -O personInfo  
+frame variable -O fruits
+frame variable -O magicNumber
+
+# Test expression evaluation for class names
+expr (const char *)object_getClassName(account)
+expr (const char *)class_getName(object_getClass(account))
+
+continue
+quit

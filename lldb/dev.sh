@@ -7,7 +7,7 @@ set -u  # Exit on undefined variables
 
 # Script configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BUILD_DIR="$SCRIPT_DIR/../build"
+BUILD_DIR="/home/robk/code/llvm-project/build"
 EXAMPLES_DIR="$SCRIPT_DIR/examples"
 # Build targets - using main LLDB targets instead of plugin-specific one
 BUILD_TARGETS="lldb lldb-server"
@@ -89,13 +89,13 @@ clean_build() {
     
     # Clean LLDB core components 
     log_info "Cleaning core LLDB components..."
-    ninja -t clean lldb lldb-server lldb-argdumper "$PLUGIN_TARGET" 2>/dev/null || true
+    ninja -t clean lldb lldb-server lldb-argdumper lldbPluginGNUstepObjCRuntime 2>/dev/null || true
     
     # Full rebuild
     log_info "Building LLDB with GNUstep plugin..."
     local start_time=$(date +%s)
     
-    if ninja lldb lldb-server lldb-argdumper "$PLUGIN_TARGET" -j$(nproc); then
+    if ninja lldb lldb-server lldb-argdumper lldbPluginGNUstepObjCRuntime -j$(nproc); then
         local end_time=$(date +%s)
         local duration=$((end_time - start_time))
         log_success "Clean build completed in ${duration}s"

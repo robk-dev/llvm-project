@@ -446,13 +446,14 @@ std::string GNUstepNSOrderedSetSummaryProvider::TryExtractStringContent(Process 
   if (class_name.find("NSConstantString") != std::string::npos || 
       class_name.find("__NSConstantString") != std::string::npos ||
       class_name.find("_NSConstantString") != std::string::npos) {
-    // NSConstantString layout: isa(0), str(8), len(16)
-    lldb::addr_t str_ptr_addr = obj_addr + 8;
+    // NSConstantString layout - NEW_ABI (GNUstep 2.1+):
+    // isa(0), flags(8), length(12), size(16), hash(20), str(24)
+    lldb::addr_t str_ptr_addr = obj_addr + 24;  // Corrected offset
     lldb::addr_t str_data_addr = GNUstepRuntimeHelper::ReadPointer(process, str_ptr_addr, error);
     
     if (error.Success() && str_data_addr != 0 && str_data_addr != LLDB_INVALID_ADDRESS) {
-      // Read the length from offset 16
-      lldb::addr_t len_addr = obj_addr + 16;
+      // Read the length from offset 12
+      lldb::addr_t len_addr = obj_addr + 12;  // Corrected offset
       uint32_t string_length = 0;
       GNUstepRuntimeHelper::ReadMemory(process, len_addr, &string_length, sizeof(string_length));
       
@@ -716,6 +717,40 @@ lldb::ValueObjectSP GNUstepNSOrderedSetSyntheticProvider::GetChildAtIndex(uint32
     // For tagged pointers, create ValueObject from DATA, not ADDRESS
     // The tagged pointer value IS the data, not a pointer to memory
     
+    uint8_t tag = element_value & 0x7;
+    
+    // Use NSString* type for tagged strings (tag 4) for proper NSString display
+    CompilerType value_type = element_type;
+    
+    if (tag == 4) {
+      // GSTinyString - try to get NSString* type
+      ObjCLanguageRuntime *runtime = ObjCLanguageRuntime::Get(*m_process);
+      if (runtime) {
+        // Look for NSString class in the runtime
+        ConstString nsstring_name("NSString");
+        
+        // Try to get the class descriptor for NSString
+        ObjCLanguageRuntime::ClassDescriptorSP nsstring_class = 
+            runtime->GetClassDescriptorFromClassName(nsstring_name);
+        
+        if (nsstring_class) {
+          // Get the CompilerType for NSString*
+          TypeSP nsstring_type_sp = nsstring_class->GetType();
+          if (nsstring_type_sp) {
+            CompilerType nsstring_base_type = nsstring_type_sp->GetForwardCompilerType();
+            if (nsstring_base_type.IsValid()) {
+              // Make it a pointer type
+              value_type = nsstring_base_type.GetPointerType();
+            }
+          }
+        }
+      }
+      // Fall back to id type if NSString* couldn't be obtained
+      if (!value_type.IsValid() || value_type == element_type) {
+        value_type = m_id_type;
+      }
+    }
+    
     // Create a data buffer containing the tagged pointer value
     size_t ptr_size = exe_ctx.GetAddressByteSize();
     DataBufferSP buffer_sp;
@@ -733,7 +768,7 @@ lldb::ValueObjectSP GNUstepNSOrderedSetSyntheticProvider::GetChildAtIndex(uint32
     
     // Create ValueObject from the data buffer containing the tagged pointer
     return ValueObject::CreateValueObjectFromData(idx_name.GetString(), 
-                                                  data_extractor, exe_ctx, element_type);
+                                                  data_extractor, exe_ctx, value_type);
   } else {
     // For regular object pointers, calculate the memory address where the pointer is stored
     // and let LLDB read it and apply dynamic type resolution normally

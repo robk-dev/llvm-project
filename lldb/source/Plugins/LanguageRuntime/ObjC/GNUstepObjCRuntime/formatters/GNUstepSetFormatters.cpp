@@ -97,10 +97,20 @@ uint32_t GNUstepNSSetSummaryProvider::ExtractSetCount(ValueObject &valobj) {
   //   ...
   // }
   
-  // The map field starts at offset 8 (after isa)
-  // nodeCount is at offset 8 within the map structure
-  // So total offset is 8 + 8 = 16
-  lldb::addr_t count_addr = obj_addr + 16;
+  // Get dynamic offset for map field
+  std::string class_name = GNUstepRuntimeHelper::GetGNUstepClassName(valobj);
+  if (class_name.empty() || class_name == "<unknown>") {
+    class_name = "GSSet"; // Fallback to most common set class
+  }
+  
+  ptrdiff_t map_offset = GNUstepRuntimeHelper::GetIvarOffset(process, class_name, "map");
+  if (map_offset < 0) {
+    map_offset = 8; // Fallback to hardcoded offset (after isa)
+  }
+  
+  // The nodeCount is at offset 8 within the GSIMapTable_t structure
+  // So total offset is map_offset + 8
+  lldb::addr_t count_addr = obj_addr + map_offset + 8;
   uint64_t count = 0;
   
   if (!GNUstepRuntimeHelper::ReadMemory(process, count_addr, &count, sizeof(count))) {
@@ -394,7 +404,55 @@ std::string GNUstepNSSetSummaryProvider::GetElementSummary(Process *process, lld
               "element", element_addr, exe_ctx2, id_type);
           
           if (valobj_sp) {
-            // Use the GNUstep NSNumber formatter directly
+            // CRITICAL FIX: For NSNumber objects in collections, manually extract the value
+            // instead of relying on the complex NSNumber formatter which may fail in nested contexts
+            
+            // Read the ISA pointer first to get the exact class name
+            GNUstepObjCRuntimeIntrospector introspector(process);
+            Status isa_error;
+            lldb::addr_t isa_addr = GNUstepRuntimeHelper::ReadPointer(process, element_addr, isa_error);
+            if (isa_error.Success() && isa_addr != 0) {
+              std::string exact_class_name = introspector.GetClassName(isa_addr);
+              
+              // Handle different NSNumber subclass types by reading value directly from memory
+              if (exact_class_name.find("IntNumber") != std::string::npos) {
+                // NSIntNumber stores int32_t at offset 8
+                int32_t int_value = 0;
+                if (GNUstepRuntimeHelper::ReadMemory(process, element_addr + 8, &int_value, sizeof(int_value))) {
+                  return std::to_string(int_value);
+                }
+              } else if (exact_class_name.find("LongLongNumber") != std::string::npos) {
+                // NSLongLongNumber stores int64_t at offset 8  
+                int64_t ll_value = 0;
+                if (GNUstepRuntimeHelper::ReadMemory(process, element_addr + 8, &ll_value, sizeof(ll_value))) {
+                  return std::to_string(ll_value);
+                }
+              } else if (exact_class_name.find("FloatNumber") != std::string::npos) {
+                // NSFloatNumber stores float at offset 8
+                float float_value = 0.0f;
+                if (GNUstepRuntimeHelper::ReadMemory(process, element_addr + 8, &float_value, sizeof(float_value))) {
+                  char buffer[32];
+                  snprintf(buffer, sizeof(buffer), "%g", float_value);
+                  return std::string(buffer);
+                }
+              } else if (exact_class_name.find("DoubleNumber") != std::string::npos) {
+                // NSDoubleNumber stores double at offset 8
+                double double_value = 0.0;
+                if (GNUstepRuntimeHelper::ReadMemory(process, element_addr + 8, &double_value, sizeof(double_value))) {
+                  char buffer[32];  
+                  snprintf(buffer, sizeof(buffer), "%g", double_value);
+                  return std::string(buffer);
+                }
+              } else if (exact_class_name.find("BoolNumber") != std::string::npos) {
+                // NSBoolNumber stores BOOL at offset 8
+                uint32_t bool_value = 0;
+                if (GNUstepRuntimeHelper::ReadMemory(process, element_addr + 8, &bool_value, sizeof(bool_value))) {
+                  return (bool_value != 0) ? "YES" : "NO";
+                }
+              }
+            }
+            
+            // Fallback: Use the GNUstep NSNumber formatter
             GNUstepNSNumberSummaryProvider number_formatter;
             StreamString number_stream;
             TypeSummaryOptions number_options;
@@ -528,17 +586,29 @@ std::string GNUstepNSSetSummaryProvider::TryExtractStringContent(Process *proces
   if (class_name.find("NSConstantString") != std::string::npos || 
       class_name.find("__NSConstantString") != std::string::npos) {
     // NSConstantString layout (compile-time constant strings that aren't tagged):
+    // NEW_ABI (GNUstep 2.1+):
     // struct {
     //   Class isa;          // offset 0
-    //   char *cString;      // offset 8 - pointer to null-terminated C string
-    //   unsigned int length;// offset 16 (may not be reliable)
-    // }
-    lldb::addr_t cstring_ptr_addr = obj_addr + 8;
+    //   uint32_t flags;     // offset 8
+    //   uint32_t length;    // offset 12 <-- String length
+    //   uint32_t size;      // offset 16
+    //   uint32_t hash;      // offset 20
+    //   const char *str;    // offset 24 <-- String pointer
+    // };
+    
+    lldb::addr_t cstring_ptr_addr = obj_addr + 24;  // Corrected offset
     lldb::addr_t cstring_ptr = GNUstepRuntimeHelper::ReadPointer(process, cstring_ptr_addr, error);
     if (error.Success() && cstring_ptr != 0 && cstring_ptr != LLDB_INVALID_ADDRESS) {
-      // Read the C string (null-terminated)
+      // Read the length at correct offset 12
+      lldb::addr_t len_addr = obj_addr + 12;
+      uint32_t string_length = 0;
+      GNUstepRuntimeHelper::ReadMemory(process, len_addr, &string_length, sizeof(string_length));
+      
+      // Use length if available, otherwise fallback to null-terminated read
+      size_t max_len = (string_length > 0 && string_length < 1024) ? string_length : 1023;
+      
       char buffer[1024] = {0};
-      size_t bytes_read = process->ReadMemory(cstring_ptr, buffer, sizeof(buffer) - 1, error);
+      size_t bytes_read = process->ReadMemory(cstring_ptr, buffer, max_len, error);
       if (error.Success() && bytes_read > 0) {
         buffer[bytes_read] = '\0';
         // Find actual string length (might be shorter than buffer)
@@ -858,26 +928,43 @@ lldb::ValueObjectSP GNUstepNSSetSyntheticProvider::GetChildAtIndex(uint32_t idx)
     auto type_system = type_system_or_err.get();
     
     if (tag == 4) {
-      // GSTinyString - create a string ValueObject
-      std::string decoded_string = GetTaggedPointerSummary(m_process, element_value);
+      // GSTinyString - create a ValueObject with the tagged pointer as NSString* type
+      // This allows LLDB to properly display it as an NSString instead of generic id
       
-      // Remove quotes from the decoded string for the actual value
-      if (decoded_string.front() == '"' && decoded_string.back() == '"' && decoded_string.length() > 1) {
-        decoded_string = decoded_string.substr(1, decoded_string.length() - 2);
+      // Try to get NSString* type from the runtime
+      CompilerType nsstring_type = m_id_type; // Default to id if we can't get NSString*
+      
+      // Attempt to get the NSString class type
+      ObjCLanguageRuntime *runtime = ObjCLanguageRuntime::Get(*m_process);
+      if (runtime) {
+        // Look for NSString class in the runtime
+        ConstString nsstring_name("NSString");
+        
+        // Try to get the class descriptor for NSString
+        ObjCLanguageRuntime::ClassDescriptorSP nsstring_class = 
+            runtime->GetClassDescriptorFromClassName(nsstring_name);
+        
+        if (nsstring_class) {
+          // Get the CompilerType for NSString*
+          TypeSP nsstring_type_sp = nsstring_class->GetType();
+          if (nsstring_type_sp) {
+            CompilerType nsstring_base_type = nsstring_type_sp->GetForwardCompilerType();
+            if (nsstring_base_type.IsValid()) {
+              // Make it a pointer type
+              nsstring_type = nsstring_base_type.GetPointerType();
+            }
+          }
+        }
       }
       
-      // Create a C string constant
-      CompilerType char_type = type_system->GetBasicTypeFromAST(eBasicTypeChar);
-      CompilerType const_char_ptr_type = char_type.GetPointerType();
-      
-      // Create string data buffer
-      DataBufferSP string_buffer = std::make_shared<DataBufferHeap>(decoded_string.c_str(), decoded_string.length() + 1);
-      DataExtractor string_data(string_buffer, exe_ctx.GetByteOrder(), exe_ctx.GetAddressByteSize());
+      // Create an NSString* type ValueObject with the tagged pointer value
+      DataBufferSP ptr_buffer = std::make_shared<DataBufferHeap>(&element_value, sizeof(element_value));
+      DataExtractor ptr_data(ptr_buffer, exe_ctx.GetByteOrder(), exe_ctx.GetAddressByteSize());
       
       return ValueObjectConstResult::Create(exe_ctx.GetBestExecutionContextScope(),
-                                            const_char_ptr_type,
+                                            nsstring_type,  // Use NSString* type instead of id
                                             ConstString(idx_name.GetString()),
-                                            string_data);
+                                            ptr_data);
       
     } else if (tag == 1 || tag == 3) {
       // GSTaggedNumber - create an integer ValueObject  

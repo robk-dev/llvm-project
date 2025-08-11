@@ -2,13 +2,23 @@
 
 ## Build Instructions
 
+```
+-- to rebuild just the plugin (what we need most of the time)
+● Bash(cd /home/robk/code/llvm-project/build && ninja lldbPluginGNUstepObjCRuntime -j$(nproc))
+  ⎿ [1/2] Building CXX object tools/lldb/source/Plugins/LanguageRuntime/ObjC/GNUstepObjCRuntime/CMakeFiles/lldbPluginGN
+    UstepObjCRuntime.dir/formatters/GNUstepArrayFormatters.cpp.o
+    [2/2] Linking CXX static library lib/liblldbPluginGNUstepObjCRuntime.a
+```
+
 ### Initial Configuration
 ```bash
+cd /home/robk/code/llvm-project/build
 cmake -G Ninja ../llvm \
     -DCMAKE_BUILD_TYPE=RelWithDebInfo \
     -DLLVM_ENABLE_PROJECTS="clang;lldb;lld" \
     -DLLVM_ENABLE_ASSERTIONS=ON \
     -DLLDB_INCLUDE_TESTS=ON \
+    -DBUILD_SHARED_LIBS=ON \
     -DLLVM_CCACHE_BUILD=ON \
     -DCMAKE_INSTALL_PREFIX=/usr/local/llvm-reldeb
 ```

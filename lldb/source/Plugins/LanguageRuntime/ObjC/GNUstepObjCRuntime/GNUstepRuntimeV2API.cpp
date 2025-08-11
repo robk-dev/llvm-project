@@ -158,6 +158,16 @@ bool GNUstepRuntimeV2API::InitializeRuntimeFunctions() {
   m_runtime.sel_getName = (const char *(*)(SEL))
       ResolveRuntimeSymbol("sel_getName");
   
+  // Method lookup and selector checking
+  m_runtime.sel_getUid = (SEL (*)(const char *))
+      ResolveRuntimeSymbol("sel_getUid");
+  m_runtime.class_respondsToSelector = (bool (*)(Class, SEL))
+      ResolveRuntimeSymbol("class_respondsToSelector");
+  m_runtime.class_getInstanceMethod = (Method (*)(Class, SEL))
+      ResolveRuntimeSymbol("class_getInstanceMethod");
+  m_runtime.class_getClassMethod = (Method (*)(Class, SEL))
+      ResolveRuntimeSymbol("class_getClassMethod");
+  
   m_runtime.class_copyPropertyList = (Property *(*)(Class, unsigned int *))
       ResolveRuntimeSymbol("class_copyPropertyList");
   m_runtime.property_getName = (const char *(*)(Property))
@@ -1247,6 +1257,135 @@ GNUstepRuntimeV2API::GetAllPropertiesIncludingInherited(Class cls) {
   }
   
   return all_properties;
+}
+
+// === Method Lookup and Selector Checking ===
+
+bool GNUstepRuntimeV2API::ClassRespondsToSelector(const std::string &class_name, 
+                                                  const std::string &selector_name) {
+  std::lock_guard<std::recursive_mutex> guard(m_mutex);
+  Log *log = GetLog(LLDBLog::Language);
+  
+  // Check if required runtime functions are available
+  if (!m_runtime.objc_getClass || !m_runtime.sel_getUid || !m_runtime.class_respondsToSelector) {
+    LLDB_LOG(log, "[{0}] Required runtime functions not available for selector check", LLDB_LOG_TAG);
+    return false;
+  }
+  
+  ExecutionContext exe_ctx(m_process);
+  EvaluateExpressionOptions options;
+  options.SetUnwindOnError(true);
+  options.SetIgnoreBreakpoints(true);
+  options.SetTimeout(std::chrono::seconds(2));
+  
+  // Call class_respondsToSelector via expression evaluation
+  char expr[512];
+  snprintf(expr, sizeof(expr),
+           "(int)class_respondsToSelector((void*)objc_getClass(\"%s\"), sel_getUid(\"%s\"))",
+           class_name.c_str(), selector_name.c_str());
+  
+  ValueObjectSP result;
+  ExpressionResults expr_result = m_process->GetTarget().EvaluateExpression(
+      expr, exe_ctx.GetFrameSP().get(), result, options);
+  
+  if (expr_result == eExpressionCompleted && result) {
+    bool responds = result->GetValueAsUnsigned(0) != 0;
+    LLDB_LOG(log, "[{0}] Class %s %s to selector %s", 
+             LLDB_LOG_TAG, class_name.c_str(), 
+             responds ? "responds" : "does not respond", selector_name.c_str());
+    return responds;
+  } else {
+    LLDB_LOG(log, "[{0}] Failed to evaluate selector check expression for class %s, selector %s", 
+             LLDB_LOG_TAG, class_name.c_str(), selector_name.c_str());
+    return false;
+  }
+}
+
+llvm::Expected<GNUstepRuntimeV2API::MethodInfo> 
+GNUstepRuntimeV2API::GetInstanceMethod(const std::string &class_name, 
+                                       const std::string &selector_name) {
+  std::lock_guard<std::recursive_mutex> guard(m_mutex);
+  Log *log = GetLog(LLDBLog::Language);
+  
+  // Check if required runtime functions are available
+  if (!m_runtime.objc_getClass || !m_runtime.sel_getUid || !m_runtime.class_getInstanceMethod) {
+    return CreateError("Required runtime functions not available for method lookup");
+  }
+  
+  ExecutionContext exe_ctx(m_process);
+  EvaluateExpressionOptions options;
+  options.SetUnwindOnError(true);
+  options.SetIgnoreBreakpoints(true);
+  options.SetTimeout(std::chrono::seconds(2));
+  
+  // Get the method pointer
+  char expr[512];
+  snprintf(expr, sizeof(expr),
+           "(void*)class_getInstanceMethod((void*)objc_getClass(\"%s\"), sel_getUid(\"%s\"))",
+           class_name.c_str(), selector_name.c_str());
+  
+  ValueObjectSP result;
+  ExpressionResults expr_result = m_process->GetTarget().EvaluateExpression(
+      expr, exe_ctx.GetFrameSP().get(), result, options);
+  
+  if (expr_result != eExpressionCompleted || !result) {
+    return CreateError("Failed to get instance method for class %s, selector %s", 
+                       class_name.c_str(), selector_name.c_str());
+  }
+  
+  lldb::addr_t method_addr = result->GetValueAsUnsigned(0);
+  if (method_addr == 0) {
+    return CreateError("Method %s not found in class %s", 
+                       selector_name.c_str(), class_name.c_str());
+  }
+  
+  MethodInfo method_info;
+  method_info.selector_name = selector_name;
+  method_info.defining_class_name = class_name;
+  
+  // Get method type encoding
+  if (m_runtime.method_getTypeEncoding) {
+    char type_expr[512];
+    snprintf(type_expr, sizeof(type_expr),
+             "(const char*)method_getTypeEncoding((void*)0x%" PRIx64 ")",
+             method_addr);
+    
+    ValueObjectSP type_result;
+    ExpressionResults type_expr_result = m_process->GetTarget().EvaluateExpression(
+        type_expr, exe_ctx.GetFrameSP().get(), type_result, options);
+    
+    if (type_expr_result == eExpressionCompleted && type_result) {
+      lldb::addr_t type_addr = type_result->GetValueAsUnsigned(0);
+      if (type_addr != 0) {
+        auto type_or_error = ReadCStringFromTarget(type_addr);
+        if (type_or_error) {
+          method_info.type_encoding = *type_or_error;
+        }
+      }
+    }
+  }
+  
+  // Get method implementation address
+  if (m_runtime.method_getImplementation) {
+    char impl_expr[512];
+    snprintf(impl_expr, sizeof(impl_expr),
+             "(void*)method_getImplementation((void*)0x%" PRIx64 ")",
+             method_addr);
+    
+    ValueObjectSP impl_result;
+    ExpressionResults impl_expr_result = m_process->GetTarget().EvaluateExpression(
+        impl_expr, exe_ctx.GetFrameSP().get(), impl_result, options);
+    
+    if (impl_expr_result == eExpressionCompleted && impl_result) {
+      method_info.implementation = impl_result->GetValueAsUnsigned(0);
+    }
+  }
+  
+  LLDB_LOG(log, "[{0}] Found method %s in class %s with encoding: %s", 
+           LLDB_LOG_TAG, selector_name.c_str(), class_name.c_str(), 
+           method_info.type_encoding.c_str());
+  
+  return method_info;
 }
 
 // === Runtime Version ===

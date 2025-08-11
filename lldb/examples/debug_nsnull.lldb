@@ -1,0 +1,16 @@
+file test_array_nil_recursion
+
+breakpoint set --file test_array_nil_recursion.m --line 18
+
+run
+
+# Let's examine the NSNull object directly
+print (void*)0x00007ffff7dc3fc8
+x/8wx 0x00007ffff7dc3fc8
+memory read 0x00007ffff7dc3fc8 --count 32 --size 1
+
+# Check what LLDB thinks this object is
+po 0x00007ffff7dc3fc8
+frame variable -T arrayWithNils[1]
+
+quit

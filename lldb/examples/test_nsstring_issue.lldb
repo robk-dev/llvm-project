@@ -1,0 +1,9 @@
+target create custom_class_test
+breakpoint set --name main
+process launch
+breakpoint set --line 190 --file custom_class_test.m
+continue
+# This should stop after the skills array is created
+frame variable skills
+po skills
+quit

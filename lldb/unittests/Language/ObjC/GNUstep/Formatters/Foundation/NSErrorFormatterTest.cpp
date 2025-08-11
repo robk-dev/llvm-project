@@ -437,7 +437,7 @@ TEST_F(NSErrorFormatterTest, PerformanceRequirements) {
     EXPECT_FALSE(output.empty()) << "Performance test should produce output";
     
     // Should handle long domain gracefully
-    EXPECT_LT(output.length(), 200) << "Complex error output should be manageable";
+    EXPECT_LT(output.length(), 200u) << "Complex error output should be manageable";
   }
 }
 

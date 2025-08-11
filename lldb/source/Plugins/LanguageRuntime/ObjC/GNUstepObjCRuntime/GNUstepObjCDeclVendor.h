@@ -52,6 +52,38 @@ private:
   clang::ObjCMethodDecl *CreateMethodDecl(clang::ObjCInterfaceDecl *interface_decl,
                                            const char *name, const char *types,
                                            bool is_instance);
+
+  // Method forwarding infrastructure for modern subscript syntax
+  struct MethodForwardingInfo {
+    std::string modern_method;      // e.g., "objectAtIndexedSubscript:"
+    std::string legacy_method;      // e.g., "objectAtIndex:"
+    std::string class_prefix;       // e.g., "NSArray" or "*" for all classes
+    bool enabled;
+  };
+
+  // Method resolution and forwarding
+  clang::ObjCMethodDecl *ResolveMethodWithForwarding(
+      clang::ObjCInterfaceDecl *interface_decl,
+      const std::string &method_name,
+      const std::string &class_name,
+      bool is_instance);
+
+  // Check if a method should be forwarded to another method
+  std::optional<std::string> GetForwardingTarget(
+      const std::string &method_name, 
+      const std::string &class_name);
+
+  // Install default method forwarding rules
+  void InstallDefaultForwardingRules();
+
+  // Runtime method existence checking
+  bool DoesClassRespondToSelector(const std::string &class_name,
+                                  const std::string &selector_name);
+
+private:
+  // Method forwarding table
+  std::vector<MethodForwardingInfo> m_method_forwarding_rules;
+  bool m_forwarding_initialized;
 };
 
 } // namespace lldb_private

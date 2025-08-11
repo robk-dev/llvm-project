@@ -1,0 +1,10 @@
+# Simple test for basic formatters without expression evaluation
+target create ./custom_class_test
+breakpoint set --line 228
+run
+# Just test basic variable display without po
+frame variable account
+frame variable personInfo  
+frame variable fruits
+continue
+quit

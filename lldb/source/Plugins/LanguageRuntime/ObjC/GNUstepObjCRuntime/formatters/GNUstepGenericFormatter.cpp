@@ -918,6 +918,8 @@ lldb::ValueObjectSP GNUstepGenericObjectSyntheticProvider::GetChildAtIndex(uint3
     
   const IvarInfo& ivar = m_ivars[idx];
   
+  // Create child for ivar
+  
   // CRITICAL FIX: Add bounds checking for ivar access to prevent buffer overrun
   if (ivar.name.empty() || ivar.type_encoding.empty()) {
     return nullptr;
@@ -1020,9 +1022,15 @@ lldb::ValueObjectSP GNUstepGenericObjectSyntheticProvider::GetChildAtIndex(uint3
     
     // For non-nil objects, create from the actual object address
     // Using CreateValueObjectFromData to ensure unique instances
+    // Creating child for object ivar
+    
     DataBufferSP data_buffer_sp(new DataBufferHeap(&obj_ptr, sizeof(obj_ptr)));
     DataExtractor data(data_buffer_sp, m_process->GetByteOrder(), m_process->GetAddressByteSize());
     lldb::ValueObjectSP result = ValueObject::CreateValueObjectFromData(ivar.name, data, exe_ctx, ivar_type);
+    
+    if (result) {
+      // Created ValueObject for object ivar
+    }
     
     // CRITICAL FIX: Cache the result to avoid recreation
     if (result) {

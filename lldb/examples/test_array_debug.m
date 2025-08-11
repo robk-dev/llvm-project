@@ -1,12 +1,15 @@
 #import <Foundation/Foundation.h>
 
-int main(int argc, char *argv[]) {
+int main(int argc, const char * argv[]) {
     @autoreleasepool {
-        NSArray *fruits = @[@"Apple", @"Banana", @"Cherry"];
+        NSArray *fruits = @[@"apple", @"banana", @"cherry"];
         
-        printf("Array created with %lu elements\n", (unsigned long)[fruits count]);
-        printf("Set breakpoint here to inspect 'fruits'\n"); // Line 8
+        // Print some debug info
+        NSLog(@"Array: %@", fruits);
+        for (id fruit in fruits) {
+            NSLog(@"Fruit: %@ (class: %@)", fruit, [fruit class]);
+        }
         
-        return 0;
+        return 0; // Breakpoint here
     }
 }

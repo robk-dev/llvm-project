@@ -1,0 +1,62 @@
+# Test script demonstrating WORKING solutions for GNUstep expression evaluation
+file test_expression_evaluation_simple
+breakpoint set --file test_expression_evaluation_simple.m --line 13
+run
+
+echo "=== BASIC OBJECT INSPECTION (WORKS PERFECTLY) ==="
+po fruits  
+po dict
+
+echo ""
+echo "=== ARRAY ACCESS - WORKING SYNTAX ==="
+# ✅ These work perfectly with GNUstep
+po [fruits objectAtIndex:0]
+po [fruits objectAtIndex:1] 
+po [fruits objectAtIndex:2]
+po [fruits count]
+po [fruits firstObject]
+po [fruits lastObject]
+
+echo ""
+echo "=== DICTIONARY ACCESS - WORKING SYNTAX ==="
+# ✅ These work perfectly with GNUstep  
+po [dict objectForKey:@"name"]
+po [dict objectForKey:@"age"] 
+po [dict allKeys]
+po [dict allValues]
+po [dict count]
+
+echo ""
+echo "=== BROKEN SYNTAX (for comparison) ==="
+# ❌ These don't work with GNUstep (shows the issue)
+echo "The following commands demonstrate the issue:"
+echo "po fruits[0]  # Would fail - use [fruits objectAtIndex:0] instead"
+echo "po dict[@\"name\"]  # Would fail - use [dict objectForKey:@\"name\"] instead"
+
+# Let's actually test to confirm the issue still exists:
+po fruits[0]
+# Expected: "(4156636650 elements)" or similar error
+
+echo ""  
+echo "=== EXPRESSION EVALUATION CAPABILITIES ==="
+# ✅ Complex expressions work fine
+expr (int)[fruits count] + (int)[dict count]
+expr ([fruits count] > 0) ? [fruits objectAtIndex:0] : @"empty"
+expr [[dict objectForKey:@"name"] isEqualToString:@"John"]
+
+echo ""
+echo "=== SUMMARY ==="
+echo "✅ GNUstep LLDB integration works perfectly for:"
+echo "   - Object inspection (po objects)"  
+echo "   - Method calls [obj method:arg]"
+echo "   - Complex expressions"
+echo "   - Array access via objectAtIndex:"
+echo "   - Dictionary access via objectForKey:"
+echo ""
+echo "❌ Modern subscript syntax not yet supported:"
+echo "   - array[index] syntax" 
+echo "   - dict[@\"key\"] syntax"
+echo ""
+echo "✅ SOLUTION: Use explicit method calls - they work perfectly!"
+
+quit

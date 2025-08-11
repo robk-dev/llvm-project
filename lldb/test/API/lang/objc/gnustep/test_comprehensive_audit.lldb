@@ -1,0 +1,409 @@
+# Comprehensive Formatter Audit Test Script
+# Tests all GNUstep formatters with recursive expansion
+
+# Set up
+settings set target.process.stop-on-exec false
+settings set interpreter.echo-commands true
+settings set interpreter.echo-comment-commands true
+
+# Load the test program
+file test_comprehensive_formatters
+
+# Set breakpoint at test line
+b test_comprehensive_formatters.m:305
+
+# Run to breakpoint
+run
+
+# ======================================
+# 1. STRING FORMATTERS TEST
+# ======================================
+
+echo "=== STRING FORMATTER TESTS ==="
+
+# Tagged pointer string
+echo "Tagged String:"
+po taggedString
+v taggedString
+
+# Constant string
+echo "Constant String:"
+po constantString
+v constantString
+
+# Mutable string
+echo "Mutable String:"
+po mutableString
+v mutableString
+
+# Empty string
+echo "Empty String:"
+po emptyString
+v emptyString
+
+# Unicode string
+echo "Unicode String:"
+po unicodeString
+v unicodeString
+
+# Long string
+echo "Long String (truncated):"
+po longString
+v longString
+
+# ======================================
+# 2. NUMBER FORMATTERS TEST
+# ======================================
+
+echo "=== NUMBER FORMATTER TESTS ==="
+
+# Tagged numbers
+echo "Tagged Int:"
+po taggedInt
+v taggedInt
+
+echo "Tagged Bool:"
+po taggedBool
+v taggedBool
+
+echo "Tagged Float:"
+po taggedFloat
+v taggedFloat
+
+# Regular numbers
+echo "Large Int:"
+po largeInt
+v largeInt
+
+echo "Negative Number:"
+po negativeNum
+v negativeNum
+
+echo "Double Number:"
+po doubleNum
+v doubleNum
+
+# Special values
+echo "Zero:"
+po zeroNum
+v zeroNum
+
+echo "Max Int:"
+po maxInt
+v maxInt
+
+echo "Min Int:"
+po minInt
+v minInt
+
+# ======================================
+# 3. BASIC COLLECTION FORMATTERS TEST
+# ======================================
+
+echo "=== ARRAY FORMATTER TESTS ==="
+
+# Arrays
+echo "Empty Array:"
+po emptyArray
+v emptyArray
+
+echo "Simple Array:"
+po simpleArray
+v simpleArray
+v simpleArray[0]
+v simpleArray[1]
+v simpleArray[2]
+
+echo "Number Array:"
+po numberArray
+v numberArray
+v numberArray[0]
+v numberArray[4]
+
+echo "Mixed Array:"
+po mixedArray
+v mixedArray
+
+echo "Mutable Array:"
+po mutableArray
+v mutableArray
+
+echo "=== DICTIONARY FORMATTER TESTS ==="
+
+# Dictionaries
+echo "Empty Dictionary:"
+po emptyDict
+v emptyDict
+
+echo "Simple Dictionary:"
+po simpleDict
+v simpleDict
+# Test child expansion
+v simpleDict[0]
+v simpleDict[1]
+v simpleDict[2]
+
+echo "Mutable Dictionary:"
+po mutableDict
+v mutableDict
+
+echo "=== SET FORMATTER TESTS ==="
+
+# Sets
+echo "Empty Set:"
+po emptySet
+v emptySet
+
+echo "Simple Set:"
+po simpleSet
+v simpleSet
+v simpleSet[0]
+v simpleSet[1]
+
+echo "Number Set:"
+po numberSet
+v numberSet
+
+echo "Mutable Set:"
+po mutableSet
+v mutableSet
+
+echo "=== ORDERED SET FORMATTER TESTS ==="
+
+echo "Ordered Set:"
+po orderedSet
+v orderedSet
+v orderedSet[0]
+v orderedSet[1]
+
+echo "Mutable Ordered Set:"
+po mutableOrderedSet
+v mutableOrderedSet
+
+# ======================================
+# 4. NESTED COLLECTIONS TEST
+# ======================================
+
+echo "=== NESTED COLLECTION TESTS ==="
+
+echo "Array of Arrays:"
+po arrayOfArrays
+v arrayOfArrays
+v arrayOfArrays[0]
+v arrayOfArrays[0][0]
+v arrayOfArrays[1]
+v arrayOfArrays[1][1]
+
+echo "Dictionary with Arrays:"
+po dictWithArrays
+v dictWithArrays
+v dictWithArrays[0]
+v dictWithArrays[1]
+v dictWithArrays[2]
+
+echo "Array of Dictionaries:"
+po arrayOfDicts
+v arrayOfDicts
+v arrayOfDicts[0]
+v arrayOfDicts[1]
+
+echo "Deeply Nested (3+ levels):"
+po deeplyNested
+v deeplyNested
+v deeplyNested[0]
+v deeplyNested[1]
+
+echo "Set of Collections:"
+po setOfCollections
+v setOfCollections
+
+# ======================================
+# 5. FOUNDATION TYPES TEST
+# ======================================
+
+echo "=== DATE FORMATTER TESTS ==="
+
+echo "Current Date:"
+po currentDate
+v currentDate
+
+echo "Past Date (Unix Epoch):"
+po pastDate
+v pastDate
+
+echo "Future Date:"
+po futureDate
+v futureDate
+
+echo "=== URL FORMATTER TESTS ==="
+
+echo "HTTP URL:"
+po httpUrl
+v httpUrl
+
+echo "File URL:"
+po fileUrl
+v fileUrl
+
+echo "=== UUID FORMATTER TESTS ==="
+
+echo "UUID 1:"
+po uuid1
+v uuid1
+
+echo "UUID 2:"
+po uuid2
+v uuid2
+
+echo "=== DATA FORMATTER TESTS ==="
+
+echo "Empty Data:"
+po emptyData
+v emptyData
+
+echo "Small Data:"
+po smallData
+v smallData
+
+echo "Binary Data:"
+po binaryData
+v binaryData
+
+echo "Mutable Data:"
+po mutableData
+v mutableData
+
+echo "=== ERROR FORMATTER TESTS ==="
+
+echo "Simple Error:"
+po simpleError
+v simpleError
+
+echo "Detailed Error:"
+po detailedError
+v detailedError
+
+echo "=== EXCEPTION FORMATTER TESTS ==="
+
+echo "Exception:"
+po exception
+v exception
+
+echo "=== NULL FORMATTER TESTS ==="
+
+echo "Null Object:"
+po nullObject
+v nullObject
+
+# ======================================
+# 6. SPECIALIZED TYPES TEST
+# ======================================
+
+echo "=== SPECIALIZED TYPE TESTS ==="
+
+echo "AttributedString:"
+po attrString
+v attrString
+
+echo "Simple IndexPath:"
+po simpleIndexPath
+v simpleIndexPath
+
+echo "Complex IndexPath:"
+po complexIndexPath
+v complexIndexPath
+
+echo "IndexSet:"
+po indexSet
+v indexSet
+
+echo "Notification:"
+po notification
+v notification
+
+echo "ProcessInfo:"
+po processInfo
+v processInfo
+
+echo "Current Locale:"
+po currentLocale
+v currentLocale
+
+echo "US Locale:"
+po usLocale
+v usLocale
+
+echo "Scanner:"
+po scanner
+v scanner
+
+echo "Alpha CharacterSet:"
+po alphaSet
+v alphaSet
+
+echo "Custom CharacterSet:"
+po customSet
+v customSet
+
+echo "UserDefaults:"
+po defaults
+v defaults
+
+# ======================================
+# 7. CUSTOM OBJECTS TEST
+# ======================================
+
+echo "=== CUSTOM OBJECT TESTS ==="
+
+echo "Custom Object:"
+po customObj
+v customObj
+
+echo "Array with Custom Object:"
+po customArray
+v customArray
+
+echo "Dictionary with Custom Object:"
+po customDict
+v customDict
+
+# ======================================
+# 8. EDGE CASES TEST
+# ======================================
+
+echo "=== EDGE CASE TESTS ==="
+
+echo "Nil String:"
+po nilString
+v nilString
+
+echo "Array with Null:"
+po arrayWithNil
+v arrayWithNil
+
+echo "Dictionary with Null:"
+po dictWithNil
+v dictWithNil
+
+echo "Circular Reference Array:"
+po circularArray
+v circularArray
+
+echo "Circular Reference Dictionary:"
+po circularDict
+v circularDict
+
+# ======================================
+# SUMMARY
+# ======================================
+
+echo "=== FORMATTER AUDIT COMPLETE ==="
+echo "Check output above for any formatters showing:"
+echo "- Hex addresses instead of values"
+echo "- <error: message> outputs"
+echo "- Incorrect child counts"
+echo "- Missing summaries"
+
+# Kill to exit
+kill
+quit

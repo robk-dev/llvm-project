@@ -1,0 +1,6 @@
+b test_string_truncation.m:11
+run
+type summary list
+frame variable skills --no-recognize-arguments
+frame variable skills --summary
+quit

@@ -343,34 +343,54 @@ bool GNUstepObjCRuntimeIntrospector::IsTaggedPointer(lldb::addr_t obj_addr) {
     return false;
   }
   
-  // CRITICAL FIX: GNUstep/libobjc2 tagged pointer detection
-  // From libobjc2/objc/runtime.h lines 1005-1008:
-  // "In both cases, the lowest bit must be 1"
+  // GNUstep/libobjc2 tagged pointer detection:
+  // Tagged pointers have specific tag values in the lower 3 bits:
+  // - 1 = NSSmallInt
+  // - 2 = NSSmallExtendedDouble  
+  // - 3 = NSSmallRepeatingDouble
+  // - 4 = NSSmallString (GSTinyString)
+  // - 5 = NSSmallFloat
+  // - 6 = Reserved
+  // - 7 = Reserved
+  //
+  // IMPORTANT: Not all pointers with non-zero lower bits are tagged!
+  // NSConstantString and other compile-time objects may have non-aligned addresses.
   // 
-  // Correct logic:
-  // - The lowest bit MUST be 1 for tagged pointers
-  // - On 32-bit: mask = 1, so (addr & 1) == 1 means tagged
-  // - On 64-bit: mask = 7, but bit 0 must still be 1
-  // 
-  // This fixes the bug where heap objects with non-aligned addresses 
-  // were incorrectly identified as tagged pointers.
+  // A more robust check: Tagged pointers typically have high bits that don't
+  // correspond to valid memory addresses. For 64-bit systems, tagged pointers
+  // usually have data encoded in the upper bits.
   
-  // First check: lowest bit must be 1
-  if ((obj_addr & 1) == 0) {
-    return false; // Bit 0 is 0, cannot be tagged pointer
+  uint8_t tag = obj_addr & 0x7;
+  
+  // Tag 0 means definitely not tagged
+  if (tag == 0) {
+    return false;
   }
   
-  // Get the architecture-appropriate mask
-  uint64_t small_object_mask;
-  if (m_address_size == 4) {
-    small_object_mask = 1; // 32-bit: only bit 0 matters
-  } else {
-    small_object_mask = 7; // 64-bit: bits 0-2, but bit 0 must be 1
+  // Only tags 1-5 are currently used for tagged pointers in GNUstep
+  if (tag > 5) {
+    return false;
   }
   
-  // Check if this address matches the small object pattern
-  // Since we already confirmed bit 0 is 1, this checks the pattern
-  return (obj_addr & small_object_mask) != 0;
+  // Additional heuristic: Check if this looks like a valid memory address
+  // Tagged pointers typically encode data in high bits, making them invalid addresses
+  // On 64-bit systems, user-space addresses typically don't use the highest bits
+  
+  // Check if the address is in a reasonable range for heap/stack objects
+  // Most user-space addresses are below 0x0000800000000000 on x86_64
+  if (obj_addr < 0x0000800000000000ULL) {
+    // This looks like a normal pointer that happens to be misaligned
+    // Try to read the ISA pointer to confirm it's a real object
+    Status error;
+    lldb::addr_t isa = m_process->ReadPointerFromMemory(obj_addr, error);
+    if (error.Success() && isa != 0 && isa != LLDB_INVALID_ADDRESS) {
+      // Successfully read an ISA pointer - this is a real object, not tagged
+      return false;
+    }
+  }
+  
+  // If we get here, it's likely a tagged pointer
+  return true;
 }
 
 std::string GNUstepObjCRuntimeIntrospector::DecodeTaggedString(lldb::addr_t obj_addr) {
@@ -410,12 +430,14 @@ std::string GNUstepObjCRuntimeIntrospector::DecodeTaggedString(lldb::addr_t obj_
   std::string result;
   result.reserve(length);
   
+  
   for (int i = 0; i < length; i++) {
     // Extract character at position i using the GNUstep formula
     // Characters are stored at bits (57 - i*7) for 7 bits each
     // The mask 0xFE means 7 bits (1111110 in binary), shifted to the right position
     uint64_t mask = 0xFE00000000000000ULL >> (i * 7);
     char c = (obj_addr & mask) >> (57 - (i * 7));
+    
     
     // Validate it's a printable ASCII character
     if (c >= 0x20 && c <= 0x7e) {

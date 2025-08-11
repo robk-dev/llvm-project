@@ -1,0 +1,6 @@
+b test_string_truncation.m:11
+run
+frame variable skills
+po skills
+p skills
+quit

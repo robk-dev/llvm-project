@@ -129,6 +129,12 @@ public:
     void *(*method_getImplementation)(Method method);
     const char *(*sel_getName)(SEL sel);
     
+    // Method lookup and selector checking
+    SEL (*sel_getUid)(const char *str);
+    bool (*class_respondsToSelector)(Class cls, SEL sel);
+    Method (*class_getInstanceMethod)(Class cls, SEL sel);
+    Method (*class_getClassMethod)(Class cls, SEL sel);
+    
     // Property introspection
     Property *(*class_copyPropertyList)(Class cls, unsigned int *outCount);
     const char *(*property_getName)(Property prop);
@@ -203,6 +209,14 @@ public:
   
   /// Check if a class is a Foundation class
   bool IsFoundationClass(const std::string &class_name);
+  
+  // === Method Lookup and Selector Checking ===
+  
+  /// Check if a class responds to a selector
+  bool ClassRespondsToSelector(const std::string &class_name, const std::string &selector_name);
+  
+  /// Get instance method for selector
+  llvm::Expected<MethodInfo> GetInstanceMethod(const std::string &class_name, const std::string &selector_name);
   
   // === Runtime Validation ===
   

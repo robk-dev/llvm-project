@@ -21,15 +21,18 @@
 #include "lldb/Utility/Stream.h"
 #include "lldb/ValueObject/ValueObject.h"
 #include <unordered_set>
+#include <unordered_map>
+#include <mutex>
 
 namespace lldb_private {
 namespace formatters {
 
-// Constants to prevent infinite recursion and timeouts
-static constexpr uint32_t MAX_FORMATTER_DEPTH = 8;
-static constexpr uint32_t MAX_COLLECTION_ELEMENTS_INLINE = 5;
-static constexpr uint32_t MAX_STRING_PREVIEW_LENGTH = 20;
-static constexpr uint32_t MAX_LOOP_ITERATIONS = 1000;  // Prevent runaway loops
+// PERFORMANCE OPTIMIZATION: Stricter limits for sub-50ms response times
+static constexpr uint32_t MAX_FORMATTER_DEPTH = 4;              // Reduced from 8
+static constexpr uint32_t MAX_COLLECTION_ELEMENTS_INLINE = 10;  // Show up to 10 elements inline for better usability  
+static constexpr uint32_t MAX_STRING_PREVIEW_LENGTH = 50;       // Increased for better readability
+static constexpr uint32_t MAX_LOOP_ITERATIONS = 100;            // Reduced from 1000
+static constexpr uint32_t MAX_NESTED_COLLECTION_ITEMS = 2;      // New: limit nested collections
 
 /// Context for tracking recursion depth and visited objects
 struct FormatterContext {
@@ -76,6 +79,30 @@ public:
   
   /// Read a UTF-8 string from target memory
   static std::string ReadUTF8String(Process *process, lldb::addr_t addr, size_t max_length = 1024);
+  
+  /// Get the dynamic offset of an instance variable in a class
+  /// This replaces hardcoded offsets with runtime-queried values
+  static ptrdiff_t GetIvarOffset(Process *process, const std::string &class_name, const std::string &ivar_name);
+  
+private:
+  /// Cache for ivar offsets to avoid repeated runtime queries
+  struct OffsetCacheKey {
+    std::string class_name;
+    std::string ivar_name;
+    bool operator==(const OffsetCacheKey &other) const {
+      return class_name == other.class_name && ivar_name == other.ivar_name;
+    }
+  };
+  
+  struct OffsetCacheKeyHash {
+    size_t operator()(const OffsetCacheKey &key) const {
+      return std::hash<std::string>{}(key.class_name) ^ 
+             (std::hash<std::string>{}(key.ivar_name) << 1);
+    }
+  };
+  
+  static std::unordered_map<OffsetCacheKey, ptrdiff_t, OffsetCacheKeyHash> s_offset_cache;
+  static std::mutex s_offset_cache_mutex;
 };
 
 /// Base class for GNUstep summary providers

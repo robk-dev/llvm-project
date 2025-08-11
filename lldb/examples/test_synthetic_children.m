@@ -1,30 +1,27 @@
-//
-// test_synthetic_children.m
-// Simple test for synthetic children providers
-//
-
 #import <Foundation/Foundation.h>
 
-int main(int argc, char *argv[]) {
-    NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
-    
-    // Create simple collections for testing
-    NSArray *fruits = [NSArray arrayWithObjects:@"apple", @"banana", @"cherry", @"date", nil];
-    NSLog(@"Fruits array created with %lu elements", (unsigned long)[fruits count]);
-    
-    NSDictionary *personInfo = [NSDictionary dictionaryWithObjectsAndKeys:
-                                @"John Doe", @"name",
-                                [NSNumber numberWithInt:42], @"age",
-                                @"Developer", @"occupation",
-                                nil];
-    NSLog(@"Person info dictionary created with %lu entries", (unsigned long)[personInfo count]);
-    
-    NSSet *colors = [NSSet setWithObjects:@"red", @"green", @"blue", nil];
-    NSLog(@"Colors set created with %lu elements", (unsigned long)[colors count]);
-    
-    // Breakpoint here for testing
-    NSLog(@"Collections ready for inspection");
-    
-    [pool drain];
+int main(int argc, const char * argv[]) {
+    @autoreleasepool {
+        // Simple array with tagged strings
+        NSArray *fruits = @[@"apple", @"banana", @"cherry"];
+        
+        // Dictionary with tagged strings
+        NSDictionary *dict = @{
+            @"name": @"John",
+            @"age": @42,
+            @"city": @"Boston"
+        };
+        
+        // Set with mixed objects
+        NSSet *set = [NSSet setWithObjects:@"one", @"two", @"three", nil];
+        
+        NSLog(@"Arrays: %@", fruits);
+        NSLog(@"Dictionary: %@", dict);
+        NSLog(@"Set: %@", set);
+        
+        // Breakpoint here
+        NSLog(@"Ready for debugging");
+        sleep(2);
+    }
     return 0;
 }

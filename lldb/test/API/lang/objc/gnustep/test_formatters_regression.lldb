@@ -1,0 +1,377 @@
+# Comprehensive Regression Test Suite for GNUstep Formatters
+# Tests all known issues and validates fixes
+# Run with: lldb test_comprehensive_formatters -b -s test_formatters_regression.lldb
+
+# Setup
+settings set target.prefer-dynamic-value false
+settings set target.import-std-module false
+target create test_comprehensive_formatters
+breakpoint set --line 301
+run
+
+# ======================================
+# TEST SUITE 1: STRING FORMATTERS
+# ======================================
+
+echo "\n=== STRING FORMATTER TESTS ===\n"
+
+# Test 1.1: Tagged pointer string (short)
+frame variable taggedString
+# Expected: (NSString *) taggedString = @"Hello"
+
+# Test 1.2: Constant string  
+frame variable constantString
+# Expected: (NSString *) constantString = @"This is a constant string literal"
+
+# Test 1.3: Mutable string
+frame variable mutableString
+# Expected: (NSMutableString *) mutableString = @"Mutable String"
+
+# Test 1.4: Empty string
+frame variable emptyString
+# Expected: (NSString *) emptyString = @""
+
+# Test 1.5: Unicode string
+frame variable unicodeString
+# Expected: (NSString *) unicodeString = @"Hello 世界 🌍"
+
+# Test 1.6: Long string (truncated display)
+frame variable longString
+# Expected: Should show beginning of string with ellipsis
+
+# ======================================
+# TEST SUITE 2: NUMBER FORMATTERS
+# ======================================
+
+echo "\n=== NUMBER FORMATTER TESTS ===\n"
+
+# Test 2.1: Tagged integer
+frame variable taggedInt
+# Expected: (NSNumber *) taggedInt = 42
+
+# Test 2.2: Tagged boolean
+frame variable taggedBool
+# Expected: (NSNumber *) taggedBool = YES
+
+# Test 2.3: Tagged float
+frame variable taggedFloat
+# Expected: (NSNumber *) taggedFloat = 3.14
+
+# Test 2.4: Large integer
+frame variable largeInt
+# Expected: (NSNumber *) largeInt = 9999999999999
+
+# Test 2.5: Negative number
+frame variable negativeNum
+# Expected: (NSNumber *) negativeNum = -100
+
+# Test 2.6: Double precision
+frame variable doubleNum
+# Expected: (NSNumber *) doubleNum = 3.141592653589793
+
+# Test 2.7: Special values
+frame variable zeroNum
+frame variable maxInt
+frame variable minInt
+# Expected: All show correct numeric values
+
+# ======================================
+# TEST SUITE 3: ARRAY FORMATTERS
+# ======================================
+
+echo "\n=== ARRAY FORMATTER TESTS ===\n"
+
+# Test 3.1: Empty array
+frame variable emptyArray
+# Expected: (NSArray *) emptyArray = @[]
+
+# Test 3.2: Simple string array (CRITICAL TEST - No <string> placeholders!)
+frame variable simpleArray
+# Expected: (NSArray *) simpleArray = @[@"Apple", @"Banana", @"Cherry"]
+# FAIL CONDITION: If shows <string> placeholders instead of actual values
+
+# Test 3.3: Number array
+frame variable numberArray
+# Expected: (NSArray *) numberArray = @[@1, @2, @3, @4, @5]
+
+# Test 3.4: Mixed type array
+frame variable mixedArray
+# Expected: (NSArray *) mixedArray = @[@"String", @42, @YES, NSNull]
+
+# Test 3.5: Mutable array
+frame variable mutableArray
+# Expected: (NSMutableArray *) mutableArray = @[@"Apple", @"Banana", @"Cherry", @"Date"]
+
+# Test 3.6: Array element access
+expression simpleArray[0]
+expression simpleArray[1]
+expression simpleArray[2]
+# Expected: Each shows individual string values
+
+# ======================================
+# TEST SUITE 4: DICTIONARY FORMATTERS
+# ======================================
+
+echo "\n=== DICTIONARY FORMATTER TESTS ===\n"
+
+# Test 4.1: Empty dictionary
+frame variable emptyDict
+# Expected: (NSDictionary *) emptyDict = @{}
+
+# Test 4.2: Simple dictionary (CRITICAL TEST - Key extraction)
+frame variable simpleDict
+# Expected: (NSDictionary *) simpleDict = @{@"name": @"John Doe", @"age": @30, @"active": @YES}
+# FAIL CONDITION: If shows [0].key/[0].value format instead
+
+# Test 4.3: Mutable dictionary
+frame variable mutableDict
+# Expected: Shows all 4 key-value pairs properly formatted
+
+# Test 4.4: Dictionary key extraction
+expression [simpleDict objectForKey:@"name"]
+expression [simpleDict objectForKey:@"age"]
+# Expected: Returns correct values
+
+# Test 4.5: Dictionary child expansion
+frame variable simpleDict --depth 2
+# Expected: Shows expanded key-value pairs
+
+# ======================================
+# TEST SUITE 5: SET FORMATTERS
+# ======================================
+
+echo "\n=== SET FORMATTER TESTS ===\n"
+
+# Test 5.1: Empty set
+frame variable emptySet
+# Expected: (NSSet *) emptySet = [NSSet setWithObjects: count:0]
+
+# Test 5.2: Simple set
+frame variable simpleSet
+# Expected: (NSSet *) simpleSet = [NSSet setWithObjects: @"Red", @"Green", @"Blue" count:3]
+
+# Test 5.3: Number set
+frame variable numberSet
+# Expected: Shows 5 numbers in set
+
+# Test 5.4: Mutable set
+frame variable mutableSet
+# Expected: Shows 4 colors including "Yellow"
+
+# Test 5.5: Ordered set
+frame variable orderedSet
+# Expected: (NSOrderedSet *) orderedSet = [NSOrderedSet orderedSetWithObjects: @"First", @"Second", @"Third" count:3]
+
+# ======================================
+# TEST SUITE 6: NESTED COLLECTIONS (CRITICAL)
+# ======================================
+
+echo "\n=== NESTED COLLECTION TESTS ===\n"
+
+# Test 6.1: Array of arrays
+frame variable arrayOfArrays
+# Expected: Shows 3x3 grid structure
+
+# Test 6.2: Dictionary with array values (CRITICAL - Tagged numbers in arrays)
+frame variable dictWithArrays
+# Expected: @{@"fruits": @[@"Apple"...], @"colors": @[@"Red"...], @"numbers": @[@1, @2, @3]}
+
+# Test 6.3: Array of dictionaries
+frame variable arrayOfDicts
+# Expected: Shows 3 person dictionaries
+
+# Test 6.4: Deep nesting (3+ levels)
+frame variable deeplyNested
+# Expected: Shows hierarchical structure
+
+# Test 6.5: Nested expansion
+frame variable deeplyNested --depth 3
+# Expected: Shows full hierarchy expanded
+
+# ======================================
+# TEST SUITE 7: FOUNDATION TYPES
+# ======================================
+
+echo "\n=== FOUNDATION TYPE TESTS ===\n"
+
+# Test 7.1: Date formatters
+frame variable currentDate
+frame variable pastDate
+frame variable futureDate
+# Expected: Shows formatted date strings
+
+# Test 7.2: URL formatters
+frame variable httpUrl
+frame variable fileUrl
+# Expected: Shows URL strings
+
+# Test 7.3: UUID formatter
+frame variable uuid1
+frame variable uuid2
+# Expected: Shows UUID strings
+
+# Test 7.4: Data formatters
+frame variable emptyData
+frame variable smallData
+frame variable binaryData
+# Expected: Shows byte count and preview
+
+# Test 7.5: Error formatter
+frame variable simpleError
+frame variable detailedError
+# Expected: Shows domain, code, and description
+
+# Test 7.6: NSNull
+frame variable nullObject
+# Expected: (NSNull *) nullObject = [NSNull null]
+
+# ======================================
+# TEST SUITE 8: SPECIALIZED TYPES
+# ======================================
+
+echo "\n=== SPECIALIZED TYPE TESTS ===\n"
+
+# Test 8.1: AttributedString
+frame variable attrString
+# Expected: Shows string content
+
+# Test 8.2: IndexPath
+frame variable simpleIndexPath
+frame variable complexIndexPath
+# Expected: Shows index path notation
+
+# Test 8.3: IndexSet
+frame variable indexSet
+# Expected: Shows indices or count
+
+# Test 8.4: Notification
+frame variable notification
+# Expected: Shows notification name and info
+
+# Test 8.5: ProcessInfo
+frame variable processInfo
+# Expected: Shows process information
+
+# Test 8.6: Locale
+frame variable currentLocale
+frame variable usLocale
+# Expected: Shows locale identifiers
+
+# Test 8.7: Scanner
+frame variable scanner
+# Expected: Shows scanner string
+
+# Test 8.8: CharacterSet
+frame variable alphaSet
+frame variable customSet
+# Expected: Shows character set info
+
+# Test 8.9: UserDefaults
+frame variable defaults
+# Expected: Shows UserDefaults object
+
+# ======================================
+# TEST SUITE 9: CUSTOM OBJECTS
+# ======================================
+
+echo "\n=== CUSTOM OBJECT TESTS ===\n"
+
+# Test 9.1: Custom object description
+frame variable customObj
+# Expected: TestObject(name=TestName, value=100)
+
+# Test 9.2: Custom object in array
+frame variable customArray
+# Expected: Shows array with custom object
+
+# Test 9.3: Custom object in dictionary
+frame variable customDict
+# Expected: Shows dictionary with custom object
+
+# ======================================
+# TEST SUITE 10: EDGE CASES
+# ======================================
+
+echo "\n=== EDGE CASE TESTS ===\n"
+
+# Test 10.1: Nil values
+frame variable nilString
+# Expected: (NSString *) nilString = nil
+
+# Test 10.2: Array with NSNull
+frame variable arrayWithNil
+# Expected: Shows array with NSNull properly
+
+# Test 10.3: Dictionary with NSNull
+frame variable dictWithNil
+# Expected: Shows dictionary with NSNull value
+
+# Test 10.4: Circular references
+frame variable circularArray
+frame variable circularDict
+# Expected: Handles without infinite recursion
+
+# ======================================
+# EXPRESSION EVALUATION TESTS
+# ======================================
+
+echo "\n=== EXPRESSION EVALUATION TESTS ===\n"
+
+# Test 11.1: po command on strings
+po taggedString
+po constantString
+po unicodeString
+# Expected: Shows string values
+
+# Test 11.2: po command on numbers
+po taggedInt
+po taggedBool
+po taggedFloat
+# Expected: Shows numeric values
+
+# Test 11.3: po command on collections
+po simpleArray
+po simpleDict
+po simpleSet
+# Expected: Shows formatted collections
+
+# Test 11.4: po command on nested structures
+po arrayOfArrays
+po dictWithArrays
+po deeplyNested
+# Expected: Shows nested structure
+
+# ======================================
+# PERFORMANCE VALIDATION
+# ======================================
+
+echo "\n=== PERFORMANCE TESTS ===\n"
+
+# Test 12.1: Large collection performance
+script import time
+script start = time.time()
+frame variable longString
+script print(f"Long string formatting: {(time.time() - start)*1000:.2f}ms")
+# Expected: <50ms
+
+script start = time.time()
+frame variable deeplyNested
+script print(f"Deep nesting formatting: {(time.time() - start)*1000:.2f}ms")
+# Expected: <50ms
+
+# ======================================
+# SUMMARY
+# ======================================
+
+echo "\n=== TEST SUMMARY ===\n"
+echo "Critical regression tests:"
+echo "1. Array summaries - NO <string> placeholders"
+echo "2. Dictionary key extraction - Proper key=value format"
+echo "3. Nested collections - Correct depth handling"
+echo "4. Tagged numbers in collections - Proper display"
+echo "5. Custom object introspection - All properties visible"
+echo "\nAll tests should complete without crashes or hangs."
+
+# Cleanup
+continue
+quit

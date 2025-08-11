@@ -7,7 +7,9 @@
 //===----------------------------------------------------------------------===//
 
 #include "GNUstepObjCDeclVendor.h"
+#include "GNUstepObjCRuntime.h"
 #include "GNUstepObjCRuntimeIntrospector.h"
+#include "GNUstepRuntimeV2API.h"
 
 #include "Plugins/ExpressionParser/Clang/ClangASTMetadata.h"
 #include "Plugins/ExpressionParser/Clang/ClangUtil.h"
@@ -21,6 +23,9 @@
 #include "clang/AST/ASTContext.h"
 #include "clang/AST/DeclObjC.h"
 #include "clang/AST/ExternalASTSource.h"
+
+#include <optional>
+#include <vector>
 
 using namespace lldb_private;
 
@@ -115,7 +120,7 @@ private:
 
 GNUstepObjCDeclVendor::GNUstepObjCDeclVendor(ObjCLanguageRuntime &runtime)
     : ClangDeclVendor(eGNUstepObjCDeclVendor), m_runtime(runtime),
-      m_type_realizer_sp(m_runtime.GetEncodingToType()) {
+      m_type_realizer_sp(m_runtime.GetEncodingToType()), m_forwarding_initialized(false) {
   m_ast_ctx = std::make_shared<TypeSystemClang>(
       "GNUstepObjCDeclVendor AST",
       runtime.GetProcess()->GetTarget().GetArchitecture().GetTriple());
@@ -123,6 +128,9 @@ GNUstepObjCDeclVendor::GNUstepObjCDeclVendor(ObjCLanguageRuntime &runtime)
   llvm::IntrusiveRefCntPtr<clang::ExternalASTSource> external_source_owning_ptr(
       m_external_source);
   m_ast_ctx->getASTContext().setExternalSource(external_source_owning_ptr);
+  
+  // Initialize method forwarding rules for modern subscript syntax
+  InstallDefaultForwardingRules();
 }
 
 clang::ObjCInterfaceDecl *
@@ -202,6 +210,7 @@ static const FoundationMethodSignature NSNumber_methods[] = {
 static const FoundationMethodSignature NSArray_methods[] = {
   {"count", "Q@:", true},
   {"objectAtIndex:", "@@:Q", true},
+  {"objectAtIndexedSubscript:", "@@:Q", true},  // Modern subscript syntax support (array[index])
   {"firstObject", "@@:", true},
   {"lastObject", "@@:", true},
   {"arrayWithObjects:", "@#@:@@", false},
@@ -214,6 +223,7 @@ static const FoundationMethodSignature NSArray_methods[] = {
 static const FoundationMethodSignature NSDictionary_methods[] = {
   {"count", "Q@:", true},
   {"objectForKey:", "@@:@", true},
+  {"objectForKeyedSubscript:", "@@:@", true},  // Modern subscript syntax support (dict[@"key"])
   {"allKeys", "@@:", true},
   {"allValues", "@@:", true},
   {"dictionaryWithObject:forKey:", "@#@:@@", false},
@@ -534,7 +544,7 @@ void GNUstepObjCDeclVendor::AddFoundationClassMethods(
     return;
   }
   
-  // Add each method to the interface with enhanced safety checks
+  // Add each method to the interface with enhanced safety checks and forwarding support
   for (int i = 0; methods[i].name; i++) {
     // CRITICAL SAFETY CHECK: Ensure method name and types are valid
     if (!methods[i].name || strlen(methods[i].name) == 0) {
@@ -559,6 +569,36 @@ void GNUstepObjCDeclVendor::AddFoundationClassMethods(
     } else {
       LLDB_LOGF(log, "[GNUstepObjCDeclVendor] WARNING: Failed to create method decl for %s in class %s",
                 methods[i].name, class_name.c_str());
+    }
+  }
+  
+  // NEW: Add forwarding methods for modern subscript syntax if the runtime doesn't have them
+  // but does have the legacy methods
+  std::vector<std::string> modern_methods_to_check = {
+    "objectAtIndexedSubscript:",
+    "objectForKeyedSubscript:"
+  };
+  
+  for (const std::string &modern_method : modern_methods_to_check) {
+    // Check if modern method already exists in static table
+    bool modern_exists = false;
+    for (int i = 0; methods[i].name; i++) {
+      if (modern_method == methods[i].name) {
+        modern_exists = true;
+        break;
+      }
+    }
+    
+    // If modern method doesn't exist, try to create a forwarding method
+    if (!modern_exists) {
+      clang::ObjCMethodDecl *forwarding_decl = ResolveMethodWithForwarding(
+          interface_decl, modern_method, class_name, true);  // Assume instance methods
+      
+      if (forwarding_decl) {
+        interface_decl->addDecl(forwarding_decl);
+        LLDB_LOGF(log, "[GNUstepObjCDeclVendor] Successfully added forwarding method %s to %s",
+                  modern_method.c_str(), class_name.c_str());
+      }
     }
   }
 }
@@ -696,6 +736,210 @@ bool GNUstepObjCDeclVendor::FinishDecl(clang::ObjCInterfaceDecl *interface_decl)
   }
 
   return true;
+}
+
+void GNUstepObjCDeclVendor::InstallDefaultForwardingRules() {
+  Log *log(GetLog(LLDBLog::Expressions));
+  LLDB_LOGF(log, "[GNUstepObjCDeclVendor] Installing method forwarding rules for modern subscript syntax");
+  
+  if (m_forwarding_initialized) {
+    return;
+  }
+  
+  // Modern NSArray subscript to traditional method forwarding
+  m_method_forwarding_rules.push_back({
+    "objectAtIndexedSubscript:",   // Modern method
+    "objectAtIndex:",              // Legacy method
+    "NSArray",                     // Class prefix
+    true                           // Enabled
+  });
+  
+  // Modern NSDictionary subscript to traditional method forwarding
+  m_method_forwarding_rules.push_back({
+    "objectForKeyedSubscript:",    // Modern method
+    "objectForKey:",               // Legacy method
+    "NSDictionary",                // Class prefix
+    true                           // Enabled
+  });
+  
+  // Also support mutable variants
+  m_method_forwarding_rules.push_back({
+    "objectAtIndexedSubscript:",
+    "objectAtIndex:",
+    "NSMutableArray",
+    true
+  });
+  
+  m_method_forwarding_rules.push_back({
+    "objectForKeyedSubscript:",
+    "objectForKey:",
+    "NSMutableDictionary",
+    true
+  });
+  
+  // Support GNUstep-specific class names
+  m_method_forwarding_rules.push_back({
+    "objectAtIndexedSubscript:",
+    "objectAtIndex:",
+    "GSArray",
+    true
+  });
+  
+  m_method_forwarding_rules.push_back({
+    "objectAtIndexedSubscript:",
+    "objectAtIndex:",
+    "GSMutableArray",
+    true
+  });
+  
+  m_method_forwarding_rules.push_back({
+    "objectForKeyedSubscript:",
+    "objectForKey:",
+    "GSDictionary",
+    true
+  });
+  
+  m_method_forwarding_rules.push_back({
+    "objectForKeyedSubscript:",
+    "objectForKey:",
+    "GSMutableDictionary",
+    true
+  });
+  
+  m_forwarding_initialized = true;
+  LLDB_LOGF(log, "[GNUstepObjCDeclVendor] Installed %zu method forwarding rules", 
+            m_method_forwarding_rules.size());
+}
+
+std::optional<std::string> GNUstepObjCDeclVendor::GetForwardingTarget(
+    const std::string &method_name, const std::string &class_name) {
+  Log *log(GetLog(LLDBLog::Expressions));
+  
+  if (!m_forwarding_initialized) {
+    InstallDefaultForwardingRules();
+  }
+  
+  // Check if this method should be forwarded
+  for (const auto &rule : m_method_forwarding_rules) {
+    if (!rule.enabled) {
+      continue;
+    }
+    
+    // Check if method matches
+    if (rule.modern_method != method_name) {
+      continue;
+    }
+    
+    // Check if class matches (support wildcard "*")
+    if (rule.class_prefix != "*" && class_name.find(rule.class_prefix) == std::string::npos) {
+      continue;
+    }
+    
+    LLDB_LOGF(log, "[GNUstepObjCDeclVendor] Found forwarding rule: %s->%s for class %s",
+              method_name.c_str(), rule.legacy_method.c_str(), class_name.c_str());
+    return rule.legacy_method;
+  }
+  
+  return std::nullopt;
+}
+
+bool GNUstepObjCDeclVendor::DoesClassRespondToSelector(const std::string &class_name,
+                                                       const std::string &selector_name) {
+  Log *log(GetLog(LLDBLog::Expressions));
+  
+  // Try to use runtime introspection to check if class responds to selector
+  // This is more reliable than just checking our static method tables
+  
+  // Get the GNUstep runtime for this check
+  GNUstepObjCRuntime *gnustep_runtime = 
+    static_cast<GNUstepObjCRuntime*>(&m_runtime);
+  if (!gnustep_runtime) {
+    LLDB_LOGF(log, "[GNUstepObjCDeclVendor] Could not get GNUstep runtime for selector check");
+    return false;
+  }
+  
+  auto *runtime_api = gnustep_runtime->GetRuntimeAPI();
+  if (!runtime_api) {
+    LLDB_LOGF(log, "[GNUstepObjCDeclVendor] Runtime API not available for selector check");
+    return false;
+  }
+  
+  // Use the optimized runtime API method for selector checking
+  bool responds = runtime_api->ClassRespondsToSelector(class_name, selector_name);
+  LLDB_LOGF(log, "[GNUstepObjCDeclVendor] Class %s %s to selector %s",
+            class_name.c_str(), responds ? "responds" : "does not respond", 
+            selector_name.c_str());
+  
+  return responds;
+}
+
+clang::ObjCMethodDecl *GNUstepObjCDeclVendor::ResolveMethodWithForwarding(
+    clang::ObjCInterfaceDecl *interface_decl,
+    const std::string &method_name,
+    const std::string &class_name,
+    bool is_instance) {
+  Log *log(GetLog(LLDBLog::Expressions));
+  
+  // SAFETY CHECK
+  if (!interface_decl) {
+    LLDB_LOGF(log, "[GNUstepObjCDeclVendor] ERROR: interface_decl is null in ResolveMethodWithForwarding");
+    return nullptr;
+  }
+  
+  LLDB_LOGF(log, "[GNUstepObjCDeclVendor] Resolving method %s for class %s (instance=%s)",
+            method_name.c_str(), class_name.c_str(), is_instance ? "YES" : "NO");
+  
+  // First, try to find the method directly
+  const FoundationMethodSignature *methods = nullptr;
+  for (int i = 0; foundation_class_methods[i].class_name; i++) {
+    if (class_name == foundation_class_methods[i].class_name) {
+      methods = foundation_class_methods[i].methods;
+      break;
+    }
+  }
+  
+  if (methods) {
+    // Check if the requested method exists in our static table
+    for (int i = 0; methods[i].name; i++) {
+      if (method_name == methods[i].name && is_instance == methods[i].is_instance) {
+        LLDB_LOGF(log, "[GNUstepObjCDeclVendor] Found method %s directly in static table", method_name.c_str());
+        return CreateMethodDecl(interface_decl, methods[i].name, methods[i].types, methods[i].is_instance);
+      }
+    }
+  }
+  
+  // Method not found directly, check if we should forward it
+  auto forwarding_target = GetForwardingTarget(method_name, class_name);
+  if (!forwarding_target) {
+    LLDB_LOGF(log, "[GNUstepObjCDeclVendor] No forwarding rule found for method %s in class %s",
+              method_name.c_str(), class_name.c_str());
+    return nullptr;
+  }
+  
+  // Check if the target method exists at runtime
+  if (!DoesClassRespondToSelector(class_name, *forwarding_target)) {
+    LLDB_LOGF(log, "[GNUstepObjCDeclVendor] Target method %s does not exist at runtime for class %s",
+              forwarding_target->c_str(), class_name.c_str());
+    return nullptr;
+  }
+  
+  // Find the target method signature
+  if (methods) {
+    for (int i = 0; methods[i].name; i++) {
+      if (*forwarding_target == methods[i].name && is_instance == methods[i].is_instance) {
+        LLDB_LOGF(log, "[GNUstepObjCDeclVendor] Creating forwarding method %s->%s for class %s",
+                  method_name.c_str(), forwarding_target->c_str(), class_name.c_str());
+        
+        // Create the method declaration using the original modern method name
+        // but with the same signature as the legacy method
+        return CreateMethodDecl(interface_decl, method_name.c_str(), methods[i].types, methods[i].is_instance);
+      }
+    }
+  }
+  
+  LLDB_LOGF(log, "[GNUstepObjCDeclVendor] Could not find signature for forwarding target %s",
+            forwarding_target->c_str());
+  return nullptr;
 }
 
 uint32_t GNUstepObjCDeclVendor::FindDecls(ConstString name, bool append,

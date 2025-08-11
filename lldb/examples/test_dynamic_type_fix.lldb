@@ -1,0 +1,38 @@
+#!/usr/bin/env lldb -s
+
+# Test script to validate GetDynamicTypeAndAddress fix for synthetic children
+file dict_test
+
+# Set breakpoint at the test point
+b dict_test.m:17
+
+# Run the program
+run
+
+# Enable logging to see GetDynamicTypeAndAddress calls
+log enable lldb process types
+
+# Test dictionary expansion - the key fix
+# This should now show proper NSString* and NSNumber* types instead of hex addresses
+print dict
+frame variable dict
+expr dict
+
+# Test synthetic children expansion - this is the critical test
+# Before: [0].key and [0].value showed as 0x7fff... hex addresses
+# After: They should show proper formatted strings/numbers
+print dict[0].key
+print dict[0].value
+print dict[1].key  
+print dict[1].value
+
+# Test more synthetic children
+print dict[2].key
+print dict[2].value
+print dict[3].key
+print dict[3].value
+
+# Check if formatters are properly dispatched
+frame variable -A dict
+
+quit

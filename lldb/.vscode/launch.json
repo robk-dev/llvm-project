@@ -11,7 +11,7 @@
             "program": "${workspaceFolder}/examples/custom_class_test",
             "args": [],
             "cwd": "${workspaceFolder}",
-            "preLaunchTask": "build-all-tests",
+            "preLaunchTask": "build-all-examples",
             "initCommands": [
                 "log enable lldb formatters",
                 // "b main",
@@ -32,7 +32,7 @@
             "program": "${workspaceFolder}/examples/custom_class_test",
             "args": [],
             "cwd": "${workspaceFolder}",
-            "preLaunchTask": "build-custom-class-test",
+            "preLaunchTask": "build-all-examples",
             "initCommands": [
                 "log enable -f ${workspaceFolder}/lldb_full.log -v lldb all",
                 "log enable -f ${workspaceFolder}/lldb_language.log -v lldb language",
@@ -63,7 +63,7 @@
             "program": "${workspaceFolder}/examples/foundation_test_simple",
             "args": [],
             "cwd": "${workspaceFolder}/examples",
-            "preLaunchTask": "build-foundation-tests",
+            "preLaunchTask": "build-all-examples",
             "initCommands": [
                 // "log enable lldb formatters",
                 "settings set target.language objc",
@@ -71,181 +71,6 @@
                 "settings set target.process.stop-on-sharedlibrary-events false",
                 "settings set target.prefer-dynamic-value no-dynamic-values"
             ],
-            "env": {
-                "LD_LIBRARY_PATH": "/usr/local/lib:/home/robk/code/llvm-project/build/lib",
-                "PATH": "/home/robk/code/llvm-project/build/bin:${env:PATH}"
-            }
-        },
-        {
-            "type": "lldb",
-            "request": "launch",
-            "name": "🔤 Test NSString Formatters",
-            "program": "${workspaceFolder}/examples/string_test",
-            "args": [],
-            "cwd": "${workspaceFolder}/examples",
-            "preLaunchTask": "build-string-tests",
-            "env": {
-                "LD_LIBRARY_PATH": "/usr/local/lib:/home/robk/code/llvm-project/build/lib",
-                "PATH": "/home/robk/code/llvm-project/build/bin:${env:PATH}"
-            }
-        },
-        {
-            "type": "lldb",
-            "request": "launch",
-            "name": "🔢 Test NSNumber Formatters",
-            "program": "${workspaceFolder}/examples/test_nsnumber_comprehensive",
-            "args": [],
-            "cwd": "${workspaceFolder}/examples",
-            "preLaunchTask": "build-number-tests",
-            "env": {
-                "LD_LIBRARY_PATH": "/usr/local/lib:/home/robk/code/llvm-project/build/lib",
-                "PATH": "/home/robk/code/llvm-project/build/bin:${env:PATH}"
-            }
-        },
-        {
-            "type": "lldb",
-            "request": "launch",
-            "name": "📊 Test Collection Formatters",
-            "program": "${workspaceFolder}/examples/test_collections_formatter",
-            "args": [],
-            "cwd": "${workspaceFolder}/examples",
-            "preLaunchTask": "build-collection-tests",
-            "env": {
-                "LD_LIBRARY_PATH": "/usr/local/lib:/home/robk/code/llvm-project/build/lib",
-                "PATH": "/home/robk/code/llvm-project/build/bin:${env:PATH}"
-            }
-        },
-        {
-            "type": "lldb",
-            "request": "launch",
-            "name": "📅 Test NSDate Formatter",
-            "program": "${workspaceFolder}/examples/test_date",
-            "args": [],
-            "cwd": "${workspaceFolder}/examples",
-            "preLaunchTask": "build-date-test",
-            "env": {
-                "LD_LIBRARY_PATH": "/usr/local/lib:/home/robk/code/llvm-project/build/lib",
-                "PATH": "/home/robk/code/llvm-project/build/bin:${env:PATH}"
-            }
-        },
-        {
-            "type": "lldb",
-            "request": "launch",
-            "name": "🔗 Test NSURL Formatter",
-            "program": "${workspaceFolder}/examples/test_url",
-            "args": [],
-            "cwd": "${workspaceFolder}/examples",
-            "preLaunchTask": "build-url-test",
-            "env": {
-                "LD_LIBRARY_PATH": "/usr/local/lib:/home/robk/code/llvm-project/build/lib",
-                "PATH": "/home/robk/code/llvm-project/build/bin:${env:PATH}"
-            }
-        },
-        {
-            "type": "lldb",
-            "request": "launch",
-            "name": "❌ Test NSError Formatter",
-            "program": "${workspaceFolder}/examples/error_test",
-            "args": [],
-            "cwd": "${workspaceFolder}/examples",
-            "preLaunchTask": "build-error-test",
-            "env": {
-                "LD_LIBRARY_PATH": "/usr/local/lib:/home/robk/code/llvm-project/build/lib",
-                "PATH": "/home/robk/code/llvm-project/build/bin:${env:PATH}"
-            }
-        },
-        {
-            "type": "lldb",
-            "request": "launch",
-            "name": "📦 Test NSData Formatter",
-            "program": "${workspaceFolder}/examples/test_data",
-            "args": [],
-            "cwd": "${workspaceFolder}/examples",
-            "preLaunchTask": "build-data-test",
-            "env": {
-                "LD_LIBRARY_PATH": "/usr/local/lib:/home/robk/code/llvm-project/build/lib",
-                "PATH": "/home/robk/code/llvm-project/build/bin:${env:PATH}"
-            }
-        },
-        {
-            "type": "lldb",
-            "request": "launch",
-            "name": "🆔 Test NSUUID Formatter",
-            "program": "${workspaceFolder}/examples/test_uuid",
-            "args": [],
-            "cwd": "${workspaceFolder}/examples",
-            "preLaunchTask": "build-uuid-test",
-            "env": {
-                "LD_LIBRARY_PATH": "/usr/local/lib:/home/robk/code/llvm-project/build/lib",
-                "PATH": "/home/robk/code/llvm-project/build/bin:${env:PATH}"
-            }
-        },
-        {
-            "type": "lldb",
-            "request": "launch",
-            "name": "🔢 Test NSIndexSet Formatter",
-            "program": "${workspaceFolder}/examples/test_indexset",
-            "args": [],
-            "cwd": "${workspaceFolder}/examples",
-            "preLaunchTask": "build-indexset-test",
-            "env": {
-                "LD_LIBRARY_PATH": "/usr/local/lib:/home/robk/code/llvm-project/build/lib",
-                "PATH": "/home/robk/code/llvm-project/build/bin:${env:PATH}"
-            }
-        },
-        {
-            "type": "lldb",
-            "request": "launch",
-            "name": "📝 Test NSCharacterSet Formatter",
-            "program": "${workspaceFolder}/examples/test_characterset",
-            "args": [],
-            "cwd": "${workspaceFolder}/examples",
-            "preLaunchTask": "build-characterset-test",
-            "env": {
-                "LD_LIBRARY_PATH": "/usr/local/lib:/home/robk/code/llvm-project/build/lib",
-                "PATH": "/home/robk/code/llvm-project/build/bin:${env:PATH}"
-            }
-        },
-        {
-            "type": "lldb",
-            "request": "launch",
-            "name": "💠 Test NSDecimalNumber Formatter",
-            "program": "${workspaceFolder}/examples/test_decimalnumber",
-            "args": [],
-            "cwd": "${workspaceFolder}/examples",
-            "preLaunchTask": "build-decimalnumber-test",
-            "env": {
-                "LD_LIBRARY_PATH": "/usr/local/lib:/home/robk/code/llvm-project/build/lib",
-                "PATH": "/home/robk/code/llvm-project/build/bin:${env:PATH}"
-            }
-        },
-        // ============================================
-        // SYNTHETIC CHILDREN TESTS
-        // ============================================
-        {
-            "type": "lldb",
-            "request": "launch",
-            "name": "🧩 Test Synthetic Children",
-            "program": "${workspaceFolder}/examples/test_synthetic_children",
-            "args": [],
-            "cwd": "${workspaceFolder}/examples",
-            "preLaunchTask": "build-synthetic-tests",
-            "env": {
-                "LD_LIBRARY_PATH": "/usr/local/lib:/home/robk/code/llvm-project/build/lib",
-                "PATH": "/home/robk/code/llvm-project/build/bin:${env:PATH}"
-            }
-        },
-        // ============================================
-        // CUSTOM CLASS TESTS
-        // ============================================
-        {
-            "type": "lldb",
-            "request": "launch",
-            "name": "🏦 Test BankAccount Custom Class",
-            "program": "${workspaceFolder}/examples/custom_class_test",
-            "args": [],
-            "cwd": "${workspaceFolder}/examples",
-            "preLaunchTask": "build-custom-class-test",
             "env": {
                 "LD_LIBRARY_PATH": "/usr/local/lib:/home/robk/code/llvm-project/build/lib",
                 "PATH": "/home/robk/code/llvm-project/build/bin:${env:PATH}"
@@ -264,7 +89,7 @@
                 "--gtest_filter=*"
             ],
             "cwd": "/home/robk/code/llvm-project/build/tools/lldb/unittests/Language/ObjC/GNUstep",
-            "preLaunchTask": "build-unit-tests",
+            "preLaunchTask": "build-all-examples",
             "MIMode": "gdb",
             "setupCommands": [
                 {
@@ -301,9 +126,9 @@
                 "."
             ],
             "cwd": "/home/robk/code/llvm-project/build/tools/lldb/test/API",
-            "preLaunchTask": "build-api-tests",
+            "preLaunchTask": "build-all-examples",
             "env": {
-                "LD_LIBRARY_PATH": "/usr/local/lib:/home/robk/code/llvm-project/build/lib:/home/robk/code/llvm-project/build/lib",
+                "LD_LIBRARY_PATH": "/usr/local/lib:/home/robk/code/llvm-project/build/lib:/home/robk/code/llvm-project/build",
                 "PATH": "/home/robk/code/llvm-project/build/bin:/home/robk/code/llvm-project/build/bin:${env:PATH}",
                 "LLDB_TEST": "/home/robk/code/llvm-project/build/bin/lldb"
             },
@@ -327,7 +152,7 @@
                 "."
             ],
             "cwd": "/home/robk/code/llvm-project/build/tools/lldb/test/API",
-            "preLaunchTask": "build-api-tests",
+            "preLaunchTask": "build-all-examples",
             "env": {
                 "LD_LIBRARY_PATH": "/usr/local/lib:/home/robk/code/llvm-project/build/lib:/home/robk/code/llvm-project/build/lib",
                 "PATH": "/home/robk/code/llvm-project/build/bin:/home/robk/code/llvm-project/build/bin:${env:PATH}",
@@ -339,31 +164,190 @@
                 "panel": "shared"
             }
         },
-        // ============================================
-        // DEBUGGING HELPERS
-        // ============================================
-        {
-            "type": "lldb",
-            "request": "launch",
-            "name": "🐛 Debug Current Test File",
-            "program": "${workspaceFolder}/examples/${fileBasenameNoExtension}",
-            "args": [],
-            "cwd": "${workspaceFolder}/examples",
-            "preLaunchTask": "build-current-test",
-            "env": {
-                "LD_LIBRARY_PATH": "/usr/local/lib:/home/robk/code/llvm-project/build/lib",
-                "PATH": "/home/robk/code/llvm-project/build/bin:${env:PATH}"
-            }
-        },
-        {
-            "type": "lldb",
-            "request": "attach",
-            "name": "📎 Attach to Process",
-            "pid": "${command:pickProcess}",
-            "env": {
-                "LD_LIBRARY_PATH": "/usr/local/lib:/home/robk/code/llvm-project/build/lib",
-                "PATH": "/home/robk/code/llvm-project/build/bin:${env:PATH}"
-            }
-        }
+        // {
+        //     "type": "lldb",
+        //     "request": "launch",
+        //     "name": "🔤 Test NSString Formatters",
+        //     "program": "${workspaceFolder}/examples/string_test",
+        //     "args": [],
+        //     "cwd": "${workspaceFolder}/examples",
+        //     "preLaunchTask": "build-all-examples",
+        //     "env": {
+        //         "LD_LIBRARY_PATH": "/usr/local/lib:/home/robk/code/llvm-project/build/lib",
+        //         "PATH": "/home/robk/code/llvm-project/build/bin:${env:PATH}"
+        //     }
+        // },
+        // {
+        //     "type": "lldb",
+        //     "request": "launch",
+        //     "name": "🔢 Test NSNumber Formatters",
+        //     "program": "${workspaceFolder}/examples/test_nsnumber_comprehensive",
+        //     "args": [],
+        //     "cwd": "${workspaceFolder}/examples",
+        //     "preLaunchTask": "build-all-examples",
+        //     "env": {
+        //         "LD_LIBRARY_PATH": "/usr/local/lib:/home/robk/code/llvm-project/build/lib",
+        //         "PATH": "/home/robk/code/llvm-project/build/bin:${env:PATH}"
+        //     }
+        // },
+        // {
+        //     "type": "lldb",
+        //     "request": "launch",
+        //     "name": "📊 Test Collection Formatters",
+        //     "program": "${workspaceFolder}/examples/test_collections_formatter",
+        //     "args": [],
+        //     "cwd": "${workspaceFolder}/examples",
+        //     "preLaunchTask": "build-all-examples",
+        //     "env": {
+        //         "LD_LIBRARY_PATH": "/usr/local/lib:/home/robk/code/llvm-project/build/lib",
+        //         "PATH": "/home/robk/code/llvm-project/build/bin:${env:PATH}"
+        //     }
+        // },
+        // {
+        //     "type": "lldb",
+        //     "request": "launch",
+        //     "name": "📅 Test NSDate Formatter",
+        //     "program": "${workspaceFolder}/examples/test_date",
+        //     "args": [],
+        //     "cwd": "${workspaceFolder}/examples",
+        //     "preLaunchTask": "build-all-examples",
+        //     "env": {
+        //         "LD_LIBRARY_PATH": "/usr/local/lib:/home/robk/code/llvm-project/build/lib",
+        //         "PATH": "/home/robk/code/llvm-project/build/bin:${env:PATH}"
+        //     }
+        // },
+        // {
+        //     "type": "lldb",
+        //     "request": "launch",
+        //     "name": "🔗 Test NSURL Formatter",
+        //     "program": "${workspaceFolder}/examples/test_url",
+        //     "args": [],
+        //     "cwd": "${workspaceFolder}/examples",
+        //     "preLaunchTask": "build-all-examples",
+        //     "env": {
+        //         "LD_LIBRARY_PATH": "/usr/local/lib:/home/robk/code/llvm-project/build/lib",
+        //         "PATH": "/home/robk/code/llvm-project/build/bin:${env:PATH}"
+        //     }
+        // },
+        // {
+        //     "type": "lldb",
+        //     "request": "launch",
+        //     "name": "❌ Test NSError Formatter",
+        //     "program": "${workspaceFolder}/examples/error_test",
+        //     "args": [],
+        //     "cwd": "${workspaceFolder}/examples",
+        //     "preLaunchTask": "build-all-examples",
+        //     "env": {
+        //         "LD_LIBRARY_PATH": "/usr/local/lib:/home/robk/code/llvm-project/build/lib",
+        //         "PATH": "/home/robk/code/llvm-project/build/bin:${env:PATH}"
+        //     }
+        // },
+        // {
+        //     "type": "lldb",
+        //     "request": "launch",
+        //     "name": "📦 Test NSData Formatter",
+        //     "program": "${workspaceFolder}/examples/test_data",
+        //     "args": [],
+        //     "cwd": "${workspaceFolder}/examples",
+        //     "preLaunchTask": "build-all-examples",
+        //     "env": {
+        //         "LD_LIBRARY_PATH": "/usr/local/lib:/home/robk/code/llvm-project/build/lib",
+        //         "PATH": "/home/robk/code/llvm-project/build/bin:${env:PATH}"
+        //     }
+        // },
+        // {
+        //     "type": "lldb",
+        //     "request": "launch",
+        //     "name": "🆔 Test NSUUID Formatter",
+        //     "program": "${workspaceFolder}/examples/test_uuid",
+        //     "args": [],
+        //     "cwd": "${workspaceFolder}/examples",
+        //     "preLaunchTask": "build-all-examples",
+        //     "env": {
+        //         "LD_LIBRARY_PATH": "/usr/local/lib:/home/robk/code/llvm-project/build/lib",
+        //         "PATH": "/home/robk/code/llvm-project/build/bin:${env:PATH}"
+        //     }
+        // },
+        // {
+        //     "type": "lldb",
+        //     "request": "launch",
+        //     "name": "🔢 Test NSIndexSet Formatter",
+        //     "program": "${workspaceFolder}/examples/test_indexset",
+        //     "args": [],
+        //     "cwd": "${workspaceFolder}/examples",
+        //     "preLaunchTask": "build-all-examples",
+        //     "env": {
+        //         "LD_LIBRARY_PATH": "/usr/local/lib:/home/robk/code/llvm-project/build/lib",
+        //         "PATH": "/home/robk/code/llvm-project/build/bin:${env:PATH}"
+        //     }
+        // },
+        // {
+        //     "type": "lldb",
+        //     "request": "launch",
+        //     "name": "📝 Test NSCharacterSet Formatter",
+        //     "program": "${workspaceFolder}/examples/test_characterset",
+        //     "args": [],
+        //     "cwd": "${workspaceFolder}/examples",
+        //     "preLaunchTask": "build-all-examples",
+        //     "env": {
+        //         "LD_LIBRARY_PATH": "/usr/local/lib:/home/robk/code/llvm-project/build/lib",
+        //         "PATH": "/home/robk/code/llvm-project/build/bin:${env:PATH}"
+        //     }
+        // },
+        // {
+        //     "type": "lldb",
+        //     "request": "launch",
+        //     "name": "💠 Test NSDecimalNumber Formatter",
+        //     "program": "${workspaceFolder}/examples/test_decimalnumber",
+        //     "args": [],
+        //     "cwd": "${workspaceFolder}/examples",
+        //     "preLaunchTask": "build-all-examples",
+        //     "env": {
+        //         "LD_LIBRARY_PATH": "/usr/local/lib:/home/robk/code/llvm-project/build/lib",
+        //         "PATH": "/home/robk/code/llvm-project/build/bin:${env:PATH}"
+        //     }
+        // },
+        // // ============================================
+        // // SYNTHETIC CHILDREN TESTS
+        // // ============================================
+        // {
+        //     "type": "lldb",
+        //     "request": "launch",
+        //     "name": "🧩 Test Synthetic Children",
+        //     "program": "${workspaceFolder}/examples/test_synthetic_children",
+        //     "args": [],
+        //     "cwd": "${workspaceFolder}/examples",
+        //     "preLaunchTask": "build-all-examples",
+        //     "env": {
+        //         "LD_LIBRARY_PATH": "/usr/local/lib:/home/robk/code/llvm-project/build/lib",
+        //         "PATH": "/home/robk/code/llvm-project/build/bin:${env:PATH}"
+        //     }
+        // },
+        // // ============================================
+        // // DEBUGGING HELPERS
+        // // ============================================
+        // {
+        //     "type": "lldb",
+        //     "request": "launch",
+        //     "name": "🐛 Debug Current Test File",
+        //     "program": "${workspaceFolder}/examples/${fileBasenameNoExtension}",
+        //     "args": [],
+        //     "cwd": "${workspaceFolder}/examples",
+        //     "preLaunchTask": "build-all-examples",
+        //     "env": {
+        //         "LD_LIBRARY_PATH": "/usr/local/lib:/home/robk/code/llvm-project/build/lib",
+        //         "PATH": "/home/robk/code/llvm-project/build/bin:${env:PATH}"
+        //     }
+        // },
+        // {
+        //     "type": "lldb",
+        //     "request": "attach",
+        //     "name": "📎 Attach to Process",
+        //     "pid": "${command:pickProcess}",
+        //     "env": {
+        //         "LD_LIBRARY_PATH": "/usr/local/lib:/home/robk/code/llvm-project/build/lib",
+        //         "PATH": "/home/robk/code/llvm-project/build/bin:${env:PATH}"
+        //     }
+        // }
     ]
 }

@@ -1,0 +1,41 @@
+#!/usr/bin/env lldb -s
+# Comprehensive expression evaluation test to validate all fixes
+
+file expression_eval_regression_test
+breakpoint set -f expression_eval_regression_test.m -l 45
+run
+
+# === Test 1: Basic po commands (should use formatters correctly) ===
+echo "=== Test 1: Basic po commands ==="
+po customObj
+po testString
+po testNumber
+po testArray
+po testDate
+po nilString
+
+# === Test 2: Expression evaluation with method calls ===
+echo "=== Test 2: Expression evaluation with method calls ==="
+expr -T 2.0 -- [customObj getValue]
+expr -T 2.0 -- [customObj name]
+expr -T 2.0 -- (NSString*)[(id)customObj description]
+expr -T 2.0 -- [testArray objectAtIndex:0]
+expr -T 2.0 -- [testString length]
+
+# === Test 3: CreateObjectChecker validation ===  
+echo "=== Test 3: Object validation ==="
+expr -T 2.0 -- [customObj respondsToSelector:@selector(getValue)]
+expr -T 2.0 -- [testString respondsToSelector:@selector(length)]
+
+# === Test 4: Edge cases ===
+echo "=== Test 4: Edge cases ==="
+po nilString
+expr -T 2.0 -- [(id)nil description]
+
+# === Test 5: Complex expressions ===
+echo "=== Test 5: Complex expressions ==="
+expr -T 2.0 -- [customObj getValue] + 100
+expr -T 2.0 -- [[testArray objectAtIndex:0] length]
+
+continue
+quit
