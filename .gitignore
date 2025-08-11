@@ -76,5 +76,5 @@ pythonenv*
 
 /gnustep-*/
 /.ccache/
-/build-windows/
-./build-win*
+/**/build-windows/
+./build-win*/

@@ -27,7 +27,11 @@ configure_windows_build() {
     if [ ! -f "$python_executable" ]; then
         python_executable=$(which python3 || which python || echo "/ucrt64/bin/python.exe")
     fi
+    
+    # Convert Python path to Windows format for CMake
+    local python_win_path=$(cygpath -w "$python_executable" 2>/dev/null || echo "$python_executable")
     print_info "Using Python: $python_executable"
+    print_info "Windows Python path: $python_win_path"
     
     # Windows-specific CMake configuration
     local cmake_args=(
@@ -38,9 +42,11 @@ configure_windows_build() {
         "-DLLVM_BUILD_LLVM_DYLIB=OFF"  # Static linking on Windows
         "-DLLVM_LINK_LLVM_DYLIB=OFF"
         "-DLLDB_ENABLE_PYTHON=OFF"  # Disable Python bindings to avoid path issues
-        "-DLLDB_ENABLE_LIBEDIT=ON"
-        "-DPYTHON_EXECUTABLE=$python_executable"
+        "-DLLDB_ENABLE_LIBEDIT=OFF"  # Disable libedit to avoid compatibility issues
+        "-DPYTHON_EXECUTABLE=$python_win_path"
+        "-DCMAKE_MSYS_RUNTIME_PATH_RESOLUTION=1"  # Help CMake resolve MSYS paths
         "-DLLVM_ENABLE_ASSERTIONS=ON"
+        "-DBUILD_SHARED_LIBS=ON"
         "-DLLVM_ENABLE_ZLIB=ON"
         "-DLLVM_ENABLE_ZSTD=ON"
         "-DLLVM_ENABLE_LIBXML2=ON"
@@ -51,10 +57,6 @@ configure_windows_build() {
         "-DCMAKE_LINKER=lld"
         "-DLLVM_USE_LINKER=lld"
         "-DCMAKE_RC_COMPILER=windres"
-        # LibEdit configuration for MSYS2 paths
-        "-DLibEdit_INCLUDE_DIRS=/usr/include"
-        "-DLibEdit_LIBRARIES=/usr/lib/libedit.dll.a"
-        "-DCMAKE_PREFIX_PATH=/usr"
     )
     
     # Add ccache if available
