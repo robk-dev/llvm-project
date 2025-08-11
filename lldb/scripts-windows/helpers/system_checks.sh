@@ -248,7 +248,6 @@ install_windows_dependencies() {
     local llvm_packages=(
         mingw-w64-ucrt-x86_64-clang
         mingw-w64-ucrt-x86_64-lld
-        mingw-w64-ucrt-x86_64-libedit
         mingw-w64-ucrt-x86_64-libxml2
         mingw-w64-ucrt-x86_64-libffi
         mingw-w64-ucrt-x86_64-zlib
@@ -259,6 +258,18 @@ install_windows_dependencies() {
     )
     
     for pkg in "${llvm_packages[@]}"; do
+        print_progress "Installing $pkg..."
+        pacman -S --noconfirm --needed $pkg || print_warning "Failed to install $pkg"
+    done
+    
+    # Install libedit from MSYS repository (different from mingw-w64)
+    print_progress "Installing libedit libraries..."
+    local msys_packages=(
+        libedit
+        libedit-devel
+    )
+    
+    for pkg in "${msys_packages[@]}"; do
         print_progress "Installing $pkg..."
         pacman -S --noconfirm --needed $pkg || print_warning "Failed to install $pkg"
     done

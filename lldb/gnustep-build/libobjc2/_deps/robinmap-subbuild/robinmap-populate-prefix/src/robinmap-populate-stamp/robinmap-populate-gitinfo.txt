@@ -1,3 +1,0 @@
-repository='https://github.com/Tessil/robin-map/'
-module=''
-tag='origin'

@@ -16,6 +16,19 @@ configure_windows_build() {
     ensure_directory "$LLVM_BUILD_DIR/build" "build directory"
     cd "$LLVM_BUILD_DIR/build"
     
+    # Set up environment for finding MSYS2 libraries
+    export PKG_CONFIG_PATH="/usr/lib/pkgconfig:/ucrt64/lib/pkgconfig:$PKG_CONFIG_PATH"
+    export CMAKE_PREFIX_PATH="/usr:/ucrt64:$CMAKE_PREFIX_PATH"
+    print_info "PKG_CONFIG_PATH: $PKG_CONFIG_PATH"
+    print_info "CMAKE_PREFIX_PATH: $CMAKE_PREFIX_PATH"
+    
+    # Python configuration for MSYS2
+    local python_executable="/ucrt64/bin/python.exe"
+    if [ ! -f "$python_executable" ]; then
+        python_executable=$(which python3 || which python || echo "/ucrt64/bin/python.exe")
+    fi
+    print_info "Using Python: $python_executable"
+    
     # Windows-specific CMake configuration
     local cmake_args=(
         "-G" "Ninja"
@@ -24,8 +37,9 @@ configure_windows_build() {
         "-DLLVM_TARGETS_TO_BUILD=X86;AArch64"
         "-DLLVM_BUILD_LLVM_DYLIB=OFF"  # Static linking on Windows
         "-DLLVM_LINK_LLVM_DYLIB=OFF"
-        "-DLLDB_ENABLE_PYTHON=ON"
+        "-DLLDB_ENABLE_PYTHON=OFF"  # Disable Python bindings to avoid path issues
         "-DLLDB_ENABLE_LIBEDIT=ON"
+        "-DPYTHON_EXECUTABLE=$python_executable"
         "-DLLVM_ENABLE_ASSERTIONS=ON"
         "-DLLVM_ENABLE_ZLIB=ON"
         "-DLLVM_ENABLE_ZSTD=ON"
@@ -37,6 +51,10 @@ configure_windows_build() {
         "-DCMAKE_LINKER=lld"
         "-DLLVM_USE_LINKER=lld"
         "-DCMAKE_RC_COMPILER=windres"
+        # LibEdit configuration for MSYS2 paths
+        "-DLibEdit_INCLUDE_DIRS=/usr/include"
+        "-DLibEdit_LIBRARIES=/usr/lib/libedit.dll.a"
+        "-DCMAKE_PREFIX_PATH=/usr"
     )
     
     # Add ccache if available
