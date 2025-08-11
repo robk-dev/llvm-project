@@ -882,11 +882,52 @@ static std::string GetTaggedPointerSummary(Process *process, lldb::addr_t tagged
     }
   }
   
-  // GSTaggedNumber (tag 1 or 3)
-  if (tag == 1 || tag == 3) {
-    // For tagged numbers, extract the value
-    int64_t value = (int64_t)(tagged_ptr >> 3);  // Remove tag bits
-    return std::to_string(value);
+  // GSTaggedNumber (tag 1, 2, 3, or 5)
+  if (tag == 1 || tag == 2 || tag == 3 || tag == 5) {
+    const int SMALL_OBJECT_SHIFT = 3;
+    
+    if (tag == 1) {
+      // NSSmallInt - integer value is ptr >> 3
+      int64_t int_value = ((int64_t)tagged_ptr) >> SMALL_OBJECT_SHIFT;
+      return std::to_string(int_value);
+    } else if (tag == 5) {
+      // NSSmallFloat
+      union {
+        uint64_t bits;
+        double d;
+      } converter;
+      converter.bits = tagged_ptr & ~0x7ULL;  // Clear tag bits
+      float float_value = (float)converter.d;
+      
+      // Format float with minimal precision for inline display
+      char buffer[32];
+      snprintf(buffer, sizeof(buffer), "%.6g", float_value);
+      return std::string(buffer);
+    } else if (tag == 2) {
+      // NSSmallExtendedDouble
+      uint64_t mask = tagged_ptr & 8;
+      union {
+        uint64_t bits;
+        double d;
+      } converter;
+      converter.bits = (tagged_ptr & ~7ULL) | (mask >> 1) | (mask >> 2) | (mask >> 3);
+      
+      char buffer[32];
+      snprintf(buffer, sizeof(buffer), "%.6g", converter.d);
+      return std::string(buffer);
+    } else if (tag == 3) {
+      // NSSmallRepeatingDouble
+      uint64_t mask = tagged_ptr & 56;
+      union {
+        uint64_t bits;
+        double d;
+      } converter;
+      converter.bits = (tagged_ptr & ~7ULL) | (mask >> 3);
+      
+      char buffer[32];
+      snprintf(buffer, sizeof(buffer), "%.6g", converter.d);
+      return std::string(buffer);
+    }
   }
   
   // Other tagged types - show raw value for debugging

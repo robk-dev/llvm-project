@@ -126,21 +126,24 @@ void GNUstepFormattersRegistry::RegisterStringFormatters(TypeCategoryImpl &categ
       
   category.AddTypeSynthetic("id", eFormatterMatchExact, id_synth);
   
-  // Register synthetic children provider for GSCInlineString to show proper field expansion
-  SyntheticChildren::Flags inline_string_synth_flags;
-  inline_string_synth_flags.SetCascades(true)
-                           .SetSkipPointers(false)
-                           .SetSkipReferences(false)
-                           .SetNonCacheable(false);
-                           
-  auto inline_string_synth = std::make_shared<CXXSyntheticChildren>(
-      inline_string_synth_flags, "GSCInlineString synthetic children", 
-      GSCInlineStringSyntheticFrontEndCreator);
-      
-  category.AddTypeSynthetic("GSCInlineString", eFormatterMatchExact, inline_string_synth);
-  category.AddTypeSynthetic("GSUInlineString", eFormatterMatchExact, inline_string_synth);
-  category.AddTypeSynthetic("GSCInlineString *", eFormatterMatchExact, inline_string_synth);
-  category.AddTypeSynthetic("GSUInlineString *", eFormatterMatchExact, inline_string_synth);
+  // DISABLED: GSCInlineString synthetic provider causes hanging
+  // The synthetic provider was creating recursion/hanging issues when
+  // GSCInlineString objects appear in collections. Disabled until proper fix.
+  //
+  // SyntheticChildren::Flags inline_string_synth_flags;
+  // inline_string_synth_flags.SetCascades(true)
+  //                          .SetSkipPointers(false)
+  //                          .SetSkipReferences(false)
+  //                          .SetNonCacheable(false);
+  //                          
+  // auto inline_string_synth = std::make_shared<CXXSyntheticChildren>(
+  //     inline_string_synth_flags, "GSCInlineString synthetic children", 
+  //     GSCInlineStringSyntheticFrontEndCreator);
+  //     
+  // category.AddTypeSynthetic("GSCInlineString", eFormatterMatchExact, inline_string_synth);
+  // category.AddTypeSynthetic("GSUInlineString", eFormatterMatchExact, inline_string_synth);
+  // category.AddTypeSynthetic("GSCInlineString *", eFormatterMatchExact, inline_string_synth);
+  // category.AddTypeSynthetic("GSUInlineString *", eFormatterMatchExact, inline_string_synth);
   
   // NOTE: Generic synthetic providers moved to RegisterGenericFormatter()
   // to ensure they don't override specific formatters

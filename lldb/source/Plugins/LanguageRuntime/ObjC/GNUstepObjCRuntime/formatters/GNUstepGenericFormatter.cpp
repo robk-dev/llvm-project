@@ -985,6 +985,24 @@ lldb::ValueObjectSP GNUstepGenericObjectSyntheticProvider::GetChildAtIndex(uint3
         case '*':
           ivar_type = type_system->GetBasicTypeFromAST(eBasicTypeChar).GetPointerType();
           break;
+        case 's':
+          ivar_type = type_system->GetBasicTypeFromAST(eBasicTypeShort);
+          break;
+        case 'S':
+          ivar_type = type_system->GetBasicTypeFromAST(eBasicTypeUnsignedShort);
+          break;
+        case 'B':
+          ivar_type = type_system->GetBasicTypeFromAST(eBasicTypeBool);
+          break;
+        case 'v':
+          ivar_type = type_system->GetBasicTypeFromAST(eBasicTypeVoid);
+          break;
+        case '#':
+          ivar_type = type_system->GetBasicTypeFromAST(eBasicTypeObjCClass);
+          break;
+        case ':':
+          ivar_type = type_system->GetBasicTypeFromAST(eBasicTypeObjCSel);
+          break;
         default:
           // For unknown types, use void*
           ivar_type = type_system->GetBasicTypeFromAST(eBasicTypeVoid).GetPointerType();
@@ -1027,10 +1045,6 @@ lldb::ValueObjectSP GNUstepGenericObjectSyntheticProvider::GetChildAtIndex(uint3
     DataBufferSP data_buffer_sp(new DataBufferHeap(&obj_ptr, sizeof(obj_ptr)));
     DataExtractor data(data_buffer_sp, m_process->GetByteOrder(), m_process->GetAddressByteSize());
     lldb::ValueObjectSP result = ValueObject::CreateValueObjectFromData(ivar.name, data, exe_ctx, ivar_type);
-    
-    if (result) {
-      // Created ValueObject for object ivar
-    }
     
     // CRITICAL FIX: Cache the result to avoid recreation
     if (result) {

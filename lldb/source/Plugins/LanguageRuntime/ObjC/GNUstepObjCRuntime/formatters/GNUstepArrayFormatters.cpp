@@ -416,8 +416,8 @@ std::string GNUstepNSArraySummaryProvider::GetElementSummary(Process *process, l
       return "";
     }
     
-    if (tag == 1 || tag == 3) {
-      // Tagged number - decode it properly
+    if (tag == 1 || tag == 2 || tag == 3 || tag == 5) {
+      // Tagged number - decode it properly (int, doubles, float)
       std::string decoded = DecodeTaggedNumberOptimized(element_addr);
       context.ExitObject(element_addr);
       return decoded.empty() ? "<NSNumber>" : decoded;
@@ -946,11 +946,11 @@ std::string GetTaggedPointerSummary(Process *process, lldb::addr_t tagged_ptr) {
     }
   }
   
-  // GSTaggedNumber (tag 1 or 3)
-  if (tag == 1 || tag == 3) {
-    // For tagged numbers, extract the value
-    int64_t value = (int64_t)(tagged_ptr >> 3);  // Remove tag bits
-    return std::to_string(value);
+  // GSTaggedNumber (tag 1, 2, 3, or 5)
+  if (tag == 1 || tag == 2 || tag == 3 || tag == 5) {
+    // Use the optimized tagged number decoder for all number types
+    std::string decoded = DecodeTaggedNumberOptimized(tagged_ptr);
+    return decoded.empty() ? llvm::formatv("<tagged_number:tag={0}>", tag) : decoded;
   }
   
   // Other tagged types - show raw value for debugging
