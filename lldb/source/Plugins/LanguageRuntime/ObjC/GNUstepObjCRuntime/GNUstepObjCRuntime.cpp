@@ -22,6 +22,7 @@
 #include "lldb/Target/ExecutionContext.h"
 #include "lldb/Target/Process.h"
 #include "lldb/Target/Target.h"
+#include "lldb/Target/ThreadPlanStepOut.h"
 #include "lldb/Utility/StreamString.h"
 #include "lldb/Utility/LLDBLog.h"
 #include "lldb/Utility/Log.h"
@@ -172,34 +173,155 @@ llvm::Error GNUstepObjCRuntime::GetObjectDescription(Stream &str,
   Log *log = GetLog(LLDBLog::Process | LLDBLog::Types);
   LLDB_LOG(log, "GNUstepObjCRuntime::GetObjectDescription called");
   
-  if (!m_introspector_up)
-    return llvm::createStringError(llvm::inconvertibleErrorCode(), "No introspector available");
+  CompilerType compiler_type(object.GetCompilerType());
+  bool is_signed;
+  // ObjC objects can only be pointers (or numbers that actually represent
+  // pointers but haven't been typecast, because reasons..)
+  if (!compiler_type.IsIntegerType(is_signed) && !compiler_type.IsPointerType())
+    return llvm::createStringError(llvm::inconvertibleErrorCode(), "not a pointer type");
 
-  // Get the ISA
-  lldb::addr_t isa_addr = object.GetPointerValue();
-  if (isa_addr == LLDB_INVALID_ADDRESS)
-    return llvm::createStringError(llvm::inconvertibleErrorCode(), "Invalid object address");
+  // Make the argument list: we pass one arg, the address of our pointer, to
+  // the print function.
+  Value val;
 
-  // Get the class name from the introspector
-  std::string class_name = m_introspector_up->GetClassName(isa_addr);
+  if (!object.ResolveValue(val.GetScalar()))
+    return llvm::createStringError(llvm::inconvertibleErrorCode(), "pointer value could not be resolved");
 
-  if (class_name.empty())
-    return llvm::createStringError(llvm::inconvertibleErrorCode(), "Could not determine class name");
-
-  str.Printf("(%s *) 0x%" PRIx64, class_name.c_str(), object.GetPointerValue());
-  LLDB_LOG(log, "GNUstepObjCRuntime: Formatted object as ({0} *) 0x{1:x}", 
-           class_name.c_str(), object.GetPointerValue());
-  return llvm::Error::success();
+  ExecutionContext exe_ctx(object.GetExecutionContextRef());
+  if (!exe_ctx.HasProcessScope()) {
+    exe_ctx.SetContext(object.GetTargetSP(), true);
+    if (!exe_ctx.HasProcessScope())
+      return llvm::createStringError(llvm::inconvertibleErrorCode(), "no process");
+  }
+  
+  return GetObjectDescription(str, val, exe_ctx.GetBestExecutionContextScope());
 }
 
 llvm::Error GNUstepObjCRuntime::GetObjectDescription(
     Stream &str, Value &value, ExecutionContextScope *exe_scope) {
-  // This version is less critical for now, just return a simple implementation
+  Log *log = GetLog(LLDBLog::Process | LLDBLog::Types);
+  LLDB_LOG(log, "GNUstepObjCRuntime::GetObjectDescription(Value&) called");
+  
+  if (!exe_scope)
+    return llvm::createStringError(llvm::inconvertibleErrorCode(), "no execution context scope");
+    
   if (value.GetValueType() != Value::ValueType::Scalar)
     return llvm::createStringError(llvm::inconvertibleErrorCode(), "Value is not scalar");
 
-  // For now, just print the raw value since creating ValueObject is complex
-  str.Printf("GNUstep object at 0x%" PRIx64, (uint64_t)value.GetScalar().ULongLong());
+  ExecutionContext exe_ctx;
+  exe_scope->CalculateExecutionContext(exe_ctx);
+  Process *process = exe_ctx.GetProcessPtr();
+  if (!process)
+    return llvm::createStringError(llvm::inconvertibleErrorCode(), "no process");
+
+  Target *target = exe_ctx.GetTargetPtr();
+  if (!target)
+    return llvm::createStringError(llvm::inconvertibleErrorCode(), "no target");
+
+  // We need other parts of the exe_ctx, but the processes have to match.
+  assert(m_process == process);
+
+  // Get the object pointer value
+  lldb::addr_t object_ptr = value.GetScalar().ULongLong(LLDB_INVALID_ADDRESS);
+  if (object_ptr == 0 || object_ptr == LLDB_INVALID_ADDRESS) {
+    str.Printf("nil");
+    return llvm::Error::success();
+  }
+
+  LLDB_LOG(log, "GNUstepObjCRuntime: Attempting to get description for object at 0x{0:x}", object_ptr);
+
+  // Basic validation using introspector if available
+  if (m_introspector_up && !m_introspector_up->IsValidObjectPointer(object_ptr)) {
+    LLDB_LOG(log, "GNUstepObjCRuntime: Object pointer 0x{0:x} failed validation", object_ptr);
+    return llvm::createStringError(llvm::inconvertibleErrorCode(), "invalid object pointer");
+  }
+
+  // Prepare the execution context
+  if (!exe_ctx.GetFramePtr()) {
+    Thread *thread = exe_ctx.GetThreadPtr();
+    if (thread == nullptr) {
+      exe_ctx.SetThreadSP(process->GetThreadList().GetSelectedThread());
+      thread = exe_ctx.GetThreadPtr();
+    }
+    if (thread) {
+      exe_ctx.SetFrameSP(thread->GetSelectedFrame(DoNoSelectMostRelevantFrame));
+    }
+  }
+
+  // Progressive restoration of expression evaluation with proper error handling and timeouts
+  LLDB_LOG(log, "GNUstepObjCRuntime: Attempting safe expression evaluation with timeouts");
+
+  // Try expression evaluation first - it's more reliable than introspector for regular objects
+  std::string class_name;
+
+  // Try expression evaluation for -description method with safety measures
+  if (exe_ctx.GetFramePtr()) {
+    EvaluateExpressionOptions options;
+    options.SetUnwindOnError(true);
+    options.SetIgnoreBreakpoints(true);
+    options.SetTryAllThreads(false); // Only current thread for safety
+    options.SetTimeout(std::chrono::milliseconds(1000)); // Short 1-second timeout
+    options.SetSuppressPersistentResult(true);
+    options.SetKeepInMemory(false);
+    options.SetUseDynamic(lldb::eDynamicCanRunTarget);
+
+    // Try calling -description method - cast to NSString* to help LLDB resolve method signature
+    char expr[256];
+    snprintf(expr, sizeof(expr), "(NSString*)[(id)0x%" PRIx64 " description]", object_ptr);
+    
+    ValueObjectSP result_sp;
+    ExpressionResults expr_result = target->EvaluateExpression(
+        expr, exe_ctx.GetFramePtr(), result_sp, options);
+    
+    if (expr_result == eExpressionCompleted && result_sp) {
+      // The result is an NSString object, we need to call UTF8String on it to get the C string
+      addr_t nsstring_addr = result_sp->GetValueAsUnsigned(0);
+      if (nsstring_addr != 0 && nsstring_addr != LLDB_INVALID_ADDRESS) {
+        // Call UTF8String method on the NSString to get char*
+        char utf8_expr[256];
+        snprintf(utf8_expr, sizeof(utf8_expr), "(char*)[(id)0x%" PRIx64 " UTF8String]", nsstring_addr);
+        
+        ValueObjectSP utf8_result_sp;
+        ExpressionResults utf8_expr_result = target->EvaluateExpression(
+            utf8_expr, exe_ctx.GetFramePtr(), utf8_result_sp, options);
+        
+        if (utf8_expr_result == eExpressionCompleted && utf8_result_sp) {
+          addr_t cstring_addr = utf8_result_sp->GetValueAsUnsigned(0);
+          if (cstring_addr != 0 && cstring_addr != LLDB_INVALID_ADDRESS) {
+            // Read the C string
+            Status read_error;
+            char desc_buffer[1024];
+            size_t bytes_read = process->ReadCStringFromMemory(cstring_addr, desc_buffer, sizeof(desc_buffer), read_error);
+            
+            if (read_error.Success() && bytes_read > 0) {
+              str.Printf("%s", desc_buffer);
+              LLDB_LOG(log, "GNUstepObjCRuntime: Successfully got description via expression evaluation: {0}", desc_buffer);
+              return llvm::Error::success();
+            }
+          }
+        }
+        LLDB_LOG(log, "GNUstepObjCRuntime: Failed to get UTF8String from description NSString");
+      }
+    } else {
+      LLDB_LOG(log, "GNUstepObjCRuntime: Expression evaluation failed or timed out: result={0}", (int)expr_result);
+    }
+  }
+
+  // Fallback: try to get class name using introspector
+  if (m_introspector_up) {
+    class_name = m_introspector_up->GetClassName(object_ptr);
+    if (!class_name.empty()) {
+      str.Printf("(%s *) 0x%" PRIx64, class_name.c_str(), object_ptr);
+      LLDB_LOG(log, "GNUstepObjCRuntime: Using introspector class name fallback: {0}", class_name);
+      return llvm::Error::success();
+    }
+  }
+
+  // Final safe fallback - raw address
+  str.Printf("GNUstep object at 0x%" PRIx64, object_ptr);
+  LLDB_LOG(log, "GNUstepObjCRuntime: Using final raw address fallback");
+  
+  
   return llvm::Error::success();
 }
 
@@ -216,8 +338,24 @@ bool GNUstepObjCRuntime::GetDynamicTypeAndAddress(ValueObject &in_value,
     return false;
   }
   
-  // Get the runtime class name
-  std::string class_name = m_introspector_up->GetClassNameFromObject(in_value);
+  // Get the object address first to check for tagged pointers
+  lldb::addr_t object_addr = in_value.GetPointerValue();
+  if (object_addr == 0 || object_addr == LLDB_INVALID_ADDRESS) {
+    LLDB_LOG(log, "Invalid object address");
+    return false;
+  }
+  
+  // Check if this is a tagged pointer - they need special handling
+  std::string class_name;
+  if (m_introspector_up->IsTaggedPointer(object_addr)) {
+    // For tagged pointers, get the class name directly using runtime functions
+    class_name = m_introspector_up->GetTaggedPointerClassName(object_addr);
+    LLDB_LOG(log, "Tagged pointer detected, class: {0}", class_name);
+  } else {
+    // For regular objects, use normal ISA resolution
+    class_name = m_introspector_up->GetClassNameFromObject(in_value);
+  }
+  
   if (class_name.empty()) {
     LLDB_LOG(log, "Could not get class name from object");
     return false;
@@ -228,8 +366,7 @@ bool GNUstepObjCRuntime::GetDynamicTypeAndAddress(ValueObject &in_value,
   // Set the class name in the result
   class_type_or_name.SetName(ConstString(class_name));
   
-  // Get the object address
-  lldb::addr_t object_addr = in_value.GetPointerValue();
+  // object_addr is already defined above, no need to redeclare
   if (object_addr == LLDB_INVALID_ADDRESS || object_addr == 0) {
     LLDB_LOG(log, "Invalid object address");
     return false;
@@ -321,10 +458,111 @@ GNUstepObjCRuntime::CreateExceptionResolver(const lldb::BreakpointSP &bkpt,
 
 lldb::ThreadPlanSP GNUstepObjCRuntime::GetStepThroughTrampolinePlan(Thread &thread,
                                                                     bool stop_others) {
-  // Stub implementation
   Log *log = GetLog(LLDBLog::Step);
   LLDB_LOG(log, "GNUstepObjCRuntime::GetStepThroughTrampolinePlan called");
-  return nullptr;
+  
+  // Get the current thread's stack frame
+  StackFrameSP frame_sp = thread.GetStackFrameAtIndex(0);
+  if (!frame_sp) {
+    LLDB_LOG(log, "No current stack frame available");
+    return nullptr;
+  }
+  
+  // Get the symbol context for the current frame
+  // Focus on symbols since objc_msgSend functions are typically runtime symbols
+  SymbolContext sc = frame_sp->GetSymbolContext(eSymbolContextSymbol);
+  
+  // Check if we have a symbol
+  const char *symbol_name = nullptr;
+  if (sc.symbol && sc.symbol->GetName()) {
+    symbol_name = sc.symbol->GetName().GetCString();
+  }
+  
+  if (!symbol_name) {
+    LLDB_LOG(log, "No symbol name available for current frame");
+    return nullptr;
+  }
+  
+  LLDB_LOG(log, "Current symbol: {0}", symbol_name);
+  
+  // Check if this is an objc_msgSend trampoline function
+  // GNUstep uses similar naming to Apple for these functions, plus some GNUstep-specific variants
+  bool is_objc_trampoline = false;
+  
+  // Check for standard objc_msgSend variants
+  if (strncmp(symbol_name, "objc_msgSend", 12) == 0) {
+    // Handle various objc_msgSend variants:
+    // - objc_msgSend (basic message send)
+    // - objc_msgSendSuper (super calls)
+    // - objc_msgSend_stret (struct returns)
+    // - objc_msgSendSuper_stret (super calls with struct returns)
+    is_objc_trampoline = (strcmp(symbol_name, "objc_msgSend") == 0 ||
+                         strcmp(symbol_name, "objc_msgSendSuper") == 0 ||
+                         strcmp(symbol_name, "objc_msgSend_stret") == 0 ||
+                         strcmp(symbol_name, "objc_msgSendSuper_stret") == 0 ||
+                         strcmp(symbol_name, "objc_msgSend_fpret") == 0 ||
+                         strcmp(symbol_name, "objc_msgSend_fp2ret") == 0);
+  }
+  
+  // Check for GNUstep-specific trampoline symbols  
+  if (!is_objc_trampoline) {
+    // GNUstep may have different symbol names for trampolines
+    is_objc_trampoline = (strstr(symbol_name, "objc_block_trampoline") != nullptr ||
+                         strstr(symbol_name, "objc_trampoline") != nullptr ||
+                         strstr(symbol_name, "objc_msgLookup") != nullptr ||
+                         strstr(symbol_name, "__objc_msg") != nullptr ||
+                         (strstr(symbol_name, "objc") != nullptr && 
+                          (strstr(symbol_name, "trampoline") != nullptr || 
+                           strstr(symbol_name, "dispatch") != nullptr ||
+                           strstr(symbol_name, "lookup") != nullptr)));
+  }
+  
+  if (!is_objc_trampoline) {
+    LLDB_LOG(log, "Not in objc_msgSend trampoline, symbol: {0}", symbol_name);
+    return nullptr;
+  }
+  
+  // Verify this symbol is from the objc runtime library, not user code
+  if (sc.module_sp) {
+    const char *module_name = sc.module_sp->GetFileSpec().GetFilename().GetCString();
+    if (module_name) {
+      bool is_objc_runtime = (strstr(module_name, "libobjc") != nullptr ||
+                             strstr(module_name, "libgnustep-base") != nullptr ||
+                             strstr(module_name, "libobjc2") != nullptr);
+      if (!is_objc_runtime) {
+        LLDB_LOG(log, "Symbol {0} is not from objc runtime library (module: {1})", 
+                 symbol_name, module_name);
+        return nullptr;
+      }
+      LLDB_LOG(log, "Confirmed objc_msgSend trampoline in runtime library: {0}", module_name);
+    }
+  }
+  
+  LLDB_LOG(log, "Detected objc_msgSend trampoline: {0}, creating step-out plan", symbol_name);
+  
+  // Create a ThreadPlanStepOut to step out of the trampoline
+  // This will cause LLDB to step over the objc_msgSend assembly and land
+  // directly in the actual method implementation
+  ThreadPlanSP step_out_plan_sp = std::make_shared<ThreadPlanStepOut>(
+      thread,
+      &sc,                    // symbol context
+      false,                  // first_insn - not first instruction  
+      stop_others,            // stop_others - as requested
+      eVoteNoOpinion,         // report_stop_vote - no opinion
+      eVoteNoOpinion,         // report_run_vote - no opinion
+      0,                      // frame_idx - step out of current frame
+      eLazyBoolCalculate,     // step_out_avoids_code_without_debug_info
+      false,                  // continue_to_next_branch
+      false                   // gather_return_value - not needed for trampolines
+  );
+  
+  if (step_out_plan_sp) {
+    LLDB_LOG(log, "Created ThreadPlanStepOut for objc_msgSend trampoline");
+  } else {
+    LLDB_LOG(log, "Failed to create ThreadPlanStepOut for objc_msgSend trampoline");
+  }
+  
+  return step_out_plan_sp;
 }
 
 bool GNUstepObjCRuntime::IsModuleObjCLibrary(const lldb::ModuleSP &module_sp) {
@@ -365,47 +603,39 @@ GNUstepObjCRuntime::CreateObjectChecker(std::string name, ExecutionContext &exe_
   Log *log = GetLog(LLDBLog::Process | LLDBLog::Types);
   LLDB_LOG(log, "GNUstepObjCRuntime::CreateObjectChecker called with name: {0}", name);
   
-  // GNUstep object checker implementation
-  // Unlike Apple, GNUstep doesn't have gdb_object_getClass, so we use a simpler approach
-  // that doesn't require dynamic function resolution during expression evaluation
+  // Create a working object checker using GNUstep runtime functions
+  // This follows Apple's pattern but uses GNUstep-specific runtime functions
+  LLDB_LOG(log, "GNUstepObjCRuntime::CreateObjectChecker: Creating GNUstep runtime-based object checker");
   
   char check_function_code[2048];
   
-  // Use a simplified object checker that avoids calling runtime functions
-  // that might not be available in the expression context
+  // Create a full-featured object checker using GNUstep runtime functions
   int len = ::snprintf(check_function_code, sizeof(check_function_code), R"(
-                     extern "C" int printf(const char *format, ...);
-                     extern "C" void
-                     %s(void *$__lldb_arg_obj, void *$__lldb_arg_selector) {
-                       // nil objects are always acceptable
-                       if ($__lldb_arg_obj == (void *)0)
-                         return;
-                       
-                       // For GNUstep, we perform basic pointer validation
-                       // Check if the pointer looks reasonable (not in low memory)
-                       unsigned long addr = (unsigned long)$__lldb_arg_obj;
-                       if (addr < 0x1000) {
-                         // Very low addresses are likely invalid
-                         *((volatile int *)0) = 'ocgc';
-                         return;
-                       }
-                       
-                       // Try to dereference the isa pointer safely
-                       // In GNUstep, isa is the first field of any object
-                       void **obj_as_ptr = (void **)$__lldb_arg_obj;
-                       void *isa = *obj_as_ptr;
-                       
-                       // Basic sanity check on the isa pointer
-                       if (isa == (void *)0 || (unsigned long)isa < 0x1000) {
-                         // Invalid isa pointer
-                         *((volatile int *)0) = 'ocgc';
-                         return;
-                       }
-                       
-                       // If we got here, the object passed basic validation
-                       // For selector checking, we skip it to avoid runtime calls
-                       // that might fail in expression evaluation context
-                     })",
+extern "C" void *object_getClass(void *obj);
+extern "C" int class_respondsToSelector(void *cls, void *sel);
+extern "C" int printf(const char *format, ...);
+extern "C" void
+%s(void *$__lldb_arg_obj, void *$__lldb_arg_selector) {
+  // nil object is always OK for Objective-C
+  if ($__lldb_arg_obj == (void *)0)
+    return;
+  
+  // Get the object's class using GNUstep runtime function
+  void *objc_class = object_getClass($__lldb_arg_obj);
+  if (!objc_class) {
+    // Invalid object - cause controlled crash for conditional breakpoints
+    // This follows Apple's pattern for LLDB integration
+    *((volatile int *)0) = 'ocgc';
+  } else if ($__lldb_arg_selector != (void *)0) {
+    // Check if class responds to selector using GNUstep runtime
+    int responds = class_respondsToSelector(objc_class, $__lldb_arg_selector);
+    if (responds == 0) {
+      // Object doesn't respond to selector - cause controlled crash
+      *((volatile int *)0) = 'ocgc';
+    }
+  }
+  // If we get here, validation passed - continue normally
+})",
                      name.c_str());
 
   if (len >= (int)sizeof(check_function_code)) {
@@ -414,7 +644,7 @@ GNUstepObjCRuntime::CreateObjectChecker(std::string name, ExecutionContext &exe_
                                    "Object checker code generation failed - code too long");
   }
 
-  LLDB_LOG(log, "GNUstepObjCRuntime::CreateObjectChecker: Generated function code:\n{0}", 
+  LLDB_LOG(log, "GNUstepObjCRuntime::CreateObjectChecker: Generated GNUstep runtime-based checker code:\n{0}", 
            check_function_code);
 
   // Create the utility function that LLDB can execute
@@ -423,9 +653,51 @@ GNUstepObjCRuntime::CreateObjectChecker(std::string name, ExecutionContext &exe_
 }
 
 void GNUstepObjCRuntime::UpdateISAToDescriptorMapIfNeeded() {
-  // Stub implementation
   Log *log = GetLog(LLDBLog::Process | LLDBLog::Types);
   LLDB_LOG(log, "GNUstepObjCRuntime::UpdateISAToDescriptorMapIfNeeded called");
+  
+  if (!m_runtime_api_up) {
+    LLDB_LOG(log, "No runtime API available for ISA map update");
+    return;
+  }
+  
+  // Get all Foundation classes from the runtime
+  auto foundation_classes = m_runtime_api_up->GetAllFoundationClasses();
+  if (!foundation_classes) {
+    // Consume the error and continue - this isn't critical
+    llvm::consumeError(foundation_classes.takeError());
+    LLDB_LOG(log, "Could not enumerate Foundation classes for ISA map");
+    return;
+  }
+  
+  LLDB_LOG(log, "Updating ISA map with {0} Foundation classes", 
+           foundation_classes->size());
+  
+  // Add each class to the ISA-to-descriptor map
+  for (const auto &class_info : *foundation_classes) {
+    lldb::addr_t class_addr = reinterpret_cast<lldb::addr_t>(class_info.class_ptr);
+    if (class_addr != LLDB_INVALID_ADDRESS && class_addr != 0) {
+      // Check if we already have this ISA in our map
+      ClassDescriptorSP existing_descriptor = ObjCLanguageRuntime::GetClassDescriptorFromISA(class_addr);
+      if (!existing_descriptor) {
+        // Create a new descriptor for this class
+        ClassDescriptorSP new_descriptor = ClassDescriptorSP(
+            new GNUstepClassDescriptor(*this, class_addr, class_info.name.c_str()));
+        
+        if (new_descriptor && new_descriptor->IsValid()) {
+          AddClass(class_addr, new_descriptor);
+          LLDB_LOG(log, "Added ISA mapping: 0x{0:x} -> {1}", 
+                   class_addr, class_info.name);
+        }
+      }
+    }
+  }
+  
+  // Also update any custom classes we've encountered during runtime introspection
+  if (m_introspector_up) {
+    // The introspector may have cached ISA-to-name mappings we can use
+    // This is a future enhancement point for custom class discovery
+  }
 }
 
 ObjCLanguageRuntime::ClassDescriptorSP

@@ -1,0 +1,43 @@
+#!/usr/bin/env lldb -s
+# Comprehensive test to analyze expression evaluation state in GNUstep LLDB bridge
+
+file custom_class_test
+breakpoint set -f custom_class_test.m -l 125
+run
+
+# === Phase 1: Basic Object Description Tests ===
+po account
+po personInfo
+po fruits
+po currentTime
+po magicNumber
+
+# === Phase 2: Custom Class Property Tests ===
+# These should work if CreateObjectChecker is functioning properly
+expr -T 2.0 -- [account balance]  
+expr -T 2.0 -- [account accountNumber]
+expr -T 2.0 -- [account owner]
+
+# === Phase 3: Expression Evaluation with Method Calls ===
+# Test if expression evaluation timeout and safety works
+expr -T 2.0 -- (NSString*)[(id)account description]
+expr -T 2.0 -- [(id)fruits objectAtIndex:0]
+expr -T 2.0 -- [(id)personInfo objectForKey:@"name"]
+
+# === Phase 4: CreateObjectChecker Tests ===
+# These test the object validation functionality
+expr -T 2.0 -- [account respondsToSelector:@selector(balance)]
+expr -T 2.0 -- [fruits respondsToSelector:@selector(objectAtIndex:)]
+expr -T 2.0 -- [personInfo respondsToSelector:@selector(objectForKey:)]
+
+# === Phase 5: Edge Cases ===
+po nilString
+po emptyArray
+expr -T 2.0 -- [(id)nil description]
+
+# === Phase 6: Advanced Expression Tests ===
+expr -T 2.0 -- [(id)[fruits objectAtIndex:0] length]
+expr -T 2.0 -- [account balance] + 100.0
+
+continue
+quit

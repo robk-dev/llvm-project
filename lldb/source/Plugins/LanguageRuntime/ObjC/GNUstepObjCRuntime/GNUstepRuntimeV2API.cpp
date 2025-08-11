@@ -278,11 +278,12 @@ GNUstepRuntimeV2API::GetAllClasses() {
   options.SetTimeout(std::chrono::seconds(5));
   
   // Execute: Class *objc_copyClassList(unsigned int *outCount)
-  // We'll use expression evaluation for this
+  // Make a SINGLE call to get both count and class list pointer
   const char *expr = R"(
     unsigned int count = 0;
     void **classes = (void **)objc_copyClassList(&count);
-    classes ? count : 0;
+    struct { void *ptr; unsigned int cnt; } result = { classes, count };
+    result;
   )";
   
   ValueObjectSP result_sp;
@@ -293,26 +294,28 @@ GNUstepRuntimeV2API::GetAllClasses() {
     return CreateError("Failed to enumerate classes");
   }
   
-  unsigned int count = result_sp->GetValueAsUnsigned(0);
-  if (count == 0) {
-    return std::vector<Class>();
+  // Extract both pointer and count from the result structure
+  ValueObjectSP ptr_child = result_sp->GetChildAtIndex(0);
+  ValueObjectSP count_child = result_sp->GetChildAtIndex(1);
+  
+  if (!ptr_child || !count_child) {
+    return CreateError("Failed to extract class list result");
   }
   
-  // Now get the class list pointer
-  const char *get_list_expr = R"(
-    unsigned int count = 0;
-    (void **)objc_copyClassList(&count);
-  )";
+  addr_t class_list_addr = ptr_child->GetValueAsUnsigned(0);
+  unsigned int count = count_child->GetValueAsUnsigned(0);
   
-  expr_result = m_process->GetTarget().EvaluateExpression(
-      get_list_expr, exe_ctx.GetFrameSP().get(), result_sp, options);
-  
-  if (expr_result != eExpressionCompleted || !result_sp) {
-    return CreateError("Failed to get class list pointer");
-  }
-  
-  addr_t class_list_addr = result_sp->GetValueAsUnsigned(0);
-  if (class_list_addr == 0) {
+  if (count == 0 || class_list_addr == 0) {
+    // If no classes or null pointer, still need to free if we got a non-null pointer
+    if (class_list_addr != 0) {
+      const char *free_expr = R"(
+        free((void *)0x%llx);
+      )";
+      char free_cmd[256];
+      snprintf(free_cmd, sizeof(free_cmd), free_expr, (unsigned long long)class_list_addr);
+      m_process->GetTarget().EvaluateExpression(
+          free_cmd, exe_ctx.GetFrameSP().get(), result_sp, options);
+    }
     return std::vector<Class>();
   }
   
@@ -331,15 +334,12 @@ GNUstepRuntimeV2API::GetAllClasses() {
     }
   }
   
-  // Free the allocated list
-  const char *free_expr = R"(
-    unsigned int count = 0;
-    void **classes = (void **)objc_copyClassList(&count);
-    if (classes) free(classes);
-  )";
+  // Free the allocated list using the specific address we already have
+  char free_cmd[256];
+  snprintf(free_cmd, sizeof(free_cmd), "free((void *)0x%llx);", (unsigned long long)class_list_addr);
   
   m_process->GetTarget().EvaluateExpression(
-      free_expr, exe_ctx.GetFrameSP().get(), result_sp, options);
+      free_cmd, exe_ctx.GetFrameSP().get(), result_sp, options);
   
   Log *log = GetLog(LLDBLog::Language);
   LLDB_LOG(log, "[{0}] Found {1} classes", LLDB_LOG_TAG, classes.size());

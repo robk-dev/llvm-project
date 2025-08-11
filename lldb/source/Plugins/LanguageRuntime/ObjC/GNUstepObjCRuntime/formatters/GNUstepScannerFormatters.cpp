@@ -31,7 +31,17 @@ bool GNUstepNSScannerSummaryProvider::FormatObject(ValueObject &valobj, Stream &
   
   // Format: NSScanner(string='Hello, World!', position=7, remaining='World!')
   stream.Printf("NSScanner(string=");
-  WriteQuotedString(stream, info.string.empty() ? "<null>" : info.string);
+  // Check if we extracted a string vs. if extraction failed
+  if (info.valid && info.string.empty()) {
+    // Valid scanner with empty string
+    stream.Printf("\"\"");
+  } else if (!info.valid) {
+    // Invalid scanner or extraction failed
+    stream.Printf("<null>");
+  } else {
+    // Valid scanner with non-empty string
+    WriteQuotedString(stream, info.string);
+  }
   stream.Printf(", position=%llu, remaining=", (unsigned long long)info.scanLocation);
   WriteQuotedString(stream, info.remaining);
   stream.Printf(")");
@@ -92,31 +102,104 @@ std::string GNUstepNSScannerSummaryProvider::ExtractScanString(ValueObject &valo
     return introspector.DecodeTaggedString(string_obj_addr);
   }
   
-  // For regular NSString objects, apply the same logic as the working NSString formatter
-  // Based on GNUstep NSConstantString structure analysis:
-  // struct {
-  //   Class isa;          // Object's class pointer (offset 0)
-  //   uint32_t len;       // String length (offset 8)
-  //   uint32_t padding;   // Padding (offset 12)
-  //   uint64_t len2;      // Length again? (offset 16)
-  //   const char *str;    // C string data pointer (offset 24)
-  // };
+  // Read the ISA pointer to determine the string type
+  lldb::addr_t isa_addr = string_obj_addr;
+  lldb::addr_t isa_ptr = GNUstepRuntimeHelper::ReadPointer(process, isa_addr, error);
+  if (error.Fail()) {
+    return "";
+  }
   
-  // Read the string data pointer from offset 24 (same as working NSString formatter)
+  // Get class name from ISA
+  ConstString class_name_const = introspector.GetClassNameFromISA(isa_ptr);
+  std::string class_name = class_name_const.GetCString() ? class_name_const.GetCString() : "";
+  
+  // Handle GSUInlineString / GSCInlineString (common for literal strings)
+  if (class_name.find("InlineString") != std::string::npos) {
+    // GSUInlineString structure:
+    // offset 0: isa (8 bytes)
+    // offset 8: _contents pointer (8 bytes) - points to inline data
+    // offset 16: _count (4 bytes) - string length
+    // offset 20: _flags (4 bytes) - bit 0 = wide (UTF-16)
+    // offset 24: start of inline character data
+    
+    // Read the string length
+    lldb::addr_t count_addr = string_obj_addr + 16;
+    uint32_t string_length = 0;
+    if (!GNUstepRuntimeHelper::ReadMemory(process, count_addr, &string_length, sizeof(string_length))) {
+      return "";
+    }
+    
+    // Sanity check - allow zero-length strings
+    if (string_length > 1024) {
+      return "";
+    }
+    
+    // Handle empty string case
+    if (string_length == 0) {
+      return "";  // Return empty string which is valid
+    }
+    
+    // Read flags to check if UTF-16
+    lldb::addr_t flags_addr = string_obj_addr + 20;
+    uint32_t flags = 0;
+    if (!GNUstepRuntimeHelper::ReadMemory(process, flags_addr, &flags, sizeof(flags))) {
+      return "";
+    }
+    
+    bool is_wide = (flags & 0x1) != 0;
+    
+    // Inline data starts at offset 24
+    lldb::addr_t data_addr = string_obj_addr + 24;
+    
+    if (is_wide || class_name == "GSUInlineString") {
+      // UTF-16 characters
+      size_t byte_size = string_length * sizeof(uint16_t);
+      std::vector<uint16_t> buffer(string_length);
+      if (!GNUstepRuntimeHelper::ReadMemory(process, data_addr, buffer.data(), byte_size)) {
+        return "";
+      }
+      
+      // Convert UTF-16 to UTF-8
+      std::string result;
+      result.reserve(string_length * 2);
+      for (uint32_t i = 0; i < string_length; ++i) {
+        uint16_t ch = buffer[i];
+        if (ch < 0x80) {
+          result.push_back(static_cast<char>(ch));
+        } else if (ch < 0x800) {
+          result.push_back(static_cast<char>(0xC0 | (ch >> 6)));
+          result.push_back(static_cast<char>(0x80 | (ch & 0x3F)));
+        } else {
+          result.push_back(static_cast<char>(0xE0 | (ch >> 12)));
+          result.push_back(static_cast<char>(0x80 | ((ch >> 6) & 0x3F)));
+          result.push_back(static_cast<char>(0x80 | (ch & 0x3F)));
+        }
+      }
+      return result;
+    } else {
+      // 8-bit ASCII/UTF-8
+      return GNUstepRuntimeHelper::ReadUTF8String(process, data_addr, string_length);
+    }
+  }
+  
+  // Handle NSConstantString and other string types
+  // NSConstantString structure:
+  // offset 0: isa (8 bytes)
+  // offset 8: length (4 bytes)
+  // offset 12: padding (4 bytes)
+  // offset 16: length2 (8 bytes)
+  // offset 24: char* pointer to C string
+  
+  // Try reading as NSConstantString
   lldb::addr_t str_ptr_addr = string_obj_addr + 24;
   lldb::addr_t str_data_addr = GNUstepRuntimeHelper::ReadPointer(process, str_ptr_addr, error);
   if (!error.Fail() && str_data_addr != 0 && str_data_addr != LLDB_INVALID_ADDRESS) {
-    // Read the string length from offset 8 (after ISA pointer)
+    // Read the string length from offset 8
     lldb::addr_t len_addr = string_obj_addr + 8;
     uint32_t string_length = 0;
     
     if (GNUstepRuntimeHelper::ReadMemory(process, len_addr, &string_length, sizeof(string_length))) {
-      // Limit string length for safety
-      if (string_length > 1024) {
-        string_length = 1024;
-      }
-      
-      if (string_length > 0) {
+      if (string_length > 0 && string_length <= 1024) {
         std::string result = GNUstepRuntimeHelper::ReadUTF8String(process, str_data_addr, string_length);
         if (!result.empty()) {
           return result;

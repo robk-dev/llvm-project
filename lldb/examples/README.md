@@ -73,7 +73,7 @@ Once in LLDB session:
 
 ```lldb
 # Set breakpoint and run
-(lldb) b custom_class_test.m:125
+(lldb) b custom_class_test.m:228
 (lldb) run
 
 # Test formatters

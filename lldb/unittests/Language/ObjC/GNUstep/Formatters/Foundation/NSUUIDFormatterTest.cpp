@@ -17,7 +17,7 @@
 #include "lldb/Target/Platform.h"
 #include "lldb/Utility/ArchSpec.h"
 #include "lldb/Core/Debugger.h"
-#include "lldb/Core/ValueObject.h"
+#include "lldb/ValueObject/ValueObject.h"
 #include "lldb/Utility/StreamString.h"
 
 #include "../Common/FormatterTestHelpers.h"
@@ -51,10 +51,9 @@ protected:
 TEST_F(NSUUIDFormatterTest, BasicUUIDFormatting) {
   // Test basic NSUUID object formatting
   lldb::DebuggerSP debugger = Debugger::CreateInstance();
-  lldb::TargetSP target = std::make_shared<Target>(*debugger, ArchSpec("x86_64"), 
-                                                   PlatformSP(), true);
+  lldb::TargetSP target = std::make_shared<MockTarget>(*debugger, ArchSpec("x86_64"), 
+                                                   PlatformSP());
   lldb::ProcessSP process = std::make_shared<MockProcess>(target, ListenerSP());
-  target->SetProcessSP(process);
   
   // Standard UUID: 550E8400-E29B-41D4-A716-446655440000
   std::array<uint8_t, 16> uuid_bytes = {
@@ -97,10 +96,9 @@ TEST_F(NSUUIDFormatterTest, BasicUUIDFormatting) {
 TEST_F(NSUUIDFormatterTest, ZeroUUIDHandling) {
   // Test zero/nil UUID (00000000-0000-0000-0000-000000000000)
   lldb::DebuggerSP debugger = Debugger::CreateInstance();
-  lldb::TargetSP target = std::make_shared<Target>(*debugger, ArchSpec("x86_64"), 
-                                                   PlatformSP(), true);
+  lldb::TargetSP target = std::make_shared<MockTarget>(*debugger, ArchSpec("x86_64"), 
+                                                   PlatformSP());
   lldb::ProcessSP process = std::make_shared<MockProcess>(target, ListenerSP());
-  target->SetProcessSP(process);
   
   std::array<uint8_t, 16> zero_uuid = {0};  // All zeros
   
@@ -133,10 +131,9 @@ TEST_F(NSUUIDFormatterTest, ZeroUUIDHandling) {
 TEST_F(NSUUIDFormatterTest, VariousUUIDFormats) {
   // Test different UUID patterns
   lldb::DebuggerSP debugger = Debugger::CreateInstance();
-  lldb::TargetSP target = std::make_shared<Target>(*debugger, ArchSpec("x86_64"), 
-                                                   PlatformSP(), true);
+  lldb::TargetSP target = std::make_shared<MockTarget>(*debugger, ArchSpec("x86_64"), 
+                                                   PlatformSP());
   lldb::ProcessSP process = std::make_shared<MockProcess>(target, ListenerSP());
-  target->SetProcessSP(process);
   
   GNUstepNSUUIDSummaryProvider provider;
   
@@ -196,10 +193,9 @@ TEST_F(NSUUIDFormatterTest, VariousUUIDFormats) {
 TEST_F(NSUUIDFormatterTest, ErrorHandling) {
   // Test error conditions
   lldb::DebuggerSP debugger = Debugger::CreateInstance();
-  lldb::TargetSP target = std::make_shared<Target>(*debugger, ArchSpec("x86_64"), 
-                                                   PlatformSP(), true);
+  lldb::TargetSP target = std::make_shared<MockTarget>(*debugger, ArchSpec("x86_64"), 
+                                                   PlatformSP());
   lldb::ProcessSP process = std::make_shared<MockProcess>(target, ListenerSP());
-  target->SetProcessSP(process);
   
   GNUstepNSUUIDSummaryProvider provider;
   
@@ -248,10 +244,9 @@ TEST_F(NSUUIDFormatterTest, ErrorHandling) {
 TEST_F(NSUUIDFormatterTest, PerformanceRequirements) {
   // Test that NSUUID formatting meets <50ms requirement
   lldb::DebuggerSP debugger = Debugger::CreateInstance();
-  lldb::TargetSP target = std::make_shared<Target>(*debugger, ArchSpec("x86_64"), 
-                                                   PlatformSP(), true);
+  lldb::TargetSP target = std::make_shared<MockTarget>(*debugger, ArchSpec("x86_64"), 
+                                                   PlatformSP());
   lldb::ProcessSP process = std::make_shared<MockProcess>(target, ListenerSP());
-  target->SetProcessSP(process);
   
   // Create UUID for performance test
   std::array<uint8_t, 16> perf_uuid = {
@@ -292,10 +287,9 @@ TEST_F(NSUUIDFormatterTest, PerformanceRequirements) {
 TEST_F(NSUUIDFormatterTest, UUIDStringRepresentation) {
   // Test that UUID string representation follows standard format
   lldb::DebuggerSP debugger = Debugger::CreateInstance();
-  lldb::TargetSP target = std::make_shared<Target>(*debugger, ArchSpec("x86_64"), 
-                                                   PlatformSP(), true);
+  lldb::TargetSP target = std::make_shared<MockTarget>(*debugger, ArchSpec("x86_64"), 
+                                                   PlatformSP());
   lldb::ProcessSP process = std::make_shared<MockProcess>(target, ListenerSP());
-  target->SetProcessSP(process);
   
   GNUstepNSUUIDSummaryProvider provider;
   
@@ -343,10 +337,9 @@ TEST_F(NSUUIDFormatterTest, UUIDStringRepresentation) {
 TEST_F(NSUUIDFormatterTest, ComparisonWithKnownUUIDs) {
   // Test formatting of well-known special UUIDs
   lldb::DebuggerSP debugger = Debugger::CreateInstance();
-  lldb::TargetSP target = std::make_shared<Target>(*debugger, ArchSpec("x86_64"), 
-                                                   PlatformSP(), true);
+  lldb::TargetSP target = std::make_shared<MockTarget>(*debugger, ArchSpec("x86_64"), 
+                                                   PlatformSP());
   lldb::ProcessSP process = std::make_shared<MockProcess>(target, ListenerSP());
-  target->SetProcessSP(process);
   
   GNUstepNSUUIDSummaryProvider provider;
   

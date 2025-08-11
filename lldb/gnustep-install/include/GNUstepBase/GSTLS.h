@@ -16,8 +16,7 @@
 
    You should have received a copy of the GNU Lesser General Public
    License along with this library; if not, write to the Free
-   Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
-   Boston, MA 02111 USA.
+   Software Foundation, Inc., 31 Milk Street #960789 Boston, MA 02196 USA.
 
    */
 
@@ -33,6 +32,8 @@ GS_EXPORT NSString * const GSTLSCertificateFile;
 GS_EXPORT NSString * const GSTLSCertificateKeyFile;
 GS_EXPORT NSString * const GSTLSCertificateKeyPassword;
 GS_EXPORT NSString * const GSTLSDebug;
+GS_EXPORT NSString * const GSTLSIssuers;
+GS_EXPORT NSString * const GSTLSOwners;
 GS_EXPORT NSString * const GSTLSPriority;
 GS_EXPORT NSString * const GSTLSRemoteHosts;
 GS_EXPORT NSString * const GSTLSRevokeFile;
@@ -175,6 +176,7 @@ GS_EXPORT_CLASS
                      certificateKeyPassword: (NSString*)cp
                                    asClient: (BOOL)client
                                       debug: (BOOL)debug;
++ (GSTLSCredentials*) selfSigned: (BOOL)debug;
 - (gnutls_certificate_credentials_t) credentials;
 - (GSTLSPrivateKey*) key;
 - (GSTLSCertificateList*) list;
@@ -206,18 +208,19 @@ GS_EXPORT_CLASS
   BOOL                                  setup;
   BOOL                                  debug;
   NSTimeInterval                        created;
+  void                                  *handle;
 @public
   gnutls_session_t                      session;
 }
 + (GSTLSSession*) sessionWithOptions: (NSDictionary*)options
                            direction: (BOOL)isOutgoing
-                           transport: (void*)handle
+                           transport: (void*)ioHandle
                                 push: (GSTLSIOW)pushFunc
                                 pull: (GSTLSIOR)pullFunc;
 
 - (id) initWithOptions: (NSDictionary*)options
              direction: (BOOL)isOutgoing
-             transport: (void*)handle
+             transport: (void*)ioHandle
                   push: (GSTLSIOW)pushFunc
                   pull: (GSTLSIOR)pullFunc;
 
@@ -262,6 +265,13 @@ GS_EXPORT_CLASS
  * described in RFC4514.  Otherwise returns nil.
  */
 - (NSString*) owner;
+
+/** Returns the number of bytes of data available to be read from the TLS
+ * buffers (using the -read:length: method).  If this returns zero the TLS
+ * software needs to perform a network read before any more data can be
+ * returned.
+ */
+- (size_t) pending;
 
 /* After a failed handshake, this should contain a description of the
  * failure reason.

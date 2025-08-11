@@ -1,0 +1,8 @@
+# Simple focused test for po functionality
+file test_po_debug
+b test_po_debug.m:21
+run
+po string
+po number
+continue
+quit

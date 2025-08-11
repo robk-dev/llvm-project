@@ -12,7 +12,7 @@
 #include "lldb/Host/HostInfo.h"
 #include "lldb/Utility/ConstString.h"
 #include "lldb/Utility/Stream.h"
-#include "lldb/Core/ValueObject.h"
+#include "lldb/ValueObject/ValueObject.h"
 #include "lldb/Utility/StreamString.h"
 #include "lldb/Core/Debugger.h"
 #include "lldb/Target/Platform.h"
@@ -47,10 +47,9 @@ protected:
 
 TEST_F(NSDataFormatterTest, BasicDataFormatting) {
   // Test basic NSData object formatting
-  lldb::TargetSP target = std::make_shared<Target>(DebuggerSP(), ArchSpec("x86_64"), 
-                                                   PlatformSP(), true);
+  lldb::TargetSP target = std::make_shared<MockTarget>(*Debugger::CreateInstance(), ArchSpec("x86_64"), 
+                                                   PlatformSP());
   lldb::ProcessSP process = std::make_shared<MockProcess>(target, ListenerSP());
-  target->SetProcessSP(process);
   
   // Create NSData object with some test data
   std::vector<uint8_t> test_data = {0x48, 0x65, 0x6C, 0x6C, 0x6F}; // "Hello"
@@ -89,10 +88,9 @@ TEST_F(NSDataFormatterTest, BasicDataFormatting) {
 
 TEST_F(NSDataFormatterTest, EmptyDataHandling) {
   // Test NSData with zero length
-  lldb::TargetSP target = std::make_shared<Target>(DebuggerSP(), ArchSpec("x86_64"), 
-                                                   PlatformSP(), true);
+  lldb::TargetSP target = std::make_shared<MockTarget>(*Debugger::CreateInstance(), ArchSpec("x86_64"), 
+                                                   PlatformSP());
   lldb::ProcessSP process = std::make_shared<MockProcess>(target, ListenerSP());
-  target->SetProcessSP(process);
   
   struct {
     uint64_t isa;
@@ -120,10 +118,9 @@ TEST_F(NSDataFormatterTest, EmptyDataHandling) {
 
 TEST_F(NSDataFormatterTest, LargeDataHandling) {
   // Test NSData with large amount of data (should be truncated in preview)
-  lldb::TargetSP target = std::make_shared<Target>(DebuggerSP(), ArchSpec("x86_64"), 
-                                                   PlatformSP(), true);
+  lldb::TargetSP target = std::make_shared<MockTarget>(*Debugger::CreateInstance(), ArchSpec("x86_64"), 
+                                                   PlatformSP());
   lldb::ProcessSP process = std::make_shared<MockProcess>(target, ListenerSP());
-  target->SetProcessSP(process);
   
   // Create large data buffer
   std::vector<uint8_t> large_data(1000, 0xAB);
@@ -158,10 +155,9 @@ TEST_F(NSDataFormatterTest, LargeDataHandling) {
 
 TEST_F(NSDataFormatterTest, DataPreviewFormatting) {
   // Test data preview for small NSData objects
-  lldb::TargetSP target = std::make_shared<Target>(DebuggerSP(), ArchSpec("x86_64"), 
-                                                   PlatformSP(), true);
+  lldb::TargetSP target = std::make_shared<MockTarget>(*Debugger::CreateInstance(), ArchSpec("x86_64"), 
+                                                   PlatformSP());
   lldb::ProcessSP process = std::make_shared<MockProcess>(target, ListenerSP());
-  target->SetProcessSP(process);
   
   // Test different small data patterns
   std::vector<std::vector<uint8_t>> test_patterns = {
@@ -217,10 +213,9 @@ TEST_F(NSDataFormatterTest, DataPreviewFormatting) {
 
 TEST_F(NSDataFormatterTest, ErrorHandling) {
   // Test error conditions
-  lldb::TargetSP target = std::make_shared<Target>(DebuggerSP(), ArchSpec("x86_64"), 
-                                                   PlatformSP(), true);
+  lldb::TargetSP target = std::make_shared<MockTarget>(*Debugger::CreateInstance(), ArchSpec("x86_64"), 
+                                                   PlatformSP());
   lldb::ProcessSP process = std::make_shared<MockProcess>(target, ListenerSP());
-  target->SetProcessSP(process);
   
   GNUstepNSDataSummaryProvider provider;
   
@@ -268,10 +263,9 @@ TEST_F(NSDataFormatterTest, ErrorHandling) {
 
 TEST_F(NSDataFormatterTest, PerformanceRequirements) {
   // Test that NSData formatting meets <50ms requirement
-  lldb::TargetSP target = std::make_shared<Target>(DebuggerSP(), ArchSpec("x86_64"), 
-                                                   PlatformSP(), true);
+  lldb::TargetSP target = std::make_shared<MockTarget>(*Debugger::CreateInstance(), ArchSpec("x86_64"), 
+                                                   PlatformSP());
   lldb::ProcessSP process = std::make_shared<MockProcess>(target, ListenerSP());
-  target->SetProcessSP(process);
   
   // Create moderate-sized NSData
   std::vector<uint8_t> perf_data(512, 0x55);
@@ -310,10 +304,9 @@ TEST_F(NSDataFormatterTest, PerformanceRequirements) {
 
 TEST_F(NSDataFormatterTest, NSMutableDataSupport) {
   // Test NSMutableData (subclass of NSData)
-  lldb::TargetSP target = std::make_shared<Target>(DebuggerSP(), ArchSpec("x86_64"), 
-                                                   PlatformSP(), true);
+  lldb::TargetSP target = std::make_shared<MockTarget>(*Debugger::CreateInstance(), ArchSpec("x86_64"), 
+                                                   PlatformSP());
   lldb::ProcessSP process = std::make_shared<MockProcess>(target, ListenerSP());
-  target->SetProcessSP(process);
   
   std::vector<uint8_t> mutable_data = {0xDE, 0xAD, 0xBE, 0xEF};
   

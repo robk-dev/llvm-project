@@ -1,0 +1,8 @@
+# Test expression evaluation directly
+file test_po_debug
+b test_po_debug.m:21
+run
+# Test the exact expressions my code should be using
+expr (NSString*)[(id)0x5555555580d8 description]
+continue
+quit

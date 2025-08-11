@@ -80,6 +80,11 @@ public:
   
   // Get the runtime API (for GNUstepClassDescriptor)
   GNUstepRuntimeV2API *GetRuntimeAPI() { return m_runtime_api_up.get(); }
+  
+  // Get the runtime introspector (for direct runtime function calls)
+  GNUstepObjCRuntimeIntrospector *GetRuntimeIntrospector() { 
+    return m_introspector_up.get(); 
+  }
 
 private:
   std::unique_ptr<GNUstepObjCRuntimeIntrospector> m_introspector_up;

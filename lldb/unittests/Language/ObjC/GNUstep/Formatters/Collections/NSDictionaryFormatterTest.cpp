@@ -111,11 +111,11 @@ TEST_F(NSDictionaryFormatterTest, HashTableMemoryLayout) {
   const size_t BUCKET_COUNT_OFFSET = MAP_TABLE_OFFSET + BUCKET_COUNT_OFFSET_IN_MAP; // 24
   const size_t BUCKETS_OFFSET = MAP_TABLE_OFFSET + BUCKETS_OFFSET_IN_MAP; // 32
   
-  EXPECT_EQ(ISA_OFFSET, 0) << "ISA must be at offset 0";
-  EXPECT_EQ(MAP_TABLE_OFFSET, 8) << "GSIMapTable at offset 8";
-  EXPECT_EQ(NODE_COUNT_OFFSET, 16) << "NodeCount at total offset 16";
-  EXPECT_EQ(BUCKET_COUNT_OFFSET, 24) << "BucketCount at total offset 24";
-  EXPECT_EQ(BUCKETS_OFFSET, 32) << "Buckets at total offset 32";
+  EXPECT_EQ(ISA_OFFSET, 0u) << "ISA must be at offset 0";
+  EXPECT_EQ(MAP_TABLE_OFFSET, 8u) << "GSIMapTable at offset 8";
+  EXPECT_EQ(NODE_COUNT_OFFSET, 16u) << "NodeCount at total offset 16";
+  EXPECT_EQ(BUCKET_COUNT_OFFSET, 24u) << "BucketCount at total offset 24";
+  EXPECT_EQ(BUCKETS_OFFSET, 32u) << "Buckets at total offset 32";
   
   // Verify alignment requirements
   const size_t POINTER_SIZE = sizeof(void*);
@@ -142,8 +142,8 @@ TEST_F(NSDictionaryFormatterTest, HashBucketTraversal) {
   const size_t BUCKET_FIRST_NODE_OFFSET = 8;
   const size_t BUCKET_HEADER_SIZE = 16; // nodeCount + firstNode pointer
   
-  EXPECT_EQ(BUCKET_NODE_COUNT_OFFSET, 0) << "Bucket node count at offset 0";
-  EXPECT_EQ(BUCKET_FIRST_NODE_OFFSET, 8) << "First node pointer at offset 8";
+  EXPECT_EQ(BUCKET_NODE_COUNT_OFFSET, 0u) << "Bucket node count at offset 0";
+  EXPECT_EQ(BUCKET_FIRST_NODE_OFFSET, 8u) << "First node pointer at offset 8";
   EXPECT_EQ(BUCKET_HEADER_SIZE, sizeof(uintptr_t) + sizeof(void*))
       << "Bucket header size should match nodeCount + pointer";
   
@@ -153,9 +153,9 @@ TEST_F(NSDictionaryFormatterTest, HashBucketTraversal) {
   const size_t NODE_VALUE_OFFSET = 16;
   const size_t NODE_SIZE = 24; // next + key + value (all pointers)
   
-  EXPECT_EQ(NODE_NEXT_OFFSET, 0) << "Next node pointer at offset 0";
-  EXPECT_EQ(NODE_KEY_OFFSET, 8) << "Key at offset 8";
-  EXPECT_EQ(NODE_VALUE_OFFSET, 16) << "Value at offset 16";
+  EXPECT_EQ(NODE_NEXT_OFFSET, 0u) << "Next node pointer at offset 0";
+  EXPECT_EQ(NODE_KEY_OFFSET, 8u) << "Key at offset 8";
+  EXPECT_EQ(NODE_VALUE_OFFSET, 16u) << "Value at offset 16";
   EXPECT_EQ(NODE_SIZE, 3 * sizeof(void*)) << "Node size should be 3 pointers";
   
   // Test linked list traversal simulation
@@ -327,7 +327,7 @@ TEST_F(NSDictionaryFormatterTest, PerformanceCharacteristics) {
   auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
   
   EXPECT_LT(duration.count(), 50) << "Creating 1000 dictionary formatters should be fast (<50ms)";
-  EXPECT_EQ(formatters.size(), 1000) << "All dictionary formatters should be created successfully";
+  EXPECT_EQ(formatters.size(), 1000u) << "All dictionary formatters should be created successfully";
 }
 
 TEST_F(NSDictionaryFormatterTest, PairCountLimits) {
@@ -403,7 +403,8 @@ TEST_F(NSDictionaryFormatterTest, MutableDictionarySupport) {
   
   // Test mutable detection logic
   for (const auto& class_name : mutable_classes) {
-    bool detected_mutable = class_name.find("Mutable") != std::string::npos;
+    bool detected_mutable = class_name.find("Mutable") != std::string::npos ||
+                           class_name.find("__NSDictionaryM") != std::string::npos;
     EXPECT_TRUE(detected_mutable)
         << "Class " << class_name << " should be detected as mutable";
   }
@@ -419,8 +420,8 @@ TEST_F(NSDictionaryFormatterTest, MutableDictionarySupport) {
   const size_t DICTIONARY_HEADER_SIZE = 8 + 8; // isa + map_table
   const size_t MAP_TABLE_SIZE = 8 + 8 + 8 + 8; // zone + nodeCount + bucketCount + buckets
   
-  EXPECT_EQ(DICTIONARY_HEADER_SIZE, 16) << "Dictionary header consistent for both types";
-  EXPECT_EQ(MAP_TABLE_SIZE, 32) << "Map table layout consistent for both types";
+  EXPECT_EQ(DICTIONARY_HEADER_SIZE, 16u) << "Dictionary header consistent for both types";
+  EXPECT_EQ(MAP_TABLE_SIZE, 32u) << "Map table layout consistent for both types";
 }
 
 TEST_F(NSDictionaryFormatterTest, SyntheticChildrenNaming) {
@@ -699,7 +700,7 @@ TEST_F(NSDictionaryFormatterTest, ThreadSafety) {
     thread.join();
   }
   
-  EXPECT_EQ(results.size(), 10) << "All dictionary formatters should be created from multiple threads";
+  EXPECT_EQ(results.size(), 10u) << "All dictionary formatters should be created from multiple threads";
   
   // All formatters should be valid
   for (const auto& formatter : results) {

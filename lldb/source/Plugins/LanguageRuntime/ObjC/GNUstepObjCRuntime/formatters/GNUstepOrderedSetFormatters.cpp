@@ -398,7 +398,7 @@ std::string GNUstepNSOrderedSetSummaryProvider::GetElementSummary(Process *proce
   context.ExitObject(element_addr);
   
   // For non-string objects where we couldn't get a better summary
-  return "<object>";
+  return "";
 }
 
 std::string GNUstepNSOrderedSetSummaryProvider::TryExtractStringContent(Process *process, lldb::addr_t obj_addr) {

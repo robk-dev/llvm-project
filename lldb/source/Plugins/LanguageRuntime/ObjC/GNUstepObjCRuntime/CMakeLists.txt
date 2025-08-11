@@ -34,6 +34,7 @@ add_lldb_library(lldbPluginGNUstepObjCRuntime PLUGIN
   formatters/GNUstepUserDefaultsFormatters.cpp
   formatters/GNUstepCalendarFormatters.cpp
   formatters/GNUstepProcessInfoFormatters.cpp
+  formatters/GNUstepProxyFormatters.cpp
   formatters/GNUstepFormattersRegistry.cpp
 
   LINK_LIBS

@@ -1,7 +1,8 @@
-/* Interface for NSURLConnection for GNUstep
+/** Interface for NSURLConnection for GNUstep
    Copyright (C) 2006 Software Foundation, Inc.
 
-   Written by:  Richard Frith-Macdonald <frm@gnu.org>
+   Written by:  Armando Pesenti Gritti
+   Written by:  Richard Frith-Macdonald <rfm@gnu.org>
    Date: 2006
    
    This file is part of the GNUstep Base Library.
@@ -18,8 +19,7 @@
    
    You should have received a copy of the GNU Lesser General Public
    License along with this library; if not, write to the Free
-   Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
-   Boston, MA 02110 USA.
+   Software Foundation, Inc., 31 Milk Street #960789 Boston, MA 02196 USA.
    */ 
 
 #ifndef __NSURLConnection_h_GNUSTEP_BASE_INCLUDE
@@ -38,6 +38,7 @@ extern "C" {
 @class NSCachedURLResponse;
 @class NSData;
 @class NSError;
+@class NSInputStream;
 @class NSURLAuthenticationChallenge;
 @class NSURLRequest;
 @class NSURLResponse;
@@ -179,6 +180,7 @@ GS_EXPORT_CLASS
  * </list>
  */
 #if OS_API_VERSION(MAC_OS_X_VERSION_10_7,GS_API_LATEST) && GS_API_VERSION(11300,GS_API_LATEST)
+/** <ignore> autogsdoc will ignore everything up to the end tag */
 @protocol NSURLConnectionDelegate <NSObject>
 
 #if GS_PROTOCOLS_HAVE_OPTIONAL
@@ -187,6 +189,7 @@ GS_EXPORT_CLASS
 @end
 @interface NSObject (NSURLConnectionDelegate)
 #endif
+/** end of text ignored by autogsdoc </ignore> */
 
 #else
 @interface NSObject (NSURLConnectionDelegate)
@@ -260,6 +263,37 @@ GS_EXPORT_CLASS
 	      willSendRequest: (NSURLRequest *)request
 	     redirectResponse: (NSURLResponse *)response;
 @end
+
+#if OS_API_VERSION(MAC_OS_X_VERSION_10_2,GS_API_LATEST)
+@protocol NSURLConnectionDataDelegate <NSURLConnectionDelegate>
+#if GS_PROTOCOLS_HAVE_OPTIONAL
+@optional
+#endif
+
+- (NSURLRequest *) connection: (NSURLConnection *)connection
+              willSendRequest: (NSURLRequest *)request
+             redirectResponse: (NSURLResponse *)response;
+
+- (void) connection: (NSURLConnection *)connection
+ didReceiveResponse: (NSURLResponse *)response;
+
+- (void) connection: (NSURLConnection *) connection didReceiveData: (NSData *)data;
+
+- (NSInputStream *) connection: (NSURLConnection *)connection
+             needNewBodyStream: (NSURLRequest *)request;
+
+- (void) connection: (NSURLConnection *)connection
+    didSendBodyData: (NSInteger)bytesWritten
+  totalBytesWritten: (NSInteger)totalBytesWritten
+  totalBytesExpectedToWrite: (NSInteger)totalBytesExpectedToWrite;
+
+- (NSCachedURLResponse *) connection: (NSURLConnection *)connection
+                   willCacheResponse:(NSCachedURLResponse *)cachedResponse;
+
+- (void) connectionDidFinishLoading: (NSURLConnection *)connection;
+
+@end
+#endif
 
 /**
  * An interface to perform synchronous loading of URL requests.

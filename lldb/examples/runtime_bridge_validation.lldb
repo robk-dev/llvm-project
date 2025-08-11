@@ -2,7 +2,7 @@
 # This script validates that the GNUstep runtime bridge is working correctly
 
 file custom_class_test
-b custom_class_test.m:125
+b custom_class_test.m:228
 run
 
 echo "=== RUNTIME BRIDGE VALIDATION ==="

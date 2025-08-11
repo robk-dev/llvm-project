@@ -1,7 +1,7 @@
 settings set target.process.stop-on-sharedlibrary-events false
 log enable lldb process
 log enable lldb types
-b custom_class_test.m:125
+b custom_class_test.m:228
 run
 frame variable account
 po account

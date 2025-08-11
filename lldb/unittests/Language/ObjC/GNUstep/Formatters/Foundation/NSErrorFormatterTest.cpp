@@ -17,7 +17,7 @@
 #include "lldb/Target/Platform.h"
 #include "lldb/Utility/ArchSpec.h"
 #include "lldb/Core/Debugger.h"
-#include "lldb/Core/ValueObject.h"
+#include "lldb/ValueObject/ValueObject.h"
 #include "lldb/Utility/StreamString.h"
 
 #include "../Common/FormatterTestHelpers.h"
@@ -50,10 +50,9 @@ protected:
 TEST_F(NSErrorFormatterTest, BasicErrorFormatting) {
   // Test basic NSError object formatting
   lldb::DebuggerSP debugger = Debugger::CreateInstance();
-  lldb::TargetSP target = std::make_shared<Target>(*debugger, ArchSpec("x86_64"), 
-                                                   PlatformSP(), true);
+  lldb::TargetSP target = std::make_shared<MockTarget>(*debugger, ArchSpec("x86_64"), 
+                                                   PlatformSP());
   lldb::ProcessSP process = std::make_shared<MockProcess>(target, ListenerSP());
-  target->SetProcessSP(process);
   
   // Create NSError with domain, code, and description
   std::string domain = "NSCocoaErrorDomain";
@@ -113,10 +112,9 @@ TEST_F(NSErrorFormatterTest, BasicErrorFormatting) {
 TEST_F(NSErrorFormatterTest, CommonErrorDomains) {
   // Test formatting of common error domains
   lldb::DebuggerSP debugger = Debugger::CreateInstance();
-  lldb::TargetSP target = std::make_shared<Target>(*debugger, ArchSpec("x86_64"), 
-                                                   PlatformSP(), true);
+  lldb::TargetSP target = std::make_shared<MockTarget>(*debugger, ArchSpec("x86_64"), 
+                                                   PlatformSP());
   lldb::ProcessSP process = std::make_shared<MockProcess>(target, ListenerSP());
-  target->SetProcessSP(process);
   
   GNUstepNSErrorSummaryProvider provider;
   
@@ -183,10 +181,9 @@ TEST_F(NSErrorFormatterTest, CommonErrorDomains) {
 TEST_F(NSErrorFormatterTest, ErrorWithUserInfo) {
   // Test NSError with userInfo dictionary
   lldb::DebuggerSP debugger = Debugger::CreateInstance();
-  lldb::TargetSP target = std::make_shared<Target>(*debugger, ArchSpec("x86_64"), 
-                                                   PlatformSP(), true);
+  lldb::TargetSP target = std::make_shared<MockTarget>(*debugger, ArchSpec("x86_64"), 
+                                                   PlatformSP());
   lldb::ProcessSP process = std::make_shared<MockProcess>(target, ListenerSP());
-  target->SetProcessSP(process);
   
   std::string domain = "TestErrorDomain";
   int64_t code = 42;
@@ -242,10 +239,9 @@ TEST_F(NSErrorFormatterTest, ErrorWithUserInfo) {
 TEST_F(NSErrorFormatterTest, ErrorCodeFormatting) {
   // Test various error code formats (positive, negative, zero)
   lldb::DebuggerSP debugger = Debugger::CreateInstance();
-  lldb::TargetSP target = std::make_shared<Target>(*debugger, ArchSpec("x86_64"), 
-                                                   PlatformSP(), true);
+  lldb::TargetSP target = std::make_shared<MockTarget>(*debugger, ArchSpec("x86_64"), 
+                                                   PlatformSP());
   lldb::ProcessSP process = std::make_shared<MockProcess>(target, ListenerSP());
-  target->SetProcessSP(process);
   
   GNUstepNSErrorSummaryProvider provider;
   std::string domain = "TestDomain";
@@ -307,10 +303,9 @@ TEST_F(NSErrorFormatterTest, ErrorCodeFormatting) {
 TEST_F(NSErrorFormatterTest, ErrorHandling) {
   // Test error conditions in NSError formatting
   lldb::DebuggerSP debugger = Debugger::CreateInstance();
-  lldb::TargetSP target = std::make_shared<Target>(*debugger, ArchSpec("x86_64"), 
-                                                   PlatformSP(), true);
+  lldb::TargetSP target = std::make_shared<MockTarget>(*debugger, ArchSpec("x86_64"), 
+                                                   PlatformSP());
   lldb::ProcessSP process = std::make_shared<MockProcess>(target, ListenerSP());
-  target->SetProcessSP(process);
   
   GNUstepNSErrorSummaryProvider provider;
   
@@ -386,10 +381,9 @@ TEST_F(NSErrorFormatterTest, ErrorHandling) {
 TEST_F(NSErrorFormatterTest, PerformanceRequirements) {
   // Test that NSError formatting meets <50ms requirement
   lldb::DebuggerSP debugger = Debugger::CreateInstance();
-  lldb::TargetSP target = std::make_shared<Target>(*debugger, ArchSpec("x86_64"), 
-                                                   PlatformSP(), true);
+  lldb::TargetSP target = std::make_shared<MockTarget>(*debugger, ArchSpec("x86_64"), 
+                                                   PlatformSP());
   lldb::ProcessSP process = std::make_shared<MockProcess>(target, ListenerSP());
-  target->SetProcessSP(process);
   
   // Create NSError with complex domain for performance test
   std::string long_domain = "com.example.MyVeryLongApplicationErrorDomainWithManyComponents.SubSystem.SpecificModule";
@@ -450,10 +444,9 @@ TEST_F(NSErrorFormatterTest, PerformanceRequirements) {
 TEST_F(NSErrorFormatterTest, LocalizedErrorHandling) {
   // Test NSError localized description handling
   lldb::DebuggerSP debugger = Debugger::CreateInstance();
-  lldb::TargetSP target = std::make_shared<Target>(*debugger, ArchSpec("x86_64"), 
-                                                   PlatformSP(), true);
+  lldb::TargetSP target = std::make_shared<MockTarget>(*debugger, ArchSpec("x86_64"), 
+                                                   PlatformSP());
   lldb::ProcessSP process = std::make_shared<MockProcess>(target, ListenerSP());
-  target->SetProcessSP(process);
   
   GNUstepNSErrorSummaryProvider provider;
   

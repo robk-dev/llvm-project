@@ -1,0 +1,13 @@
+# Test introspector functionality
+file test_po_debug
+b test_po_debug.m:21
+run
+expr (void*)string
+expr (void*)number
+# Test class name resolution manually
+expr (char*)object_getClassName(string)
+expr (char*)object_getClassName(number)
+expr (void*)object_getClass(string)
+expr (void*)object_getClass(number)
+continue
+quit

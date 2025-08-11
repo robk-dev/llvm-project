@@ -28,6 +28,10 @@ private:
   
   /// Handle mutable strings (NSMutableString)
   std::string ExtractMutableString(ValueObject &valobj);
+  
+  /// Handle inline strings (GSCInlineString/GSUInlineString)
+  /// These store string data immediately after the object in memory
+  std::string ExtractInlineString(ValueObject &valobj);
 };
 
 /// Function wrapper for LLDB registration

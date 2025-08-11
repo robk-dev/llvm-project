@@ -1,0 +1,34 @@
+b custom_class_test.m:125
+run
+script
+import lldb
+target = lldb.debugger.GetSelectedTarget()
+process = target.GetProcess()
+thread = process.GetSelectedThread()
+frame = thread.GetSelectedFrame()
+
+# Get the account variable
+account = frame.FindVariable("account")
+personInfo = frame.FindVariable("personInfo")
+fruits = frame.FindVariable("fruits")
+magicNumber = frame.FindVariable("magicNumber")
+
+print(f"Account: type={account.GetTypeName()}, value={account.GetValue()}, summary={account.GetSummary()}")
+print(f"Account address: {account.GetAddress()}")
+print(f"Account children: {account.GetNumChildren()}")
+
+print(f"PersonInfo: type={personInfo.GetTypeName()}, value={personInfo.GetValue()}, summary={personInfo.GetSummary()}")
+print(f"PersonInfo children: {personInfo.GetNumChildren()}")
+
+print(f"Fruits: type={fruits.GetTypeName()}, value={fruits.GetValue()}, summary={fruits.GetSummary()}")
+print(f"Fruits children: {fruits.GetNumChildren()}")
+
+print(f"MagicNumber: type={magicNumber.GetTypeName()}, value={magicNumber.GetValue()}, summary={magicNumber.GetSummary()}")
+
+# Try to get children
+if personInfo.GetNumChildren() > 0:
+    for i in range(personInfo.GetNumChildren()):
+        child = personInfo.GetChildAtIndex(i)
+        print(f"  PersonInfo child {i}: {child.GetName()} = {child.GetValue()}")
+
+quit

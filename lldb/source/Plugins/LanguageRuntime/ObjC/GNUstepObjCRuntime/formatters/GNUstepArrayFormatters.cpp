@@ -434,7 +434,7 @@ std::string GNUstepNSArraySummaryProvider::GetElementSummary(Process *process, l
   context.ExitObject(element_addr);
   
   // For non-string objects where we couldn't get a better summary
-  return "<object>";
+  return "";
 }
 
 bool GNUstepNSArraySummaryProvider::IsGNUstepTaggedPointer(lldb::addr_t addr) {
@@ -466,8 +466,38 @@ std::string GNUstepNSArraySummaryProvider::TryExtractStringContent(Process *proc
       if (!decoded.empty()) {
         return decoded;
       }
-      // Fallback if decoding fails
-      return "<tagged_string>";
+      
+      // Enhanced fallback: try different decoding approaches if standard fails
+      // Some tagged strings might use slightly different encoding
+      
+      // Try manual decode with different parameters
+      int length = (obj_addr >> 3) & 0x1f;
+      if (length > 0 && length <= 9) {
+        std::string manual_result;
+        manual_result.reserve(length);
+        bool all_printable = true;
+        
+        for (int i = 0; i < length; i++) {
+          uint64_t mask = 0xFE00000000000000ULL >> (i * 7);
+          char c = (obj_addr & mask) >> (57 - (i * 7));
+          if (c >= 0x20 && c <= 0x7e) {
+            manual_result += c;
+          } else {
+            all_printable = false;
+            break;
+          }
+        }
+        
+        if (all_printable && !manual_result.empty()) {
+          return manual_result;
+        }
+      }
+      
+      // Final fallback: show the raw tagged pointer value for debugging
+      char buffer[64];
+      snprintf(buffer, sizeof(buffer), "<tagged_str_0x%llx>", 
+               (unsigned long long)obj_addr);
+      return std::string(buffer);
     }
     
     // Check if it's a tagged number - return empty to let GetElementSummary handle it properly

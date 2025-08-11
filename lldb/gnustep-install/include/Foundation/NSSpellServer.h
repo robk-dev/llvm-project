@@ -26,8 +26,7 @@
    You should have received a copy of the GNU Lesser General Public
    License along with this library; see the file COPYING.LIB.
     If not, write to the Free Software Foundation,
-   51 Franklin Street, Fifth Floor,
-   Boston, MA 02110-1301, USA.
+   31 Milk Street #960789 Boston, MA 02196 USA.
 */ 
 
 #ifndef _GNUstep_H_NSSpellServer
@@ -162,6 +161,12 @@ findMisspelledWordInString: (NSString *)stringToCheck
 #endif
 
 @end
+
+#if	!NO_GNUSTEP
+// Function to create name for spell server
+GS_EXPORT NSString*
+GSSpellServerName(NSString *vendor, NSString *language);
+#endif
 
 #if     defined(__cplusplus)
 }

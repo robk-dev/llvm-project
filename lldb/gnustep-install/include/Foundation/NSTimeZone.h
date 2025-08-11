@@ -1,4 +1,4 @@
-/* Interface for NSTimeZone for GNUStep
+/**Interface for NSTimeZone for GNUStep
    Copyright (C) 1994, 1996, 1999 Free Software Foundation, Inc.
 
    This file is part of the GNUstep Base Library.
@@ -15,8 +15,7 @@
 
    You should have received a copy of the GNU Lesser General Public
    License along with this library; if not, write to the Free
-   Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
-   Boston, MA 02110 USA.
+   Software Foundation, Inc., 31 Milk Street #960789 Boston, MA 02196 USA.
   */
 
 #ifndef __NSTimeZone_h_GNUSTEP_BASE_INCLUDE
@@ -49,19 +48,19 @@ GS_EXPORT NSString * const NSSystemTimeZoneDidChangeNotification;
 GS_EXPORT_CLASS
 @interface NSTimeZone : NSObject
 
-//Creating and Initializing an NSTimeZone
+// Creating and Initializing an NSTimeZone
 + (NSTimeZone*) localTimeZone;
 + (NSTimeZone*) timeZoneForSecondsFromGMT: (NSInteger)seconds;
 + (NSTimeZone*) timeZoneWithName: (NSString*)aTimeZoneName;
 
-//Managing Time Zones
+// Managing Time Zones
 + (void) setDefaultTimeZone: (NSTimeZone*)aTimeZone;
 
 // Getting Time Zone Information
 + (NSDictionary*) abbreviationDictionary;
 + (NSArray*) knownTimeZoneNames;
 
-//Getting Arrays of Time Zones
+// Getting Arrays of Time Zones
 + (NSArray*) timeZoneArray;
 - (NSArray*) timeZoneDetailArray;
 
@@ -89,16 +88,16 @@ GS_EXPORT_CLASS
 #endif
 
 #if OS_API_VERSION(MAC_OS_X_VERSION_10_5,GS_API_LATEST) 
-- (NSTimeInterval) daylightSavingTimeOffsetForDate: (NSDate *)aDate;
-/** Not implemented */
-- (NSDate *) nextDaylightSavingTimeTransitionAfterDate: (NSDate *)aDate;
+- (NSTimeInterval) daylightSavingTimeOffsetForDate: (NSDate*)aDate;
+
+- (NSDate*) nextDaylightSavingTimeTransitionAfterDate: (NSDate*)aDate;
 
 - (NSTimeInterval) daylightSavingTimeOffset;
-/** Not implemented */
-- (NSDate *) nextDaylightSavingTimeTransition;
 
-- (NSString *)localizedName: (NSTimeZoneNameStyle)style
-                     locale: (NSLocale *)locale;
+- (NSDate*) nextDaylightSavingTimeTransition;
+
+- (NSString*) localizedName: (NSTimeZoneNameStyle)style
+                     locale: (NSLocale*)locale;
 #endif
 
 #if	OS_API_VERSION(GS_API_OPENSTEP, GS_API_MACOSX)

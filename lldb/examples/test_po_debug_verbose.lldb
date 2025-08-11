@@ -1,0 +1,10 @@
+# Debug po functionality with more verbose output
+file test_po_debug
+log enable lldb process types
+b test_po_debug.m:21
+run
+expr (void*)string
+expr (NSString*)[(id)string description]
+po string
+continue
+quit

@@ -110,22 +110,43 @@ ObjCLanguageRuntime::ClassDescriptorSP
 GNUstepClassDescriptor::GetSuperclass() {
   std::lock_guard<std::recursive_mutex> guard(m_mutex);
   
+  // Strategy 1: Use cached class info if available
   EnsureClassInfoLoaded();
   
-  if (!m_class_info || !m_class_info->superclass_ptr)
-    return ObjCLanguageRuntime::ClassDescriptorSP();
+  if (m_class_info && m_class_info->superclass_ptr) {
+    // Create a new descriptor for the superclass
+    ObjCLanguageRuntime::ObjCISA superclass_isa = 
+        reinterpret_cast<ObjCLanguageRuntime::ObjCISA>(
+            m_class_info->superclass_ptr);
+    
+    const char *superclass_name = m_class_info->superclass_name.empty() 
+        ? nullptr 
+        : m_class_info->superclass_name.c_str();
+    
+    return ObjCLanguageRuntime::ClassDescriptorSP(
+        new GNUstepClassDescriptor(m_runtime, superclass_isa, superclass_name));
+  }
   
-  // Create a new descriptor for the superclass
-  ObjCLanguageRuntime::ObjCISA superclass_isa = 
-      reinterpret_cast<ObjCLanguageRuntime::ObjCISA>(
-          m_class_info->superclass_ptr);
+  // Strategy 2: Direct runtime API call if class info not loaded but class_ptr available
+  if (m_class_ptr && m_runtime_api) {
+    auto class_info_result = m_runtime_api->GetClassInfoFromPointer(
+        reinterpret_cast<GNUstepRuntimeV2API::Class>(m_class_ptr));
+    
+    if (class_info_result && class_info_result->superclass_ptr) {
+      ObjCLanguageRuntime::ObjCISA superclass_isa = 
+          reinterpret_cast<ObjCLanguageRuntime::ObjCISA>(
+              class_info_result->superclass_ptr);
+      
+      const char *superclass_name = class_info_result->superclass_name.empty() 
+          ? nullptr 
+          : class_info_result->superclass_name.c_str();
+      
+      return ObjCLanguageRuntime::ClassDescriptorSP(
+          new GNUstepClassDescriptor(m_runtime, superclass_isa, superclass_name));
+    }
+  }
   
-  const char *superclass_name = m_class_info->superclass_name.empty() 
-      ? nullptr 
-      : m_class_info->superclass_name.c_str();
-  
-  return ObjCLanguageRuntime::ClassDescriptorSP(
-      new GNUstepClassDescriptor(m_runtime, superclass_isa, superclass_name));
+  return ObjCLanguageRuntime::ClassDescriptorSP();
 }
 
 ObjCLanguageRuntime::ClassDescriptorSP 
@@ -152,10 +173,21 @@ bool GNUstepClassDescriptor::IsValid() {
 uint64_t GNUstepClassDescriptor::GetInstanceSize() {
   std::lock_guard<std::recursive_mutex> guard(m_mutex);
   
+  // Strategy 1: Use cached class info if available
   EnsureClassInfoLoaded();
   
   if (m_class_info) {
     return m_class_info->instance_size;
+  }
+  
+  // Strategy 2: Direct runtime API call if class info not loaded but class_ptr available
+  if (m_class_ptr && m_runtime_api) {
+    auto class_info_result = m_runtime_api->GetClassInfoFromPointer(
+        reinterpret_cast<GNUstepRuntimeV2API::Class>(m_class_ptr));
+    
+    if (class_info_result) {
+      return class_info_result->instance_size;
+    }
   }
   
   return 0;
@@ -167,27 +199,54 @@ void GNUstepClassDescriptor::LoadIVars() const {
   if (m_ivars_loaded)
     return;
   
+  // Strategy 1: Use cached class info if available
   EnsureClassInfoLoaded();
   
-  if (!m_class_info)
+  if (m_class_info) {
+    m_ivar_descriptors.clear();
+    
+    // Convert GNUstepRuntimeV2API::IvarInfo to iVarDescriptor
+    for (const auto &ivar_info : m_class_info->all_ivars) {
+      iVarDescriptor descriptor;
+      descriptor.m_name = ConstString(ivar_info.name.c_str());
+      descriptor.m_offset = static_cast<int32_t>(ivar_info.offset);
+      descriptor.m_size = ivar_info.size;
+      
+      // Type encoding would need to be converted to CompilerType
+      // This is a simplified version - real implementation would need
+      // proper type conversion through TypeSystemClang
+      
+      m_ivar_descriptors.push_back(descriptor);
+    }
+    
+    m_ivars_loaded = true;
     return;
-  
-  m_ivar_descriptors.clear();
-  
-  // Convert GNUstepRuntimeV2API::IvarInfo to iVarDescriptor
-  for (const auto &ivar_info : m_class_info->all_ivars) {
-    iVarDescriptor descriptor;
-    descriptor.m_name = ConstString(ivar_info.name.c_str());
-    descriptor.m_offset = static_cast<int32_t>(ivar_info.offset);
-    descriptor.m_size = ivar_info.size;
-    
-    // Type encoding would need to be converted to CompilerType
-    // This is a simplified version - real implementation would need
-    // proper type conversion through TypeSystemClang
-    
-    m_ivar_descriptors.push_back(descriptor);
   }
   
+  // Strategy 2: Direct runtime API call if class_ptr available
+  if (m_class_ptr && m_runtime_api) {
+    auto class_info_result = m_runtime_api->GetClassInfoFromPointer(
+        reinterpret_cast<GNUstepRuntimeV2API::Class>(m_class_ptr));
+    
+    if (class_info_result) {
+      m_ivar_descriptors.clear();
+      
+      // Convert runtime ivar info to descriptors
+      for (const auto &ivar_info : class_info_result->all_ivars) {
+        iVarDescriptor descriptor;
+        descriptor.m_name = ConstString(ivar_info.name.c_str());
+        descriptor.m_offset = static_cast<int32_t>(ivar_info.offset);
+        descriptor.m_size = ivar_info.size;
+        
+        m_ivar_descriptors.push_back(descriptor);
+      }
+      
+      m_ivars_loaded = true;
+      return;
+    }
+  }
+  
+  // Mark as loaded even if we couldn't get ivars to avoid repeated attempts
   m_ivars_loaded = true;
 }
 

@@ -12,7 +12,9 @@
 
 using namespace lldb;
 using namespace lldb_private;
-using namespace lldb_private::formatters;
+
+namespace lldb_private {
+namespace formatters {
 
 bool GNUstepNSUserDefaultsSummaryProvider::FormatObject(ValueObject &valobj, Stream &stream, 
                                                         const TypeSummaryOptions &options) {
@@ -144,14 +146,15 @@ uint32_t GNUstepNSUserDefaultsSummaryProvider::ReadGSArrayCount(Process *process
     return 0;
   }
   
-  // GSMutableArray structure (based on GNUstep implementation):
-  // +0: isa
-  // +8: some field (observed as address)
-  // +16: count (uint32_t or uint64_t depending on architecture)
+  // GSMutableArray structure (from GSPrivate.h):
+  // +0: isa (8 bytes)
+  // +8: _contents_array (pointer, 8 bytes)
+  // +16: _count (unsigned int, 4 bytes)
+  // +20: _capacity (unsigned int, 4 bytes)
   
   uint32_t addr_size = GNUstepRuntimeHelper::GetAddressByteSize(process);
   
-  // Skip isa and next field, read count at offset +16
+  // Read count at offset +16 (after isa and _contents_array pointer)
   uint32_t count = 0;
   bool success = GNUstepRuntimeHelper::ReadMemory(process, array_addr + addr_size * 2, &count, sizeof(count));
   
@@ -168,23 +171,47 @@ uint32_t GNUstepNSUserDefaultsSummaryProvider::ReadGSDictionaryCount(Process *pr
     return 0;
   }
   
-  // GSMutableDictionary structure (based on observation):
-  // +0: isa
-  // +8: some field
-  // +16: count (observed value of 3 at this location)
-  // +24: capacity or other field
+  // GNUstep dictionaries use GSIMapTable internally
+  // The structure typically has:
+  // +0: isa (8 bytes)
+  // +8: GSIMapTable structure inline or pointer to it
+  // For GSIMapTable (from GSIMap.h):
+  // +0: zone pointer (8 bytes)
+  // +8: nodeCount (uintptr_t, 8 bytes on 64-bit)
+  // +16: bucketCount (uintptr_t, 8 bytes)
   
   uint32_t addr_size = GNUstepRuntimeHelper::GetAddressByteSize(process);
   
-  uint32_t count = 0;
-  bool success = GNUstepRuntimeHelper::ReadMemory(process, dict_addr + addr_size * 2, &count, sizeof(count));
+  // Try to read the GSIMapTable nodeCount
+  // First, check if we have a pointer to GSIMapTable or inline structure
+  // For NSMutableDictionary/GSMutableDictionary, it's typically at offset +8
+  
+  // Read potential pointer to map table
+  lldb::addr_t map_addr = 0;
+  Status error;
+  map_addr = GNUstepRuntimeHelper::ReadPointer(process, dict_addr + addr_size, error);
+  
+  if (error.Fail() || map_addr == 0) {
+    // Try reading count directly at offset +16 (inline case)
+    uint64_t count = 0;
+    bool success = GNUstepRuntimeHelper::ReadMemory(process, dict_addr + addr_size * 2, &count, sizeof(uint64_t));
+    if (!success) {
+      return 0;
+    }
+    // Sanity check
+    return (count < 10000) ? static_cast<uint32_t>(count) : 0;
+  }
+  
+  // Read nodeCount from GSIMapTable at offset +8 (after zone pointer)
+  uint64_t node_count = 0;
+  bool success = GNUstepRuntimeHelper::ReadMemory(process, map_addr + addr_size, &node_count, sizeof(uint64_t));
   
   if (!success) {
     return 0;
   }
   
   // Sanity check - domain dictionaries shouldn't be massive
-  return (count < 10000) ? count : 0;
+  return (node_count < 10000) ? static_cast<uint32_t>(node_count) : 0;
 }
 
 uint32_t GNUstepNSUserDefaultsSummaryProvider::EstimateKeyCount(Process *process, lldb::addr_t dict_addr) {
@@ -215,3 +242,6 @@ bool GNUstepNSUserDefaultsFormatterFunction(ValueObject &valobj, Stream &stream,
   GNUstepNSUserDefaultsSummaryProvider formatter;
   return formatter.FormatObject(valobj, stream, options);
 }
+
+} // namespace formatters
+} // namespace lldb_private

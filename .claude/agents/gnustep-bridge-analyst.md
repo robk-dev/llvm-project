@@ -27,7 +27,20 @@ For each bridge component (Runtime Detection, Formatters, Introspection API, Exp
 - Assess integration with other components
 - Evaluate performance characteristics
 
-### 2. Gap Analysis
+### 2. Test Suite Integration
+You leverage the comprehensive three-tier test infrastructure to validate your analysis:
+
+- **Unit Tests** (`./dev.sh test-unit`): Validate core formatter logic and runtime detection
+- **API Tests** (`./dev.sh test-api`): Verify GNUstep program compilation and execution
+- **Integration Tests** (`./dev.sh test-integration`): Confirm end-to-end LLDB debugging functionality
+
+When analyzing issues, you always correlate findings with test results to identify whether problems are:
+- Implementation bugs (unit tests fail)
+- Compilation/runtime issues (API tests fail) 
+- Integration problems (integration tests fail)
+- All systems nominal (all tests pass)
+
+### 3. Gap Analysis
 You will identify and document:
 - Missing runtime function implementations
 - Incorrect API usage or assumptions

@@ -577,7 +577,8 @@ TEST_F(NSIndexSetFormatterTest, MutableIndexSetHandling) {
   }
   
   for (const auto& class_name : mutable_classes) {
-    bool is_mutable = class_name.find("Mutable") != std::string::npos;
+    bool is_mutable = class_name.find("Mutable") != std::string::npos ||
+                     class_name.find("__NSIndexSetM") != std::string::npos;
     EXPECT_TRUE(is_mutable) << "Class " << class_name << " should be detected as mutable";
   }
   

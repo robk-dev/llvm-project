@@ -1,0 +1,36 @@
+*** GNUstepObjCRuntime::Initialize() called - Plugin registered ***
+🎯 Global .lldbinit loaded - project-specific .lldbinit files will now be read
+(lldb) target create "./test_nsstring_formatter"
+Current executable set to '/home/robk/code/llvm-project/lldb/examples/test_nsstring_formatter' (x86_64).
+(lldb) command source -s 0 './test_nsstring_formatter.lldb'
+Executing commands in '/home/robk/code/llvm-project/lldb/examples/test_nsstring_formatter.lldb'.
+(lldb) file ./test_nsstring_formatter
+Current executable set to '/home/robk/code/llvm-project/lldb/examples/test_nsstring_formatter' (x86_64).
+(lldb) b main
+Breakpoint 1: where = test_nsstring_formatter`main + 25 at test_nsstring_formatter.m:4:22, address = 0x00000000000021c9
+(lldb) run
+*** GNUstepObjCRuntime::CreateInstance() called for language 16 ***
+*** GNUstepObjCRuntime::CreateInstance() called for language 17 ***
+5 locations added to breakpoint 1
+*** GNUstepObjCRuntime::CreateInstance() called for language 2 ***
+*** GNUstepObjCRuntime::CreateInstance() called for language 2 ***
+Process 29241 launched: '/home/robk/code/llvm-project/lldb/examples/test_nsstring_formatter' (x86_64)
+Process 29241 stopped
+* thread #1, name = 'test_nsstring_f', stop reason = breakpoint 1.1
+    frame #0: 0x00005555555561c9 test_nsstring_formatter`main(argc=1, argv=0x00007fffffffd308) at test_nsstring_formatter.m:4:22
+   1   	#import <Foundation/Foundation.h>
+   2   	
+   3   	int main(int argc, char *argv[]) {
+-> 4   	    @autoreleasepool {
+    	                     ^
+   5   	        // Test 1: Constant strings (NSConstantString)
+   6   	        NSString *constantString1 = @"Hello, World!";
+   7   	        NSString *constantString2 = @"Testing GNUstep NSString formatter";
+(lldb) po nil
+*** GNUstepObjCRuntime::CreateInstance() called for language 2 ***
+*** GNUstepObjCRuntime::CreateInstance() called for language 2 ***
+nil
+
+(lldb) po emptyString
+          ^
+          error: use of undeclared identifier 'emptyString'

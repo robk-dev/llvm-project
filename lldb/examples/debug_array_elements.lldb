@@ -1,0 +1,28 @@
+#!/usr/bin/env lldb -S
+
+# Test script to examine array element corruption
+target create test_array_corruption
+
+# Set breakpoints
+b test_array_corruption.m:23
+run
+
+# When we hit the breakpoint, examine the array
+print fruits
+print [fruits count]
+
+# Examine individual elements - this is where we should see the corruption
+print fruits[0]
+print fruits[1]
+print fruits[2]
+print fruits[3]
+
+# Also test the mutable array
+print items
+print [items count]
+print items[0]
+print items[4]
+
+# Exit
+continue
+exit

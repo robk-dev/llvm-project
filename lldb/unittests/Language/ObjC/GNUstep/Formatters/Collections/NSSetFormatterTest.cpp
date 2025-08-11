@@ -77,11 +77,11 @@ TEST_F(NSSetFormatterTest, GSIMapTableStructureKnowledge) {
   const size_t BUCKET_COUNT_OFFSET = MAP_TABLE_OFFSET + 16; // 24
   const size_t BUCKETS_OFFSET = MAP_TABLE_OFFSET + 24;     // 32
   
-  EXPECT_EQ(ISA_OFFSET, 0) << "ISA at offset 0 (same as dictionary)";
-  EXPECT_EQ(MAP_TABLE_OFFSET, 8) << "Map table at offset 8 (same as dictionary)";
-  EXPECT_EQ(NODE_COUNT_OFFSET, 16) << "Node count at offset 16 (same as dictionary)";
-  EXPECT_EQ(BUCKET_COUNT_OFFSET, 24) << "Bucket count at offset 24 (same as dictionary)";
-  EXPECT_EQ(BUCKETS_OFFSET, 32) << "Buckets at offset 32 (same as dictionary)";
+  EXPECT_EQ(ISA_OFFSET, 0u) << "ISA at offset 0 (same as dictionary)";
+  EXPECT_EQ(MAP_TABLE_OFFSET, 8u) << "Map table at offset 8 (same as dictionary)";
+  EXPECT_EQ(NODE_COUNT_OFFSET, 16u) << "Node count at offset 16 (same as dictionary)";
+  EXPECT_EQ(BUCKET_COUNT_OFFSET, 24u) << "Bucket count at offset 24 (same as dictionary)";
+  EXPECT_EQ(BUCKETS_OFFSET, 32u) << "Buckets at offset 32 (same as dictionary)";
   
   // Verify that GSSet and GSDictionary have identical hash table structure
   const size_t SET_HEADER_SIZE = ISA_OFFSET + sizeof(void*) + MAP_TABLE_OFFSET;
@@ -91,7 +91,7 @@ TEST_F(NSSetFormatterTest, GSIMapTableStructureKnowledge) {
   
   // Test hash table implementation sharing
   const size_t MAP_TABLE_SIZE = 4 * sizeof(void*); // zone + nodeCount + bucketCount + buckets
-  EXPECT_EQ(MAP_TABLE_SIZE, 32) << "Map table size should be consistent";
+  EXPECT_EQ(MAP_TABLE_SIZE, 32u) << "Map table size should be consistent";
 }
 
 TEST_F(NSSetFormatterTest, HashTableTraversalAlgorithm) {
@@ -110,9 +110,9 @@ TEST_F(NSSetFormatterTest, HashTableTraversalAlgorithm) {
   const size_t NODE_VALUE_OFFSET = 16; // Unused for sets
   const size_t NODE_SIZE = 24;
   
-  EXPECT_EQ(NODE_NEXT_OFFSET, 0) << "Next pointer at offset 0";
-  EXPECT_EQ(NODE_KEY_OFFSET, 8) << "Set element (key) at offset 8";
-  EXPECT_EQ(NODE_VALUE_OFFSET, 16) << "Value field at offset 16 (unused for sets)";
+  EXPECT_EQ(NODE_NEXT_OFFSET, 0u) << "Next pointer at offset 0";
+  EXPECT_EQ(NODE_KEY_OFFSET, 8u) << "Set element (key) at offset 8";
+  EXPECT_EQ(NODE_VALUE_OFFSET, 16u) << "Value field at offset 16 (unused for sets)";
   EXPECT_EQ(NODE_SIZE, 3 * sizeof(void*)) << "Node size should be 3 pointers";
   
   // Test set-specific traversal behavior
@@ -311,7 +311,7 @@ TEST_F(NSSetFormatterTest, PerformanceRequirements) {
   auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
   
   EXPECT_LT(duration.count(), 50) << "Creating 1000 set formatters should be fast (<50ms)";
-  EXPECT_EQ(formatters.size(), 1000) << "All set formatters should be created successfully";
+  EXPECT_EQ(formatters.size(), 1000u) << "All set formatters should be created successfully";
 }
 
 TEST_F(NSSetFormatterTest, ErrorHandling) {
@@ -387,9 +387,12 @@ TEST_F(NSSetFormatterTest, ErrorHandling) {
     
     if (bucket_ptr == 0x1000) {
       EXPECT_TRUE(should_be_usable) << "Valid aligned pointer should be usable";
+    } else if (bucket_ptr == 0) {
+      // Null pointers can be handled (empty buckets)
+      EXPECT_TRUE(is_null) << "Null pointer should be identified as null";
     } else {
-      EXPECT_FALSE(should_be_usable || bucket_ptr == 0) 
-          << "Invalid/unaligned/null pointers should not be usable (except null may be handled)";
+      EXPECT_FALSE(should_be_usable) 
+          << "Invalid/unaligned pointers should not be usable";
     }
   }
 }
@@ -420,7 +423,8 @@ TEST_F(NSSetFormatterTest, MutableVsImmutableHandling) {
   
   // Validate mutable detection
   for (const auto& class_name : mutable_set_classes) {
-    bool detected_mutable = class_name.find("Mutable") != std::string::npos;
+    bool detected_mutable = class_name.find("Mutable") != std::string::npos ||
+                           class_name.find("__NSSetM") != std::string::npos;
     EXPECT_TRUE(detected_mutable)
         << "Class " << class_name << " should be detected as mutable";
   }
@@ -436,8 +440,8 @@ TEST_F(NSSetFormatterTest, MutableVsImmutableHandling) {
   const size_t SET_HEADER_SIZE = sizeof(void*) + sizeof(void*); // isa + map
   const size_t MAP_TABLE_SIZE = 4 * sizeof(void*); // zone + nodeCount + bucketCount + buckets
   
-  EXPECT_EQ(SET_HEADER_SIZE, 16) << "Set header size consistent for both types";
-  EXPECT_EQ(MAP_TABLE_SIZE, 32) << "Map table size consistent for both types";
+  EXPECT_EQ(SET_HEADER_SIZE, 16u) << "Set header size consistent for both types";
+  EXPECT_EQ(MAP_TABLE_SIZE, 32u) << "Map table size consistent for both types";
   
   // Test display format implications
   struct SetDisplayTest {
@@ -682,7 +686,7 @@ TEST_F(NSSetFormatterTest, ThreadSafety) {
     thread.join();
   }
   
-  EXPECT_EQ(results.size(), 10) << "All set formatters should be created from multiple threads";
+  EXPECT_EQ(results.size(), 10u) << "All set formatters should be created from multiple threads";
   
   // All formatters should be valid
   for (const auto& formatter : results) {

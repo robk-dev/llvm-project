@@ -12,7 +12,7 @@
 #include "lldb/Host/HostInfo.h"
 #include "lldb/Utility/ConstString.h"
 #include "lldb/Utility/Stream.h"
-#include "lldb/Core/ValueObject.h"
+#include "lldb/ValueObject/ValueObject.h"
 #include "lldb/Utility/StreamString.h"
 #include "lldb/Core/Debugger.h"
 #include "lldb/Target/Platform.h"
@@ -60,10 +60,9 @@ TEST_F(NSJSONSerializationFormatterTest, StaticClassBehavior) {
   // + (NSInteger)writeJSONObject:(id)obj toStream:(NSOutputStream *)stream options:(NSJSONWritingOptions)opt error:(NSError **)error
   
   // Test actual NSJSONSerialization class object formatting
-  lldb::TargetSP target = std::make_shared<Target>(DebuggerSP(), ArchSpec("x86_64"), 
-                                                   PlatformSP(), true);
+  lldb::TargetSP target = std::make_shared<MockTarget>(*Debugger::CreateInstance(), ArchSpec("x86_64"), 
+                                                   PlatformSP());
   lldb::ProcessSP process = std::make_shared<MockProcess>(target, ListenerSP());
-  target->SetProcessSP(process);
   
   // Create NSJSONSerialization class object (metaclass)
   struct {
@@ -126,10 +125,9 @@ TEST_F(NSJSONSerializationFormatterTest, ReadingOptionsEnum) {
   EXPECT_EQ(combined, 3) << "Combined reading options should work";
   
   // Test actual options formatting using the formatter
-  lldb::TargetSP target = std::make_shared<Target>(DebuggerSP(), ArchSpec("x86_64"), 
-                                                   PlatformSP(), true);
+  lldb::TargetSP target = std::make_shared<MockTarget>(*Debugger::CreateInstance(), ArchSpec("x86_64"), 
+                                                   PlatformSP());
   lldb::ProcessSP process = std::make_shared<MockProcess>(target, ListenerSP());
-  target->SetProcessSP(process);
   
   // Create an object with reading options
   struct {
@@ -190,10 +188,9 @@ TEST_F(NSJSONSerializationFormatterTest, WritingOptionsEnum) {
   EXPECT_EQ(combined, 7) << "Combined writing options should work";
   
   // Test actual writing options formatting
-  lldb::TargetSP target = std::make_shared<Target>(DebuggerSP(), ArchSpec("x86_64"), 
-                                                   PlatformSP(), true);
+  lldb::TargetSP target = std::make_shared<MockTarget>(*Debugger::CreateInstance(), ArchSpec("x86_64"), 
+                                                   PlatformSP());
   lldb::ProcessSP process = std::make_shared<MockProcess>(target, ListenerSP());
-  target->SetProcessSP(process);
   
   // Test various writing option combinations
   std::vector<uint64_t> option_tests = {
@@ -249,10 +246,9 @@ TEST_F(NSJSONSerializationFormatterTest, IdDispatcherRouting) {
   
   // Verify the class name routing logic
   // Test actual IdDispatcher routing for JSON classes
-  lldb::TargetSP target = std::make_shared<Target>(DebuggerSP(), ArchSpec("x86_64"), 
-                                                   PlatformSP(), true);
+  lldb::TargetSP target = std::make_shared<MockTarget>(*Debugger::CreateInstance(), ArchSpec("x86_64"), 
+                                                   PlatformSP());
   lldb::ProcessSP process = std::make_shared<MockProcess>(target, ListenerSP());
-  target->SetProcessSP(process);
   
   // Set up basic JSON serialization object
   struct {
@@ -312,10 +308,9 @@ TEST_F(NSJSONSerializationFormatterTest, JSONDataHandling) {
   EXPECT_FALSE(INVALID_JSON_1.find("\"key\"") == 0) << "Invalid JSON should be detected";
   
   // Test actual JSON data handling with real formatter
-  lldb::TargetSP target = std::make_shared<Target>(DebuggerSP(), ArchSpec("x86_64"), 
-                                                   PlatformSP(), true);
+  lldb::TargetSP target = std::make_shared<MockTarget>(*Debugger::CreateInstance(), ArchSpec("x86_64"), 
+                                                   PlatformSP());
   lldb::ProcessSP process = std::make_shared<MockProcess>(target, ListenerSP());
-  target->SetProcessSP(process);
   
   GNUstepNSJSONSerializationSummaryProvider provider;
   
@@ -394,10 +389,9 @@ TEST_F(NSJSONSerializationFormatterTest, ErrorHandling) {
   EXPECT_FALSE(NON_JSON.find("{") == 0 || NON_JSON.find("[") == 0) << "Non-JSON content should be detected";
   
   // Test actual error handling with malformed/invalid JSON
-  lldb::TargetSP target = std::make_shared<Target>(DebuggerSP(), ArchSpec("x86_64"), 
-                                                   PlatformSP(), true);
+  lldb::TargetSP target = std::make_shared<MockTarget>(*Debugger::CreateInstance(), ArchSpec("x86_64"), 
+                                                   PlatformSP());
   lldb::ProcessSP process = std::make_shared<MockProcess>(target, ListenerSP());
-  target->SetProcessSP(process);
   
   GNUstepNSJSONSerializationSummaryProvider provider;
   
@@ -497,10 +491,9 @@ TEST_F(NSJSONSerializationFormatterTest, MemoryLayoutUnderstanding) {
   EXPECT_LT(EXPECTED_SUPERCLASS_OFFSET, EXPECTED_NAME_OFFSET) << "Memory layout should be logical";
   
   // Test actual memory layout understanding with real objects
-  lldb::TargetSP target = std::make_shared<Target>(DebuggerSP(), ArchSpec("x86_64"), 
-                                                   PlatformSP(), true);
+  lldb::TargetSP target = std::make_shared<MockTarget>(*Debugger::CreateInstance(), ArchSpec("x86_64"), 
+                                                   PlatformSP());
   lldb::ProcessSP process = std::make_shared<MockProcess>(target, ListenerSP());
-  target->SetProcessSP(process);
   
   GNUstepNSJSONSerializationSummaryProvider provider;
   
@@ -595,10 +588,9 @@ TEST_F(NSJSONSerializationFormatterTest, FormatterOutput) {
   EXPECT_TRUE(EXPECTED_READING_OPTIONS.find("Options") != std::string::npos) << "Options output should be clear";
   
   // Test actual formatter output with real objects
-  lldb::TargetSP target = std::make_shared<Target>(DebuggerSP(), ArchSpec("x86_64"), 
-                                                   PlatformSP(), true);
+  lldb::TargetSP target = std::make_shared<MockTarget>(*Debugger::CreateInstance(), ArchSpec("x86_64"), 
+                                                   PlatformSP());
   lldb::ProcessSP process = std::make_shared<MockProcess>(target, ListenerSP());
-  target->SetProcessSP(process);
   
   GNUstepNSJSONSerializationSummaryProvider provider;
   
@@ -770,10 +762,9 @@ TEST_F(NSJSONSerializationFormatterTest, JSONContentTypeDetection) {
   }
   
   // Test actual JSON content type detection using real formatter methods
-  lldb::TargetSP target = std::make_shared<Target>(DebuggerSP(), ArchSpec("x86_64"), 
-                                                   PlatformSP(), true);
+  lldb::TargetSP target = std::make_shared<MockTarget>(*Debugger::CreateInstance(), ArchSpec("x86_64"), 
+                                                   PlatformSP());
   lldb::ProcessSP process = std::make_shared<MockProcess>(target, ListenerSP());
-  target->SetProcessSP(process);
   
   GNUstepNSJSONSerializationSummaryProvider provider;
   
@@ -862,10 +853,9 @@ TEST_F(NSJSONSerializationFormatterTest, OptionsFormatting) {
   }
   
   // Test actual options flag combination formatting
-  lldb::TargetSP target = std::make_shared<Target>(DebuggerSP(), ArchSpec("x86_64"), 
-                                                   PlatformSP(), true);
+  lldb::TargetSP target = std::make_shared<MockTarget>(*Debugger::CreateInstance(), ArchSpec("x86_64"), 
+                                                   PlatformSP());
   lldb::ProcessSP process = std::make_shared<MockProcess>(target, ListenerSP());
-  target->SetProcessSP(process);
   
   GNUstepNSJSONSerializationSummaryProvider provider;
   
@@ -949,17 +939,16 @@ TEST_F(NSJSONSerializationFormatterTest, LargeJSONHandling) {
     << "Truncated preview should indicate truncation";
   
   // Test actual large JSON handling with real formatter
-  lldb::TargetSP target = std::make_shared<Target>(DebuggerSP(), ArchSpec("x86_64"), 
-                                                   PlatformSP(), true);
+  lldb::TargetSP target = std::make_shared<MockTarget>(*Debugger::CreateInstance(), ArchSpec("x86_64"), 
+                                                   PlatformSP());
   lldb::ProcessSP process = std::make_shared<MockProcess>(target, ListenerSP());
-  target->SetProcessSP(process);
   
   GNUstepNSJSONSerializationSummaryProvider provider;
   
-  // Create large JSON object
-  std::string large_json = "{";
+  // Re-use or create large JSON object
+  large_json = "{";
   for (int i = 0; i < 1000; ++i) {
-    large_json += "\"key" + std::to_string(i) + \":\"value" + std::to_string(i) + \"\",";
+    large_json += "\"key" + std::to_string(i) + "\":\"value" + std::to_string(i) + "\",";
   }
   large_json.back() = '}'; // Replace last comma
   

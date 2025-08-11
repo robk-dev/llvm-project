@@ -1,0 +1,94 @@
+# LLDB script to validate CreateObjectChecker functionality
+# This script tests conditional breakpoints that should trigger object validation
+
+# Load the test program
+target create test_object_checker
+process launch
+
+echo "=== OBJECT CHECKER VALIDATION TEST ==="
+
+# Test Case 1: Simple nil check conditional breakpoint
+echo "\n--- Test Case 1: Simple Nil Check ---"
+breakpoint set --file test_object_checker.m --line 69 --condition "validObj != nil"
+continue
+echo "Hit conditional breakpoint with validObj != nil"
+print validObj
+print (void*)validObj
+
+# Test Case 2: respondsToSelector conditional breakpoint
+echo "\n--- Test Case 2: RespondsToSelector Check ---"
+breakpoint delete --force
+breakpoint set --file test_object_checker.m --line 72 --condition "[(id)validObj respondsToSelector:@selector(performTestAction)]"
+continue
+echo "Hit conditional breakpoint with respondsToSelector check"
+print validObj
+print (BOOL)[(id)validObj respondsToSelector:@selector(performTestAction)]
+
+# Test Case 3: Foundation object validation
+echo "\n--- Test Case 3: Foundation Object Validation ---"
+breakpoint delete --force
+breakpoint set --file test_object_checker.m --line 77 --condition "[(id)string respondsToSelector:@selector(length)]"
+continue
+echo "Hit conditional breakpoint with Foundation string validation"
+print string
+print (BOOL)[(id)string respondsToSelector:@selector(length)]
+
+# Test Case 4: isKindOfClass validation
+echo "\n--- Test Case 4: isKindOfClass Validation ---"
+breakpoint delete --force
+breakpoint set --file test_object_checker.m --line 81 --condition "[array isKindOfClass:[NSArray class]]"
+continue
+echo "Hit conditional breakpoint with isKindOfClass check"
+print array
+print (BOOL)[array isKindOfClass:[NSArray class]]
+
+# Test Case 5: Generic object validation
+echo "\n--- Test Case 5: Generic Object Validation ---"
+breakpoint delete --force
+breakpoint set --file test_object_checker.m --line 87 --condition "[genericObj respondsToSelector:@selector(performTestAction)]"
+continue
+echo "Hit conditional breakpoint with generic object validation"
+print genericObj
+print (BOOL)[genericObj respondsToSelector:@selector(performTestAction)]
+
+# Test Case 6: Complex conditional with multiple checks
+echo "\n--- Test Case 6: Complex Conditional ---"
+breakpoint delete --force
+breakpoint set --file test_object_checker.m --line 94 --condition "corruptedObj != nil && [(id)corruptedObj respondsToSelector:@selector(performTestAction)]"
+continue
+echo "Hit conditional breakpoint with complex validation"
+print corruptedObj
+
+# Test object checker behavior with invalid/corrupted objects
+echo "\n--- Testing Object Checker Error Handling ---"
+
+# Try to evaluate expressions that should trigger object checker
+echo "Testing expression evaluation with object validation:"
+expr (BOOL)[validObj respondsToSelector:@selector(performTestAction)]
+expr (BOOL)[corruptedObj respondsToSelector:@selector(nonExistentMethod)]
+expr (NSUInteger)[(NSString*)validObj length]  # This should fail gracefully
+
+# Test performance of object checker
+echo "\n--- Performance Test ---"
+echo "Testing object checker performance with multiple evaluations:"
+expr (BOOL)[validObj respondsToSelector:@selector(performTestAction)]
+expr (BOOL)[validObj respondsToSelector:@selector(performTestAction)]
+expr (BOOL)[validObj respondsToSelector:@selector(performTestAction)]
+
+continue
+
+# Summary
+echo "\n=== OBJECT CHECKER TEST SUMMARY ==="
+echo "Test completed. Verify that:"
+echo "1. All conditional breakpoints triggered without hanging"
+echo "2. Object validation expressions evaluated correctly"
+echo "3. Invalid objects were handled gracefully"
+echo "4. No crashes or infinite loops occurred"
+echo "5. CreateObjectChecker was called for complex expressions"
+
+# Check LLDB logs for CreateObjectChecker activity
+echo "\nChecking for CreateObjectChecker activity in logs..."
+echo "(Look for 'CreateObjectChecker called with name' messages in console output)"
+
+# Clean exit
+quit

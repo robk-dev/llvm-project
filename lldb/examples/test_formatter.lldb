@@ -2,7 +2,7 @@ settings set interpreter.echo-commands true
 settings set interpreter.echo-comment-commands true
 log enable lldb process
 log enable lldb types
-b custom_class_test.m:125
+b custom_class_test.m:228
 run
 po account
 frame variable account

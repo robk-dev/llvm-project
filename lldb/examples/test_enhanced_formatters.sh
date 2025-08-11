@@ -16,7 +16,7 @@ echo ""
 
 # Test custom_class_test array
 echo -e "Testing with custom_class_test:"
-echo -e "b custom_class_test.m:125\nrun\nframe variable fruits\nquit" | \
+echo -e "b custom_class_test.m:228\nrun\nframe variable fruits\nquit" | \
 /home/robk/code/llvm-project/build/bin/lldb custom_class_test 2>/dev/null | \
 grep -E "fruits.*= " | \
 sed 's/^.*= //'

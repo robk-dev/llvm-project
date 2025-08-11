@@ -12,7 +12,7 @@
 #include "lldb/Host/HostInfo.h"
 #include "lldb/Utility/ConstString.h"
 #include "lldb/Utility/Stream.h"
-#include "lldb/Core/ValueObject.h"
+#include "lldb/ValueObject/ValueObject.h"
 #include "lldb/Utility/StreamString.h"
 #include "lldb/Core/Debugger.h"
 #include "lldb/Target/Platform.h"
@@ -42,12 +42,26 @@ protected:
   void SetUp() override {
     FileSystem::Initialize();
     HostInfo::Initialize();
+    
+    // Create shared test infrastructure
+    m_debugger = Debugger::CreateInstance();
+    ArchSpec arch("x86_64-pc-linux");
+    PlatformSP platform_sp = Platform::GetHostPlatform();
+    m_target = std::make_shared<MockTarget>(*m_debugger, arch, platform_sp);
+    m_process = std::make_shared<MockProcess>(m_target, ListenerSP());
   }
   
   void TearDown() override {
+    m_process.reset();
+    m_target.reset();
+    Debugger::Destroy(m_debugger);
     HostInfo::Terminate();
     FileSystem::Terminate();
   }
+  
+  DebuggerSP m_debugger;
+  TargetSP m_target;
+  std::shared_ptr<MockProcess> m_process;
 };
 
 TEST_F(NSValueFormatterTest, IdDispatcherRouting) {
@@ -72,13 +86,9 @@ TEST_F(NSValueFormatterTest, IdDispatcherRouting) {
   // Verify IdDispatcher function exists
   // Note: IdDispatcher is part of the formatter system architecture
   // Test actual IdDispatcher function call
-  lldb::TargetSP target = std::make_shared<Target>(DebuggerSP(), ArchSpec("x86_64"), 
-                                                   PlatformSP(), true);
-  lldb::ProcessSP process = std::make_shared<MockProcess>(target, ListenerSP());
-  target->SetProcessSP(process);
   
-  // Create a mock NSValue object
-  lldb::ValueObjectSP nsvalue_obj = MockValueObject::Create(target, "test_value", 
+  // Create a mock NSValue object using the test infrastructure
+  lldb::ValueObjectSP nsvalue_obj = MockValueObject::Create(m_target, "test_value", 
                                                             0x1000, "NSValue");
   
   StreamString output_stream;
@@ -107,17 +117,14 @@ TEST_F(NSValueFormatterTest, NSNumberDelegation) {
   // but we validate the design pattern
   
   // Create mock NSNumber object (inherits from NSValue)
-  lldb::TargetSP target = std::make_shared<Target>(DebuggerSP(), ArchSpec("x86_64"), 
-                                                   PlatformSP(), true);
-  lldb::ProcessSP process = std::make_shared<MockProcess>(target, ListenerSP());
-  target->SetProcessSP(process);
+  // Use the shared test infrastructure
   
   // Set up NSNumber memory layout  
-  static_cast<MockProcess*>(process.get())->SetMemory(0x2000, &process, sizeof(void*)); // ISA
+  static_cast<MockProcess*>(m_process.get())->SetMemory(0x2000, &m_process, sizeof(void*)); // ISA
   int64_t number_value = 42;
-  static_cast<MockProcess*>(process.get())->SetMemory(0x2008, &number_value, sizeof(number_value));
+  static_cast<MockProcess*>(m_process.get())->SetMemory(0x2008, &number_value, sizeof(number_value));
   
-  lldb::ValueObjectSP nsnumber_obj = MockValueObject::Create(target, "test_number", 
+  lldb::ValueObjectSP nsnumber_obj = MockValueObject::Create(m_target, "test_number", 
                                                              0x2000, "NSNumber");
   
   StreamString output_stream;
@@ -158,10 +165,7 @@ TEST_F(NSValueFormatterTest, PrimitiveWrapperTypes) {
   EXPECT_EQ(DOUBLE_ENCODING.length(), 1) << "Type encoding should be single character";
   
   // Test actual type encoding validation
-  lldb::TargetSP target = std::make_shared<Target>(DebuggerSP(), ArchSpec("x86_64"), 
-                                                   PlatformSP(), true);
-  lldb::ProcessSP process = std::make_shared<MockProcess>(target, ListenerSP());
-  target->SetProcessSP(process);
+  // Use the shared test infrastructure
   
   // Create NSValue wrapping an integer
   struct {
@@ -176,9 +180,9 @@ TEST_F(NSValueFormatterTest, PrimitiveWrapperTypes) {
     4        // length
   };
   
-  static_cast<MockProcess*>(process.get())->SetMemory(0x4000, &nsvalue_int, sizeof(nsvalue_int));
+  static_cast<MockProcess*>(m_process.get())->SetMemory(0x4000, &nsvalue_int, sizeof(nsvalue_int));
   
-  lldb::ValueObjectSP nsvalue_obj = MockValueObject::Create(target, "int_value", 
+  lldb::ValueObjectSP nsvalue_obj = MockValueObject::Create(m_target, "int_value", 
                                                             0x4000, "NSValue");
   
   StreamString output_stream;
@@ -225,10 +229,7 @@ TEST_F(NSValueFormatterTest, StructWrapperTypes) {
   EXPECT_TRUE(CGRECT_ENCODING.find("CGSize") != std::string::npos) << "CGRect should contain CGSize";
   
   // Test complex struct type encoding handling
-  lldb::TargetSP target = std::make_shared<Target>(DebuggerSP(), ArchSpec("x86_64"), 
-                                                   PlatformSP(), true);
-  lldb::ProcessSP process = std::make_shared<MockProcess>(target, ListenerSP());
-  target->SetProcessSP(process);
+  // Use the shared test infrastructure
   
   // Create NSValue wrapping CGPoint struct
   struct {
@@ -243,9 +244,9 @@ TEST_F(NSValueFormatterTest, StructWrapperTypes) {
     16               // sizeof(CGPoint)
   };
   
-  static_cast<MockProcess*>(process.get())->SetMemory(0x5000, &nsvalue_point, sizeof(nsvalue_point));
+  static_cast<MockProcess*>(m_process.get())->SetMemory(0x5000, &nsvalue_point, sizeof(nsvalue_point));
   
-  lldb::ValueObjectSP nsvalue_obj = MockValueObject::Create(target, "point_value", 
+  lldb::ValueObjectSP nsvalue_obj = MockValueObject::Create(m_target, "point_value", 
                                                             0x5000, "NSValue");
   
   StreamString output_stream;
@@ -271,10 +272,7 @@ TEST_F(NSValueFormatterTest, GenericFormatterIntegration) {
   
   // Note: Generic formatter is accessible through the registry system
   // Test generic formatter integration with actual objects
-  lldb::TargetSP target = std::make_shared<Target>(DebuggerSP(), ArchSpec("x86_64"), 
-                                                   PlatformSP(), true);
-  lldb::ProcessSP process = std::make_shared<MockProcess>(target, ListenerSP());
-  target->SetProcessSP(process);
+  // Use the shared test infrastructure
   
   // Create an NSValue that won't match NSNumber formatter
   struct {
@@ -289,9 +287,9 @@ TEST_F(NSValueFormatterTest, GenericFormatterIntegration) {
     1       // length
   };
   
-  static_cast<MockProcess*>(process.get())->SetMemory(0x6000, &nsvalue_bool, sizeof(nsvalue_bool));
+  static_cast<MockProcess*>(m_process.get())->SetMemory(0x6000, &nsvalue_bool, sizeof(nsvalue_bool));
   
-  lldb::ValueObjectSP nsvalue_obj = MockValueObject::Create(target, "bool_value", 
+  lldb::ValueObjectSP nsvalue_obj = MockValueObject::Create(m_target, "bool_value", 
                                                             0x6000, "NSConcreteValue");
   
   StreamString output_stream;
@@ -409,10 +407,7 @@ TEST_F(NSValueFormatterTest, MemoryLayoutHandling) {
   EXPECT_LT(CGPOINT_SIZE, CGRECT_SIZE) << "Size hierarchy should be logical";
   
   // Test actual memory layout validation with real mock memory
-  lldb::TargetSP target = std::make_shared<Target>(DebuggerSP(), ArchSpec("x86_64"), 
-                                                   PlatformSP(), true);
-  lldb::ProcessSP process = std::make_shared<MockProcess>(target, ListenerSP());
-  target->SetProcessSP(process);
+  // Use the shared test infrastructure
   
   // Test different NSValue sizes
   struct SmallNSValue {
@@ -430,11 +425,11 @@ TEST_F(NSValueFormatterTest, MemoryLayoutHandling) {
   } large_value = {0x3000, "{LargeStruct=dddd}", {1.0, 2.0, 3.0, 4.0}, 32};
   
   // Set up memory for both objects
-  static_cast<MockProcess*>(process.get())->SetMemory(0x7000, &small_value, sizeof(small_value));
-  static_cast<MockProcess*>(process.get())->SetMemory(0x8000, &large_value, sizeof(large_value));
+  static_cast<MockProcess*>(m_process.get())->SetMemory(0x7000, &small_value, sizeof(small_value));
+  static_cast<MockProcess*>(m_process.get())->SetMemory(0x8000, &large_value, sizeof(large_value));
   
   // Test small NSValue
-  lldb::ValueObjectSP small_obj = MockValueObject::Create(target, "small_val", 0x7000, "NSValue");
+  lldb::ValueObjectSP small_obj = MockValueObject::Create(m_target, "small_val", 0x7000, "NSValue");
   StreamString small_stream;
   TypeSummaryOptions options;
   GNUstepGenericFormatter formatter;
@@ -444,7 +439,7 @@ TEST_F(NSValueFormatterTest, MemoryLayoutHandling) {
     << "Should handle small NSValue objects";
   
   // Test large NSValue
-  lldb::ValueObjectSP large_obj = MockValueObject::Create(target, "large_val", 0x8000, "NSValue");
+  lldb::ValueObjectSP large_obj = MockValueObject::Create(m_target, "large_val", 0x8000, "NSValue");
   StreamString large_stream;
   
   bool large_result = formatter.FormatObject(*large_obj, large_stream, options);
@@ -487,10 +482,7 @@ TEST_F(NSValueFormatterTest, PerformanceRequirements) {
     // For unit test, we verify the formatter function integration
     // Note: Generic formatter integration is tested through registry
     // Simulate actual generic formatter performance for NSValue objects
-  lldb::TargetSP target = std::make_shared<Target>(DebuggerSP(), ArchSpec("x86_64"), 
-                                                   PlatformSP(), true);
-  lldb::ProcessSP process = std::make_shared<MockProcess>(target, ListenerSP());
-  target->SetProcessSP(process);
+  // Use the shared test infrastructure
   
   // Set up test NSValue
   struct {
@@ -500,9 +492,9 @@ TEST_F(NSValueFormatterTest, PerformanceRequirements) {
     uint64_t length;
   } nsvalue_data = {0x3000, "d", 3.14159, 8};
   
-  static_cast<MockProcess*>(process.get())->SetMemory(0x9000, &nsvalue_data, sizeof(nsvalue_data));
+  static_cast<MockProcess*>(m_process.get())->SetMemory(0x9000, &nsvalue_data, sizeof(nsvalue_data));
   
-  lldb::ValueObjectSP nsvalue_obj = MockValueObject::Create(target, "perf_test", 0x9000, "NSValue");
+  lldb::ValueObjectSP nsvalue_obj = MockValueObject::Create(m_target, "perf_test", 0x9000, "NSValue");
   
   // Measure formatting performance
   auto formatter_start = std::chrono::high_resolution_clock::now();
@@ -553,13 +545,10 @@ TEST_F(NSValueFormatterTest, ErrorHandling) {
   EXPECT_TRUE(VALID_ENCODING.front() == '{' && VALID_ENCODING.back() == '}') << "Valid encoding properly formatted";
   
   // Test actual error handling with invalid/corrupted NSValue objects
-  lldb::TargetSP target = std::make_shared<Target>(DebuggerSP(), ArchSpec("x86_64"), 
-                                                   PlatformSP(), true);
-  lldb::ProcessSP process = std::make_shared<MockProcess>(target, ListenerSP());
-  target->SetProcessSP(process);
+  // Use the shared test infrastructure
   
   // Test 1: Null NSValue object
-  lldb::ValueObjectSP null_obj = MockValueObject::Create(target, "null_value", 0x0, "NSValue");
+  lldb::ValueObjectSP null_obj = MockValueObject::Create(m_target, "null_value", 0x0, "NSValue");
   StreamString null_stream;
   TypeSummaryOptions options;
   
@@ -577,9 +566,9 @@ TEST_F(NSValueFormatterTest, ErrorHandling) {
     uint64_t length;
   } corrupted_value = {LLDB_INVALID_ADDRESS, nullptr, 0, 0};
   
-  static_cast<MockProcess*>(process.get())->SetMemory(0xA000, &corrupted_value, sizeof(corrupted_value));
+  static_cast<MockProcess*>(m_process.get())->SetMemory(0xA000, &corrupted_value, sizeof(corrupted_value));
   
-  lldb::ValueObjectSP corrupted_obj = MockValueObject::Create(target, "corrupted", 0xA000, "NSValue");
+  lldb::ValueObjectSP corrupted_obj = MockValueObject::Create(m_target, "corrupted", 0xA000, "NSValue");
   StreamString corrupted_stream;
   
   bool corrupted_result = GNUstepGenericFormatter().FormatObject(*corrupted_obj, corrupted_stream, options);
@@ -610,10 +599,7 @@ TEST_F(NSValueFormatterTest, CustomValueClasses) {
   EXPECT_FALSE(CUSTOM_VALUE_2.find("Number") != std::string::npos) << "Custom value should not match Number routing";
   
   // Test actual custom NSValue subclass handling
-  lldb::TargetSP target = std::make_shared<Target>(DebuggerSP(), ArchSpec("x86_64"), 
-                                                   PlatformSP(), true);
-  lldb::ProcessSP process = std::make_shared<MockProcess>(target, ListenerSP());
-  target->SetProcessSP(process);
+  // Use the shared test infrastructure
   
   // Create custom NSValue subclass object
   struct {
@@ -623,7 +609,7 @@ TEST_F(NSValueFormatterTest, CustomValueClasses) {
     uint64_t length;
   } custom_value = {0x4000, "{Point=ii}", {100, 200}, 8};
   
-  static_cast<MockProcess*>(process.get())->SetMemory(0xB000, &custom_value, sizeof(custom_value));
+  static_cast<MockProcess*>(m_process.get())->SetMemory(0xB000, &custom_value, sizeof(custom_value));
   
   // Test different custom class names
   std::vector<std::string> custom_classes = {
@@ -631,7 +617,7 @@ TEST_F(NSValueFormatterTest, CustomValueClasses) {
   };
   
   for (const auto& class_name : custom_classes) {
-    lldb::ValueObjectSP custom_obj = MockValueObject::Create(target, "custom_val", 
+    lldb::ValueObjectSP custom_obj = MockValueObject::Create(m_target, "custom_val", 
                                                              0xB000, class_name);
     StreamString output_stream;
     TypeSummaryOptions options;
@@ -683,10 +669,7 @@ TEST_F(NSValueFormatterTest, ThreadSafety) {
   EXPECT_EQ(success_count.load(), 40) << "All NSValue routing decisions should succeed concurrently";
   
   // Test actual concurrent formatter calls
-  lldb::TargetSP target = std::make_shared<Target>(DebuggerSP(), ArchSpec("x86_64"), 
-                                                   PlatformSP(), true);
-  lldb::ProcessSP process = std::make_shared<MockProcess>(target, ListenerSP());
-  target->SetProcessSP(process);
+  // Use the shared test infrastructure
   
   // Set up test NSValue in memory
   struct {
@@ -696,7 +679,7 @@ TEST_F(NSValueFormatterTest, ThreadSafety) {
     uint64_t length;
   } thread_test_value = {0x3000, "f", 1.5f, 4};
   
-  static_cast<MockProcess*>(process.get())->SetMemory(0xC000, &thread_test_value, sizeof(thread_test_value));
+  static_cast<MockProcess*>(m_process.get())->SetMemory(0xC000, &thread_test_value, sizeof(thread_test_value));
   
   std::atomic<int> formatter_success{0};
   std::vector<std::thread> formatter_threads;
@@ -704,7 +687,7 @@ TEST_F(NSValueFormatterTest, ThreadSafety) {
   // Test concurrent formatter calls
   for (int i = 0; i < 5; ++i) {
     formatter_threads.emplace_back([&]() {
-      lldb::ValueObjectSP obj = MockValueObject::Create(target, "thread_val", 0xC000, "NSValue");
+      lldb::ValueObjectSP obj = MockValueObject::Create(m_target, "thread_val", 0xC000, "NSValue");
       StreamString stream;
       TypeSummaryOptions options;
       

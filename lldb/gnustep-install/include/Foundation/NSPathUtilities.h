@@ -18,8 +18,7 @@
    
    You should have received a copy of the GNU Lesser General Public
    License along with this library; if not, write to the Free
-   Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
-   Boston, MA 02110 USA.
+   Software Foundation, Inc., 31 Milk Street #960789 Boston, MA 02196 USA.
  
    AutogsdocSource:	NSPathUtilities.m
    */ 
@@ -131,11 +130,19 @@ enum
   NSDownloadsDirectory = 15,	        /** location of downloaded files */
 #endif
 #if OS_API_VERSION(MAC_OS_X_VERSION_10_6, GS_API_LATEST)
+  NSInputMethodsDirectory = 16,	        /** location of Library/Input methods */
   NSMoviesDirectory = 17,	        /** location of video/movie files */
   NSMusicDirectory = 18,	        /** location of music files */
   NSPicturesDirectory = 19,	        /** location of picture/images files */
+  NSPrinterDescriptionDirectory = 20,	/** location of system/PPDs */
+  NSSharedPublicDirectory = 21,		/** location of users public sharing */
+  NSPreferencePanesDirectory = 22,	/** location of preference panes */
+#if OS_API_VERSION(MAC_OS_X_VERSION_10_8, GS_API_LATEST)
+  NSApplicationScriptsDirectory = 23,	/** location of user scripts */
+#endif
   NSItemReplacementDirectory = 99,      /** pass to URLFirDirectory:inDomain:
-                                            appropriateForURL:create:error to create a temporary directory */
+                                            appropriateForURL:create:error to
+					    create a temporary directory */
 #endif  
 
   NSAllApplicationsDirectory = 100,	/** all app directories */

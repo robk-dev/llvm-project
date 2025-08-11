@@ -86,6 +86,10 @@ void GNUstepFormattersRegistry::RegisterStringFormatters(TypeCategoryImpl &categ
   category.AddTypeSummary("__NSCFString", eFormatterMatchExact, string_summary);
   category.AddTypeSummary("NSConstantString", eFormatterMatchExact, string_summary);
   category.AddTypeSummary("__NSConstantString", eFormatterMatchExact, string_summary);
+  category.AddTypeSummary("GSCInlineString", eFormatterMatchExact, string_summary);
+  category.AddTypeSummary("GSUInlineString", eFormatterMatchExact, string_summary);
+  category.AddTypeSummary("GSCString", eFormatterMatchExact, string_summary);
+  category.AddTypeSummary("GSUnicodeString", eFormatterMatchExact, string_summary);
   
   // Also register with pointer types
   category.AddTypeSummary("NSString *", eFormatterMatchExact, string_summary);
@@ -93,6 +97,10 @@ void GNUstepFormattersRegistry::RegisterStringFormatters(TypeCategoryImpl &categ
   category.AddTypeSummary("__NSCFString *", eFormatterMatchExact, string_summary);
   category.AddTypeSummary("NSConstantString *", eFormatterMatchExact, string_summary);
   category.AddTypeSummary("__NSConstantString *", eFormatterMatchExact, string_summary);
+  category.AddTypeSummary("GSCInlineString *", eFormatterMatchExact, string_summary);
+  category.AddTypeSummary("GSUInlineString *", eFormatterMatchExact, string_summary);
+  category.AddTypeSummary("GSCString *", eFormatterMatchExact, string_summary);
+  category.AddTypeSummary("GSUnicodeString *", eFormatterMatchExact, string_summary);
   
   // Register the comprehensive id dispatcher that handles all GNUstep types
   auto id_summary = std::make_shared<CXXFunctionSummaryFormat>(
@@ -365,8 +373,8 @@ void GNUstepFormattersRegistry::RegisterFoundationFormatters(TypeCategoryImpl &c
   // Enable NSDate formatter - it's implemented
   RegisterDateFormatters(category);
   
-  // TEMPORARILY DISABLED - function not implemented yet
-  // RegisterCalendarFormatters(category);
+  // Enable NSCalendar formatter - it's implemented
+  RegisterCalendarFormatters(category);
   
   // Enable additional Foundation formatters - all are implemented and ready
   RegisterURLFormatters(category);
@@ -396,11 +404,11 @@ void GNUstepFormattersRegistry::RegisterFoundationFormatters(TypeCategoryImpl &c
   // Register NSLocale formatter
   RegisterLocaleFormatters(category);
   
-  // TEMPORARILY DISABLED - functions not implemented yet
-  // RegisterUserDefaultsFormatters(category);
+  // Register NSUserDefaults formatter
+  RegisterUserDefaultsFormatters(category);
   
   // Register NSProcessInfo formatter  
-  // RegisterProcessInfoFormatters(category);
+  RegisterProcessInfoFormatters(category);
   
   // Register NSProxy formatter - TODO: implement function
   // RegisterProxyFormatters(category);

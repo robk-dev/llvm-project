@@ -12,7 +12,7 @@
 #include "lldb/Host/HostInfo.h"
 #include "lldb/Utility/ConstString.h"
 #include "lldb/Utility/Stream.h"
-#include "lldb/Core/ValueObject.h"
+#include "lldb/ValueObject/ValueObject.h"
 #include "lldb/Utility/StreamString.h"
 #include "lldb/Core/Debugger.h"
 #include "lldb/Target/Platform.h"
@@ -47,10 +47,9 @@ protected:
 
 TEST_F(NSURLFormatterTest, BasicURLFormatting) {
   // Test basic NSURL object formatting
-  lldb::TargetSP target = std::make_shared<Target>(DebuggerSP(), ArchSpec("x86_64"), 
-                                                   PlatformSP(), true);
+  lldb::TargetSP target = std::make_shared<MockTarget>(*Debugger::CreateInstance(), ArchSpec("x86_64"), 
+                                                   PlatformSP());
   lldb::ProcessSP process = std::make_shared<MockProcess>(target, ListenerSP());
-  target->SetProcessSP(process);
   
   // Create NSURL object with URL string
   std::string url_string = "https://www.example.com/path";
@@ -104,10 +103,9 @@ TEST_F(NSURLFormatterTest, BasicURLFormatting) {
 
 TEST_F(NSURLFormatterTest, FileURLHandling) {
   // Test file:// URL handling
-  lldb::TargetSP target = std::make_shared<Target>(DebuggerSP(), ArchSpec("x86_64"), 
-                                                   PlatformSP(), true);
+  lldb::TargetSP target = std::make_shared<MockTarget>(*Debugger::CreateInstance(), ArchSpec("x86_64"), 
+                                                   PlatformSP());
   lldb::ProcessSP process = std::make_shared<MockProcess>(target, ListenerSP());
-  target->SetProcessSP(process);
   
   std::string file_url = "file:///home/user/document.txt";
   
@@ -147,10 +145,9 @@ TEST_F(NSURLFormatterTest, FileURLHandling) {
 
 TEST_F(NSURLFormatterTest, RelativeURLHandling) {
   // Test relative URL with base URL
-  lldb::TargetSP target = std::make_shared<Target>(DebuggerSP(), ArchSpec("x86_64"), 
-                                                   PlatformSP(), true);
+  lldb::TargetSP target = std::make_shared<MockTarget>(*Debugger::CreateInstance(), ArchSpec("x86_64"), 
+                                                   PlatformSP());
   lldb::ProcessSP process = std::make_shared<MockProcess>(target, ListenerSP());
-  target->SetProcessSP(process);
   
   std::string relative_url = "page.html";
   std::string base_url = "https://www.example.com/";
@@ -212,10 +209,9 @@ TEST_F(NSURLFormatterTest, RelativeURLHandling) {
 
 TEST_F(NSURLFormatterTest, MalformedURLHandling) {
   // Test malformed/invalid URLs
-  lldb::TargetSP target = std::make_shared<Target>(DebuggerSP(), ArchSpec("x86_64"), 
-                                                   PlatformSP(), true);
+  lldb::TargetSP target = std::make_shared<MockTarget>(*Debugger::CreateInstance(), ArchSpec("x86_64"), 
+                                                   PlatformSP());
   lldb::ProcessSP process = std::make_shared<MockProcess>(target, ListenerSP());
-  target->SetProcessSP(process);
   
   GNUstepNSURLSummaryProvider provider;
   
@@ -272,10 +268,9 @@ TEST_F(NSURLFormatterTest, MalformedURLHandling) {
 
 TEST_F(NSURLFormatterTest, NullURLHandling) {
   // Test null/invalid NSURL objects
-  lldb::TargetSP target = std::make_shared<Target>(DebuggerSP(), ArchSpec("x86_64"), 
-                                                   PlatformSP(), true);
+  lldb::TargetSP target = std::make_shared<MockTarget>(*Debugger::CreateInstance(), ArchSpec("x86_64"), 
+                                                   PlatformSP());
   lldb::ProcessSP process = std::make_shared<MockProcess>(target, ListenerSP());
-  target->SetProcessSP(process);
   
   GNUstepNSURLSummaryProvider provider;
   
@@ -320,10 +315,9 @@ TEST_F(NSURLFormatterTest, NullURLHandling) {
 
 TEST_F(NSURLFormatterTest, PerformanceRequirements) {
   // Test that NSURL formatting meets <50ms requirement
-  lldb::TargetSP target = std::make_shared<Target>(DebuggerSP(), ArchSpec("x86_64"), 
-                                                   PlatformSP(), true);
+  lldb::TargetSP target = std::make_shared<MockTarget>(*Debugger::CreateInstance(), ArchSpec("x86_64"), 
+                                                   PlatformSP());
   lldb::ProcessSP process = std::make_shared<MockProcess>(target, ListenerSP());
-  target->SetProcessSP(process);
   
   // Create NSURL with moderately long URL
   std::string long_url = "https://www.example.com/very/long/path/with/many/components/and/query/parameters?param1=value1&param2=value2&param3=value3";
@@ -373,10 +367,9 @@ TEST_F(NSURLFormatterTest, PerformanceRequirements) {
 
 TEST_F(NSURLFormatterTest, SpecialURLSchemes) {
   // Test various URL schemes
-  lldb::TargetSP target = std::make_shared<Target>(DebuggerSP(), ArchSpec("x86_64"), 
-                                                   PlatformSP(), true);
+  lldb::TargetSP target = std::make_shared<MockTarget>(*Debugger::CreateInstance(), ArchSpec("x86_64"), 
+                                                   PlatformSP());
   lldb::ProcessSP process = std::make_shared<MockProcess>(target, ListenerSP());
-  target->SetProcessSP(process);
   
   GNUstepNSURLSummaryProvider provider;
   

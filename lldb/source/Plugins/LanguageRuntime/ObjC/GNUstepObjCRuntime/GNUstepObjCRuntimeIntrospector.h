@@ -46,11 +46,26 @@ public:
   // Check if this looks like a valid GNUstep runtime
   bool IsValidGNUstepRuntime();
   
+  // Load runtime function symbols for direct calling
+  bool LoadRuntimeSymbols();
+  
+  // Ensure runtime symbols are loaded (call this before using symbol addresses)
+  void EnsureRuntimeSymbolsLoaded();
+  
+  // Get runtime function address by name with caching
+  lldb::addr_t GetRuntimeFunctionAddress(const char *function_name);
+  
   // Check if an object is a tagged pointer
   bool IsTaggedPointer(lldb::addr_t obj_addr);
   
   // Decode tagged pointer data for strings
   std::string DecodeTaggedString(lldb::addr_t obj_addr);
+  
+  // Get the class pointer for a tagged pointer using runtime functions
+  lldb::addr_t GetTaggedPointerClass(lldb::addr_t obj_addr);
+  
+  // Get the class name for a tagged pointer
+  std::string GetTaggedPointerClassName(lldb::addr_t obj_addr);
   
   // Check if an address represents a valid object
   bool IsValidObjectPointer(lldb::addr_t obj_addr);
@@ -59,6 +74,19 @@ private:
   Process *m_process;
   uint32_t m_address_size;
   lldb::ByteOrder m_byte_order;
+  
+  // Runtime function addresses for direct calling (performance optimization)
+  lldb::addr_t m_object_getClass_addr = LLDB_INVALID_ADDRESS;
+  lldb::addr_t m_class_getSuperclass_addr = LLDB_INVALID_ADDRESS;
+  lldb::addr_t m_class_getInstanceSize_addr = LLDB_INVALID_ADDRESS;
+  lldb::addr_t m_class_getMethodImplementation_addr = LLDB_INVALID_ADDRESS;
+  lldb::addr_t m_objc_msgSend_addr = LLDB_INVALID_ADDRESS;
+  lldb::addr_t m_objc_copyClassList_addr = LLDB_INVALID_ADDRESS;
+  lldb::addr_t m_class_getName_addr = LLDB_INVALID_ADDRESS;
+  lldb::addr_t m_free_addr = LLDB_INVALID_ADDRESS;
+  
+  // Flag to track if we've attempted to load runtime symbols
+  bool m_runtime_symbols_loaded = false;
   
   // Cache for function callers to avoid repeated compilation
   struct FunctionCallerCache {

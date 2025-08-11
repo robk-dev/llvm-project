@@ -25,8 +25,7 @@
    
    You should have received a copy of the GNU Lesser General Public
    License along with this library; if not, write to the Free
-   Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
-   Boston, MA 02110 USA.
+   Software Foundation, Inc., 31 Milk Street #960789 Boston, MA 02196 USA.
 */ 
 
 #ifndef __NSLock_h_GNUSTEP_BASE_INCLUDE
@@ -74,7 +73,7 @@ GS_EXPORT_CLASS
 {
 #if	GS_EXPOSE(NSLock)
 @protected
-  gs_mutex_t	_mutex;
+  gs_mutex_public_t	_mutex;
   NSString	*_name;
 #endif
 }
@@ -126,8 +125,8 @@ GS_EXPORT_CLASS
 {
 #if	GS_EXPOSE(NSCondition)
 @protected
-  gs_cond_t	_condition;
-  gs_mutex_t	_mutex;
+  gs_cond_public_t	_condition;
+  gs_mutex_public_t	_mutex;
   NSString	*_name;
 #endif
 }
@@ -278,7 +277,7 @@ GS_EXPORT_CLASS
 {
 #if	GS_EXPOSE(NSRecursiveLock)
 @protected
-  gs_mutex_t	_mutex;
+  gs_mutex_public_t	_mutex;
   NSString      *_name;
 #endif
 }
@@ -360,10 +359,6 @@ GS_EXPORT NSLock_error_handler  *_NSLock_error_handler;
 
 #if  defined(__cplusplus)
 }
-#endif
-
-#if     !NO_GNUSTEP && !defined(GNUSTEP_BASE_INTERNAL)
-#import <GNUstepBase/NSLock+GNUstepBase.h>
 #endif
 
 #endif /* __NSLock_h_GNUSTEP_BASE_INCLUDE */

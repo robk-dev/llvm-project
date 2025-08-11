@@ -1,0 +1,131 @@
+# LLDB script to validate step-through trampoline functionality
+# This script tests that stepping into method calls lands in the method implementation,
+# not in objc_msgSend assembly code
+
+# Load the test program
+target create test_stepping_trampoline
+process launch
+
+echo "=== STEP-THROUGH TRAMPOLINE VALIDATION TEST ==="
+
+# Test Case 1: Simple Method Call
+echo "\n--- Test Case 1: Simple Method Call ---"
+breakpoint set --file test_stepping_trampoline.m --line 77
+continue
+echo "Stopped at simple method call breakpoint"
+
+# Step into the method call - should land in simpleMethod, not objc_msgSend
+step
+echo "After step into - checking current location:"
+frame info
+thread backtrace --count 3
+
+# Verify we're in simpleMethod, not assembly/trampoline
+frame select 0
+set show-variables
+echo "Current symbol context:"
+frame select 0
+print (char*)__FUNCTION__
+
+# Continue to next test
+continue
+
+# Test Case 2: Method With Return
+echo "\n--- Test Case 2: Method With Return ---"
+breakpoint set --file test_stepping_trampoline.m --line 82
+continue
+echo "Stopped at method with return breakpoint"
+
+# Step into should skip trampoline
+step
+echo "After step into method with return:"
+frame info
+thread backtrace --count 3
+
+# Verify we're in methodWithReturn
+frame select 0
+print (char*)__FUNCTION__
+
+continue
+
+# Test Case 3: Method With Parameter
+echo "\n--- Test Case 3: Method With Parameter ---"
+breakpoint set --file test_stepping_trampoline.m --line 86
+continue
+echo "Stopped at method with parameter breakpoint"
+
+step
+echo "After step into method with parameter:"
+frame info
+thread backtrace --count 3
+
+continue
+
+# Test Case 4: Nested Method Calls
+echo "\n--- Test Case 4: Nested Method Calls ---"
+breakpoint set --file test_stepping_trampoline.m --line 90
+continue
+echo "Stopped at nested method calls breakpoint"
+
+step
+echo "After step into nested method call:"
+frame info
+thread backtrace --count 3
+
+# Test stepping through the nested calls
+step
+step
+step
+echo "After several steps through nested calls:"
+thread backtrace --count 5
+
+continue
+
+# Test Case 5: Foundation Method Calls  
+echo "\n--- Test Case 5: Foundation Method Calls ---"
+breakpoint set --file test_stepping_trampoline.m --line 95
+continue
+echo "Stopped at Foundation method call breakpoint"
+
+step
+echo "After step into Foundation method:"
+frame info
+thread backtrace --count 3
+
+# For Foundation methods, we expect either:
+# 1. Step into the actual Foundation implementation
+# 2. Or step over if the implementation is not available
+# We should NOT land in objc_msgSend assembly
+
+continue
+
+# Test Case 6: Property Access
+echo "\n--- Test Case 6: Property Access ---"
+breakpoint set --file test_stepping_trampoline.m --line 99
+continue
+echo "Stopped at property setter breakpoint"
+
+step
+echo "After step into property setter:"
+frame info
+
+breakpoint set --file test_stepping_trampoline.m --line 100
+continue
+echo "Stopped at property getter breakpoint"
+
+step
+echo "After step into property getter:"
+frame info
+
+continue
+
+# Summary
+echo "\n=== STEP-THROUGH TRAMPOLINE TEST SUMMARY ==="
+echo "Test completed. Review the output above to verify:"
+echo "1. Step into method calls land in method implementations"
+echo "2. No steps land in objc_msgSend or assembly code"
+echo "3. Thread backtraces show clean call stacks"
+echo "4. Function names are correctly resolved"
+
+# Clean exit
+quit

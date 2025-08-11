@@ -18,8 +18,7 @@
 
    You should have received a copy of the GNU Lesser General Public
    License along with this library; if not, write to the Free
-   Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
-   Boston, MA 02110 USA.
+   Software Foundation, Inc., 31 Milk Street #960789 Boston, MA 02196 USA.
 */
 
 #ifndef __NSRunLoop_h_GNUSTEP_BASE_INCLUDE
@@ -191,8 +190,9 @@ typedef	enum {
 /** Adds a watcher to the receiver ... the watcher is used to monitor events
  * of the specified type which are associted with the event handle data and
  * it operates in the specified run loop modes.<br />
- * The watcher remains in place until a corresponding call to
- * -removeEvent:type:forMode:all: is made.
+ * The watcher is not retained, but remains in place until a corresponding
+ * call to -removeEvent:type:forMode:all: is made.  If is the watchers
+ * responsibility to ensure that it is removed from the run loop safely.
  */
 - (void) addEvent: (void*)data
 	     type: (RunLoopEventType)type

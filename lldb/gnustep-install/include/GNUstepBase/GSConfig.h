@@ -22,8 +22,7 @@
 
    You should have received a copy of the GNU Lesser General Public
    License along with this library; if not, write to the Free
-   Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
-   Boston, MA 02111 USA.
+   Software Foundation, Inc., 31 Milk Street #960789 Boston, MA 02196 USA.
    */
 
 #ifndef	included_GSConfig_h
@@ -254,24 +253,28 @@ typedef	gsuaddr gsaddr;
  */
 typedef	struct {
   uint8_t	dummy[48];
-} gs_cond_t	__attribute__((aligned (8)));
+} gs_cond_public_t	__attribute__((aligned (8)));
 typedef	struct {
   uint8_t	dummy[40];
-} gs_mutex_t	__attribute__((aligned (8)));
+} gs_cond_mutex_public_t	__attribute__((aligned (8)));
+typedef	struct {
+  uint8_t	dummy[40];
+} gs_mutex_public_t	__attribute__((aligned (8)));
 
 #define	OBJC2RUNTIME 1
 #define BASE_NATIVE_OBJC_EXCEPTIONS     1
-#define GS_NONFRAGILE     0
+#define GS_NONFRAGILE     1
 #define GS_USE_LIBXML 1
 #define GS_USE_GNUTLS 1
 #define GS_USE_AVAHI 1
 #define GS_USE_MDNS 0
 #define GS_USE_ICU 1
-#define GS_USE_LIBCURL 0
-#define GS_USE_LIBDISPATCH 0
+#define GS_USE_LIBCURL 1
+#define GS_USE_LIBDISPATCH 1
 #define GS_USE_LIBDISPATCH_RUNLOOP 0
-#define GS_HAVE_NSURLSESSION 0
+#define GS_HAVE_NSURLSESSION 1
 #define GS_HAVE_OBJC_ROOT_CLASS_ATTR 1
+#define GS_USE_WIN32_THREADS_AND_LOCKS 0
 
 #ifndef __has_include
 #  define __has_include(x) 0
@@ -300,7 +303,7 @@ typedef	struct {
 
 #  if defined(__MINGW__)
 #    include <w32api.h>
-#    define GS_WINVER Windows2000
+#    define GS_WINVER WindowsVista
 #  elif defined(_MSC_VER)
 #    include <WinSDKVer.h>
 #    define GS_WINVER _WIN32_WINNT_WIN10
@@ -333,6 +336,13 @@ typedef	struct {
 #  undef  BOOL
 #endif
 
+/* Used to annotate callback functions with __stdcall on Windows. */
+#if defined(_WIN32)
+#define GS_WINAPI WINAPI
+#else
+#define GS_WINAPI
+#endif
+
 /* Include the blocks runtime header if it's available (It shouldn't matter
  * that this doesn't work on compilers that don't support __has_include(),
  * because they also don't support blocks).
@@ -346,10 +356,10 @@ typedef	struct {
 #endif
 
 /* The following group of lines maintained by the gstep-base configure */
-#define GNUSTEP_BASE_VERSION            1.28.0
+#define GNUSTEP_BASE_VERSION            1.31.1
 #define GNUSTEP_BASE_MAJOR_VERSION      1
-#define GNUSTEP_BASE_MINOR_VERSION      28
-#define GNUSTEP_BASE_SUBMINOR_VERSION   0
+#define GNUSTEP_BASE_MINOR_VERSION      31
+#define GNUSTEP_BASE_SUBMINOR_VERSION   1
 #define GNUSTEP_BASE_GCC_VERSION        4.0.0
 
 /* Do not use the following macros!

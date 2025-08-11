@@ -3,7 +3,7 @@
 file custom_class_test
 
 # Set breakpoint at the key location where we want to test custom class debugging
-b custom_class_test.m:125
+b custom_class_test.m:228
 
 # Run the program
 run

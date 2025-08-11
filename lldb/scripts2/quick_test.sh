@@ -26,7 +26,7 @@ fi
 
 # Create simple LLDB script
 cat > /tmp/quick_test.lldb << 'EOF'
-b custom_class_test.m:125
+b custom_class_test.m:228
 run
 frame variable greeting
 frame variable magicNumber

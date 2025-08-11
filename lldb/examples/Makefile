@@ -35,7 +35,8 @@ SOURCES = simple_test.m custom_class_test.m foundation_test.m string_test.m \
           simple_array_test.m test_nsnumber_comprehensive.m test_nsarray_comprehensive.m \
           dictionary_test.m nsset_test.m test_collections_formatter.m test_method_enum.m \
           test_indexset.m test_decimalnumber.m test_characterset.m test_data_url_uuid.m \
-          test_userdefaults.m
+          test_userdefaults.m test_tagged_pointers.m test_stepping_trampoline.m \
+          test_object_checker.m test_exception_resolver.m
 EXECUTABLES = $(SOURCES:.m=)
 
 .PHONY: all clean clean-all symbols help debug debug-simple debug-custom debug-foundation debug-nsstring debug-nsnumber debug-array debug-dictionary debug-set debug-collections debug-method-enum debug-data-url-uuid debug-timezone debug-timezone-comprehensive test-plugin

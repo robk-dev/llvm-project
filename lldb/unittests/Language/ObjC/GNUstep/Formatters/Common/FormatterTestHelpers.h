@@ -15,6 +15,7 @@
 #include "lldb/Target/Process.h"
 #include "lldb/Target/Target.h"
 #include "lldb/Utility/DataExtractor.h"
+#include "lldb/Core/Value.h"
 #include "llvm/ADT/StringRef.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
@@ -24,6 +25,14 @@
 namespace lldb_private {
 namespace formatters {
 namespace test {
+
+// Mock Target for testing
+class MockTarget : public Target {
+public:
+  MockTarget(Debugger &debugger, const ArchSpec &target_arch,
+             const lldb::PlatformSP &platform_sp)
+      : Target(debugger, target_arch, platform_sp, true) {}
+};
 
 // Mock Process for testing with resource management
 class MockProcess : public Process {
@@ -104,6 +113,7 @@ private:
   }
   llvm::StringRef GetPluginName() override { return "MockProcess"; }
 
+public:
   // Architecture stub
   const ArchSpec &GetArchitecture() const {
     static ArchSpec arch("x86_64-pc-linux");
@@ -121,17 +131,14 @@ public:
                                     const std::string &name,
                                     lldb::addr_t address,
                                     const std::string &type_name) {
-    // Create a simple pointer type
-    CompilerType pointer_type = target->GetScratchTypeSystemForLanguage(
-        lldb::eLanguageTypeObjC)
-        ->GetBuiltinTypeForEncodingAndBitSize(lldb::eEncodingUint, 64);
+    // For unit tests, create a simple value pointing to the address
+    // The formatters just need to read memory from this address
+    Value value;
+    value.SetValueType(Value::ValueType::LoadAddress);
+    value.GetScalar() = address;
     
-    // Create value object
-    DataExtractor data;
-    data.SetData(&address, sizeof(address), target->GetArchitecture().GetByteOrder());
-    
-    return ValueObjectConstResult::Create(
-        target.get(), pointer_type, ConstString(name), data);
+    ExecutionContextScope *exe_scope = target ? target.get() : nullptr;
+    return ValueObjectConstResult::Create(exe_scope, value, ConstString(name));
   }
 };
 
@@ -145,113 +152,57 @@ private:
 public:
   static void SetupNSString(MockProcess &process, lldb::addr_t addr,
                             const std::string &string_value) {
-    // Create platform-independent NSConstantString layout using DataExtractor
-    const ArchSpec &arch = process.GetArchitecture();
-    const lldb::ByteOrder byte_order = arch.GetByteOrder();
-    const uint32_t addr_size = arch.GetAddressByteSize();
+    // Create NSConstantString layout
+    struct {
+      uint64_t isa;
+      uint64_t length;
+      uint64_t length2;
+      uint64_t str_ptr;
+    } string_obj = {
+      0x1000,  // ISA
+      string_value.length(),
+      string_value.length(),
+      addr + sizeof(string_obj)
+    };
     
-    // Allocate buffer for the string object
-    std::vector<uint8_t> string_buffer(kNSStringStructSize, 0);
-    
-    // Use DataExtractor for platform-independent serialization
-    DataExtractor extractor(string_buffer.data(), string_buffer.size(), 
-                           byte_order, addr_size);
-    
-    lldb::offset_t offset = 0;
-    // Write ISA pointer
-    extractor.PutAddress(offset, 0x1000);
-    offset += addr_size;
-    
-    // Write length (platform-appropriate size)
-    if (addr_size == 8) {
-      extractor.PutU64(offset, string_value.length());
-      offset += 8;
-      extractor.PutU64(offset, string_value.length());  // len2
-      offset += 8;
-    } else {
-      extractor.PutU32(offset, static_cast<uint32_t>(string_value.length()));
-      offset += 4;
-      extractor.PutU32(offset, static_cast<uint32_t>(string_value.length()));  // len2
-      offset += 4;
-    }
-    
-    // Write string data pointer
-    extractor.PutAddress(offset, addr + kNSStringStructSize);
-    
-    process.SetMemory(addr, string_buffer.data(), string_buffer.size());
-    process.SetMemory(addr + kNSStringStructSize, string_value.c_str(), 
+    process.SetMemory(addr, &string_obj, sizeof(string_obj));
+    process.SetMemory(addr + sizeof(string_obj), string_value.c_str(), 
                      string_value.length() + 1);
   }
 
   static void SetupNSNumber(MockProcess &process, lldb::addr_t addr,
                            int64_t value) {
-    // Create platform-independent NSNumber layout
-    const ArchSpec &arch = process.GetArchitecture();
-    const lldb::ByteOrder byte_order = arch.GetByteOrder();
-    const uint32_t addr_size = arch.GetAddressByteSize();
+    // Create NSNumber layout
+    struct {
+      uint64_t isa;
+      int64_t value;
+    } number_obj = {
+      0x2000,  // ISA
+      value
+    };
     
-    const size_t number_struct_size = 2 * addr_size;  // isa + value
-    std::vector<uint8_t> number_buffer(number_struct_size, 0);
-    
-    DataExtractor extractor(number_buffer.data(), number_buffer.size(),
-                           byte_order, addr_size);
-    
-    lldb::offset_t offset = 0;
-    // Write ISA pointer
-    extractor.PutAddress(offset, 0x2000);
-    offset += addr_size;
-    
-    // Write value (sign-extend appropriately)
-    if (addr_size == 8) {
-      extractor.PutU64(offset, static_cast<uint64_t>(value));
-    } else {
-      extractor.PutU32(offset, static_cast<uint32_t>(value));
-    }
-    
-    process.SetMemory(addr, number_buffer.data(), number_buffer.size());
+    process.SetMemory(addr, &number_obj, sizeof(number_obj));
   }
 
   static void SetupNSArray(MockProcess &process, lldb::addr_t addr,
                           const std::vector<lldb::addr_t> &elements) {
-    // Create platform-independent GSArray layout
-    const ArchSpec &arch = process.GetArchitecture();
-    const lldb::ByteOrder byte_order = arch.GetByteOrder();
-    const uint32_t addr_size = arch.GetAddressByteSize();
+    // Create GSArray layout
+    struct {
+      uint64_t isa;
+      uint64_t count;
+      uint64_t objects_ptr;
+    } array_obj = {
+      0x3000,  // ISA
+      elements.size(),
+      addr + sizeof(array_obj)
+    };
     
-    const size_t array_struct_size = 3 * addr_size;  // isa + count + objects_ptr
-    std::vector<uint8_t> array_buffer(array_struct_size, 0);
-    
-    DataExtractor extractor(array_buffer.data(), array_buffer.size(),
-                           byte_order, addr_size);
-    
-    lldb::offset_t offset = 0;
-    // Write ISA pointer
-    extractor.PutAddress(offset, 0x3000);
-    offset += addr_size;
-    
-    // Write count
-    extractor.PutAddress(offset, elements.size());
-    offset += addr_size;
-    
-    // Write objects array pointer
-    const lldb::addr_t objects_addr = addr + array_struct_size;
-    extractor.PutAddress(offset, objects_addr);
-    
-    process.SetMemory(addr, array_buffer.data(), array_buffer.size());
+    process.SetMemory(addr, &array_obj, sizeof(array_obj));
     
     // Write element pointers if any
     if (!elements.empty()) {
-      std::vector<uint8_t> elements_buffer(elements.size() * addr_size, 0);
-      DataExtractor elem_extractor(elements_buffer.data(), elements_buffer.size(),
-                                   byte_order, addr_size);
-      
-      offset = 0;
-      for (lldb::addr_t element_addr : elements) {
-        elem_extractor.PutAddress(offset, element_addr);
-        offset += addr_size;
-      }
-      
-      process.SetMemory(objects_addr, elements_buffer.data(), elements_buffer.size());
+      process.SetMemory(addr + sizeof(array_obj), elements.data(), 
+                       elements.size() * sizeof(lldb::addr_t));
     }
   }
 };
@@ -299,9 +250,14 @@ public:
   
   static void AssertChildCount(lldb::ValueObjectSP valobj,
                                size_t expected_count) {
-    ASSERT_EQ(valobj->GetNumChildren(), expected_count)
-        << "Child count mismatch. Expected: " << expected_count
-        << ", Got: " << valobj->GetNumChildren();
+    auto child_count = valobj->GetNumChildren();
+    if (child_count) {
+      ASSERT_EQ(*child_count, expected_count)
+          << "Child count mismatch. Expected: " << expected_count
+          << ", Got: " << *child_count;
+    } else {
+      FAIL() << "Failed to get child count";
+    }
   }
 };
 

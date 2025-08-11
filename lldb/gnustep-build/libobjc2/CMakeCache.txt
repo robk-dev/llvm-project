@@ -339,6 +339,9 @@ CMAKE_STATIC_LINKER_FLAGS_RELWITHDEBINFO:STRING=
 //Path to a program.
 CMAKE_STRIP:FILEPATH=/usr/bin/strip
 
+//No help, variable specified on the command line.
+CMAKE_TRY_COMPILE_TARGET_TYPE:UNINITIALIZED=STATIC_LIBRARY
+
 //If this value is on, makefiles will be generated without the
 // .SILENT directive, and all commands will be echoed to the console
 // during the make.  This is useful for debugging only. With Visual
@@ -426,7 +429,7 @@ LIBOBJC_NAME:STRING=objc
 LIB_INSTALL_PATH:STRING=lib
 
 //Path to a library.
-M_LIBRARY:FILEPATH=/usr/lib/x86_64-linux-gnu/libm.so
+M_LIBRARY:FILEPATH=M_LIBRARY-NOTFOUND
 
 //Enable compatibility with GCC and old GNUstep ABIs
 OLDABI_COMPAT:BOOL=ON

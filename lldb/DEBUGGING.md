@@ -72,7 +72,7 @@ This guide explains how to use the VS Code development infrastructure for effici
 Use the **"Interactive LLDB Session"** configuration for manual testing:
 
 ```bash
-(lldb) b custom_class_test.m:125
+(lldb) b custom_class_test.m:228
 (lldb) run
 (lldb) po account      # Test custom class
 (lldb) po personInfo   # Test dictionary

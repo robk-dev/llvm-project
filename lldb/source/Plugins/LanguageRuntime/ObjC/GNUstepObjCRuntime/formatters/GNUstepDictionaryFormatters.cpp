@@ -402,7 +402,7 @@ std::string GNUstepNSDictionarySummaryProvider::GetElementSummary(Process *proce
           }
           
           // ENHANCED FIX: Truncate very long collections for dictionary values
-          if (is_collection && result.length() > 50) {
+          if (is_collection && result.length() > 100) {
             // For arrays: @[item1, item2, ...]
             if (result.find("@[") == 0) {
               size_t comma_pos = result.find(",");
@@ -747,7 +747,7 @@ std::string GNUstepNSDictionarySummaryProvider::GetElementSummary(Process *proce
   context.ExitObject(element_addr);
   
   // For non-string objects where we couldn't get a better summary
-  return "<object>";
+  return "";
 }
 
 bool GNUstepNSDictionarySummaryProvider::IsGNUstepTaggedPointer(lldb::addr_t addr) {

@@ -20,8 +20,7 @@
    
    You should have received a copy of the GNU Lesser General Public
    License along with this library; if not, write to the Free
-   Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
-   Boston, MA 02110 USA.
+   Software Foundation, Inc., 31 Milk Street #960789 Boston, MA 02196 USA.
    */ 
 
 #ifndef __Foundation_h_GNUSTEP_BASE_INCLUDE
@@ -47,6 +46,7 @@
 #import	<Foundation/NSAutoreleasePool.h>
 #import <Foundation/NSBackgroundActivityScheduler.h>
 #import	<Foundation/NSBundle.h>
+#import <Foundation/NSByteCountFormatter.h>
 #import	<Foundation/NSByteOrder.h>
 #import	<Foundation/NSCache.h>
 #import	<Foundation/NSCalendar.h>

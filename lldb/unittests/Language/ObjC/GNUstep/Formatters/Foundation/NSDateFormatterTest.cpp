@@ -17,7 +17,7 @@
 #include "lldb/Target/Platform.h"
 #include "lldb/Utility/ArchSpec.h"
 #include "lldb/Core/Debugger.h"
-#include "lldb/Core/ValueObject.h"
+#include "lldb/ValueObject/ValueObject.h"
 #include "lldb/Utility/StreamString.h"
 
 #include "../Common/FormatterTestHelpers.h"
@@ -50,10 +50,9 @@ protected:
 TEST_F(NSDateFormatterTest, BasicDateFormatting) {
   // Test basic NSDate object formatting
   lldb::DebuggerSP debugger = Debugger::CreateInstance();
-  lldb::TargetSP target = std::make_shared<Target>(*debugger, ArchSpec("x86_64"), 
-                                                   PlatformSP(), true);
+  lldb::TargetSP target = std::make_shared<MockTarget>(*debugger, ArchSpec("x86_64"), 
+                                                   PlatformSP());
   lldb::ProcessSP process = std::make_shared<MockProcess>(target, ListenerSP());
-  target->SetProcessSP(process);
   
   // NSDate stores time as NSTimeInterval (seconds since reference date)
   // Reference date: January 1, 2001, 00:00:00 GMT
@@ -96,10 +95,9 @@ TEST_F(NSDateFormatterTest, BasicDateFormatting) {
 TEST_F(NSDateFormatterTest, SpecialDateValues) {
   // Test special NSDate values (epoch, far future, far past)
   lldb::DebuggerSP debugger = Debugger::CreateInstance();
-  lldb::TargetSP target = std::make_shared<Target>(*debugger, ArchSpec("x86_64"), 
-                                                   PlatformSP(), true);
+  lldb::TargetSP target = std::make_shared<MockTarget>(*debugger, ArchSpec("x86_64"), 
+                                                   PlatformSP());
   lldb::ProcessSP process = std::make_shared<MockProcess>(target, ListenerSP());
-  target->SetProcessSP(process);
   
   GNUstepNSDateSummaryProvider provider;
   
@@ -159,10 +157,9 @@ TEST_F(NSDateFormatterTest, SpecialDateValues) {
 TEST_F(NSDateFormatterTest, DateComponentFormatting) {
   // Test that date formatting shows recognizable components
   lldb::DebuggerSP debugger = Debugger::CreateInstance();
-  lldb::TargetSP target = std::make_shared<Target>(*debugger, ArchSpec("x86_64"), 
-                                                   PlatformSP(), true);
+  lldb::TargetSP target = std::make_shared<MockTarget>(*debugger, ArchSpec("x86_64"), 
+                                                   PlatformSP());
   lldb::ProcessSP process = std::make_shared<MockProcess>(target, ListenerSP());
-  target->SetProcessSP(process);
   
   GNUstepNSDateSummaryProvider provider;
   
@@ -222,10 +219,9 @@ TEST_F(NSDateFormatterTest, DateComponentFormatting) {
 TEST_F(NSDateFormatterTest, NSCalendarDateHandling) {
   // Test NSCalendarDate (legacy NSDate subclass) if supported
   lldb::DebuggerSP debugger = Debugger::CreateInstance();
-  lldb::TargetSP target = std::make_shared<Target>(*debugger, ArchSpec("x86_64"), 
-                                                   PlatformSP(), true);
+  lldb::TargetSP target = std::make_shared<MockTarget>(*debugger, ArchSpec("x86_64"), 
+                                                   PlatformSP());
   lldb::ProcessSP process = std::make_shared<MockProcess>(target, ListenerSP());
-  target->SetProcessSP(process);
   
   double calendar_interval = 86400.0;  // One day after reference
   
@@ -268,10 +264,9 @@ TEST_F(NSDateFormatterTest, NSCalendarDateHandling) {
 TEST_F(NSDateFormatterTest, ErrorHandling) {
   // Test error conditions in NSDate formatting
   lldb::DebuggerSP debugger = Debugger::CreateInstance();
-  lldb::TargetSP target = std::make_shared<Target>(*debugger, ArchSpec("x86_64"), 
-                                                   PlatformSP(), true);
+  lldb::TargetSP target = std::make_shared<MockTarget>(*debugger, ArchSpec("x86_64"), 
+                                                   PlatformSP());
   lldb::ProcessSP process = std::make_shared<MockProcess>(target, ListenerSP());
-  target->SetProcessSP(process);
   
   GNUstepNSDateSummaryProvider provider;
   
@@ -360,10 +355,9 @@ TEST_F(NSDateFormatterTest, ErrorHandling) {
 TEST_F(NSDateFormatterTest, PerformanceRequirements) {
   // Test that NSDate formatting meets <50ms requirement
   lldb::DebuggerSP debugger = Debugger::CreateInstance();
-  lldb::TargetSP target = std::make_shared<Target>(*debugger, ArchSpec("x86_64"), 
-                                                   PlatformSP(), true);
+  lldb::TargetSP target = std::make_shared<MockTarget>(*debugger, ArchSpec("x86_64"), 
+                                                   PlatformSP());
   lldb::ProcessSP process = std::make_shared<MockProcess>(target, ListenerSP());
-  target->SetProcessSP(process);
   
   // Create NSDate for performance test
   double perf_interval = 1609459200.0;  // Some reasonable time
@@ -401,10 +395,9 @@ TEST_F(NSDateFormatterTest, PerformanceRequirements) {
 TEST_F(NSDateFormatterTest, TimeIntervalAccuracy) {
   // Test NSDate time interval interpretation accuracy
   lldb::DebuggerSP debugger = Debugger::CreateInstance();
-  lldb::TargetSP target = std::make_shared<Target>(*debugger, ArchSpec("x86_64"), 
-                                                   PlatformSP(), true);
+  lldb::TargetSP target = std::make_shared<MockTarget>(*debugger, ArchSpec("x86_64"), 
+                                                   PlatformSP());
   lldb::ProcessSP process = std::make_shared<MockProcess>(target, ListenerSP());
-  target->SetProcessSP(process);
   
   GNUstepNSDateSummaryProvider provider;
   
@@ -462,10 +455,9 @@ TEST_F(NSDateFormatterTest, TimeIntervalAccuracy) {
 TEST_F(NSDateFormatterTest, TimeZoneHandling) {
   // Test NSDate with timezone considerations
   lldb::DebuggerSP debugger = Debugger::CreateInstance();
-  lldb::TargetSP target = std::make_shared<Target>(*debugger, ArchSpec("x86_64"), 
-                                                   PlatformSP(), true);
+  lldb::TargetSP target = std::make_shared<MockTarget>(*debugger, ArchSpec("x86_64"), 
+                                                   PlatformSP());
   lldb::ProcessSP process = std::make_shared<MockProcess>(target, ListenerSP());
-  target->SetProcessSP(process);
   
   GNUstepNSDateSummaryProvider provider;
   

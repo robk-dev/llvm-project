@@ -18,8 +18,7 @@
    
    You should have received a copy of the GNU Lesser General Public
    License along with this library; if not, write to the Free
-   Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
-   Boston, MA 02110 USA.
+   Software Foundation, Inc., 31 Milk Street #960789 Boston, MA 02196 USA.
 
    AutogsdocSource: NSError.m
    */ 
@@ -153,9 +152,9 @@ GS_EXPORT_CLASS
  * Creates and returns an autoreleased NSError instance by calling
  * -initWithDomain:code:userInfo:
  */
-+ (id) errorWithDomain: (NSErrorDomain)aDomain
-		  code: (NSInteger)aCode
-	      userInfo: (NSDictionary*)aDictionary;
++ (instancetype) errorWithDomain: (NSErrorDomain)aDomain
+                            code: (NSInteger)aCode
+                        userInfo: (NSDictionary*)aDictionary;
 
 /**
  * Return the error code ... which is not globally unique, just unique for
@@ -172,9 +171,9 @@ GS_EXPORT_CLASS
  * Initialises the receiver using the supplied domain, code, and info.<br />
  * The domain must be non-nil.
  */
-- (id) initWithDomain: (NSErrorDomain)aDomain
-		 code: (NSInteger)aCode
-	     userInfo: (NSDictionary*)aDictionary;
+- (instancetype) initWithDomain: (NSErrorDomain)aDomain
+                           code: (NSInteger)aCode
+                       userInfo: (NSDictionary*)aDictionary;
 
 /**
  * Return a human readable description for the error.<br />

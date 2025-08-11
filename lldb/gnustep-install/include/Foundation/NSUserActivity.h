@@ -1,7 +1,7 @@
-/* Definition of class NSUserActivity
+/**Definition of class NSUserActivity
    Copyright (C) 2019 Free Software Foundation, Inc.
    
-   By: heron
+   By: Gregory John Casamento <greg.casamento@gmail.com>
    Date: Fri Nov  1 00:25:47 EDT 2019
 
    This file is part of the GNUstep Library.
@@ -18,8 +18,7 @@
    
    You should have received a copy of the GNU Lesser General Public
    License along with this library; if not, write to the Free
-   Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
-   Boston, MA 02110 USA.
+   Software Foundation, Inc., 31 Milk Street #960789 Boston, MA 02196 USA.
 */
 
 #ifndef _NSUserActivity_h_GNUSTEP_BASE_INCLUDE
@@ -27,7 +26,7 @@
 
 #include <Foundation/NSObject.h>
 
-#if OS_API_VERSION(MAC_OS_X_VERSION_10_0, GS_API_LATEST)
+#if OS_API_VERSION(MAC_OS_X_VERSION_10_10, GS_API_LATEST)
 
 #if	defined(__cplusplus)
 extern "C" {

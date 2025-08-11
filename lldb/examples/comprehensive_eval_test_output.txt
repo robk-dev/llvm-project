@@ -1,0 +1,52 @@
+*** GNUstepObjCRuntime::Initialize() called - Plugin registered ***
+🎯 Global .lldbinit loaded - project-specific .lldbinit files will now be read
+(lldb) command source -s 0 'expression_eval_comprehensive_test.lldb'
+Executing commands in '/home/robk/code/llvm-project/lldb/examples/expression_eval_comprehensive_test.lldb'.
+(lldb) #!/usr/bin/env lldb -s
+(lldb) # Comprehensive test to analyze expression evaluation state in GNUstep LLDB bridge
+(lldb) file custom_class_test
+Current executable set to '/home/robk/code/llvm-project/lldb/examples/custom_class_test' (x86_64).
+(lldb) breakpoint set -f custom_class_test.m -l 125
+Breakpoint 1: where = custom_class_test`main + 933 at custom_class_test.m:127:34, address = 0x0000000000005d15
+(lldb) run
+*** GNUstepObjCRuntime::CreateInstance() called for language 16 ***
+*** GNUstepObjCRuntime::CreateInstance() called for language 17 ***
+*** GNUstepObjCRuntime::CreateInstance() called for language 2 ***
+*** GNUstepObjCRuntime::CreateInstance() called for language 2 ***
+Process 98863 launched: '/home/robk/code/llvm-project/lldb/examples/custom_class_test' (x86_64)
+Process 98863 stopped
+* thread #1, name = 'custom_class_te', stop reason = breakpoint 1.1
+    frame #0: 0x0000555555559d15 custom_class_test`main(argc=1, argv=0x00007fffffffd318) at custom_class_test.m:127:34
+   124 	    NSNull *nullObject = [NSNull null];
+   125 	    
+   126 	    // Test NSException
+-> 127 	    NSException *testException = [NSException exceptionWithName:@"TestException" 
+    	                                 ^
+   128 	                                                         reason:@"This is a test exception for debugging"
+   129 	                                                       userInfo:@{@"errorCode": @404, @"context": @"Testing"}];
+   130
+(lldb) # === Phase 1: Basic Object Description Tests ===
+(lldb) po account
+*** GNUstepObjCRuntime::CreateInstance() called for language 2 ***
+2001-01-01 00:00:00 +0000
+
+(lldb) po personInfo
+(<tagged[5]> *) 0x7ffff7f9ee75
+
+(lldb) po fruits
+()
+
+(lldb) po currentTime
+*** GNUstepObjCRuntime::CreateInstance() called for language 2 ***
+2025-08-10 16:02:48 +0100
+
+(lldb) po magicNumber
+*** GNUstepObjCRuntime::CreateInstance() called for language 2 ***
+42
+
+(lldb) # === Phase 2: Custom Class Property Tests ===
+(lldb) # These should work if CreateObjectChecker is functioning properly
+(lldb) expr -T 2.0 -- [account balance]  
+                      
+error: Expression execution was interrupted: Attempted to dereference an invalid ObjC Object or send it an unrecognized selector.
+The process has been returned to the state before expression evaluation.

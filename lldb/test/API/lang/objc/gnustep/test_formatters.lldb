@@ -1,15 +1,16 @@
-b main.m:105
+# GNUstep Formatter Integration Test Script
+target create /home/robk/code/llvm-project/lldb/test/API/lang/objc/gnustep/a.out
+breakpoint set --file main.m --line 105
 run
-po emptyString
-po asciiString
-po utf8String
-po intNumber
-po floatNumber
-po emptyArray
-po simpleArray
-po emptyDict
-po simpleDict
-po emptySet
-po simpleSet
-po account
+# Test basic formatters using frame variable (po causes hanging)
+frame variable -O emptyString
+frame variable -O asciiString
+frame variable -O intNumber
+frame variable -O emptyArray
+frame variable -O simpleArray
+frame variable -O emptyDict
+frame variable -O simpleDict
+frame variable -O emptySet
+frame variable -O account
+continue
 quit

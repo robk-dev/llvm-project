@@ -38,6 +38,9 @@ GNUstepObjCRuntimeIntrospector::GNUstepObjCRuntimeIntrospector(Process *process)
   if (m_process) {
     m_address_size = m_process->GetAddressByteSize();
     m_byte_order = m_process->GetByteOrder();
+    
+    // Note: Don't load runtime symbols here as libraries may not be loaded yet
+    // LoadRuntimeSymbols() will be called on-demand when symbols are first needed
   } else {
     m_address_size = 0;
     m_byte_order = lldb::eByteOrderInvalid;
@@ -57,9 +60,9 @@ lldb::addr_t GNUstepObjCRuntimeIntrospector::GetISAFromObject(ValueObject &valob
   
   // Check if this is a tagged pointer first
   if (IsTaggedPointer(obj_addr)) {
-    // For tagged pointers, we need to extract the class information differently
-    // GNUstep tagged pointers encode class information in the lower bits
-    return obj_addr; // Return the tagged pointer itself for now
+    // For tagged pointers, we need to use the runtime's classForObject function
+    // to get the correct class pointer from the SmallObjectClasses array
+    return GetTaggedPointerClass(obj_addr);
   }
   
   // For regular objects, the ISA is the first pointer-sized value
@@ -78,6 +81,9 @@ std::string GNUstepObjCRuntimeIntrospector::GetClassName(lldb::addr_t isa_addr) 
     // printf("[DEBUG] GetClassName: Invalid process or ISA address\n");
     return "";
   }
+  
+  // Ensure runtime symbols are loaded for enhanced introspection
+  EnsureRuntimeSymbolsLoaded();
   
   // printf("[DEBUG] GetClassName: Looking up class name for ISA 0x%llx\n", (unsigned long long)isa_addr);
   
@@ -138,6 +144,17 @@ std::string GNUstepObjCRuntimeIntrospector::GetClassName(lldb::addr_t isa_addr) 
 }
 
 std::string GNUstepObjCRuntimeIntrospector::GetClassNameFromObject(ValueObject &valobj) {
+  lldb::addr_t obj_addr = valobj.GetPointerValue();
+  if (obj_addr == 0 || obj_addr == LLDB_INVALID_ADDRESS) {
+    return "";
+  }
+  
+  // Check for tagged pointers first - they need special handling
+  if (IsTaggedPointer(obj_addr)) {
+    return GetTaggedPointerClassName(obj_addr);
+  }
+  
+  // For regular objects, use normal ISA resolution
   lldb::addr_t isa_addr = GetISAFromObject(valobj);
   if (isa_addr == LLDB_INVALID_ADDRESS) {
     return "";
@@ -248,25 +265,33 @@ bool GNUstepObjCRuntimeIntrospector::IsValidGNUstepRuntime() {
 lldb::addr_t GNUstepObjCRuntimeIntrospector::CallRuntimeFunction(
     const std::string &function_name, const std::vector<lldb::addr_t> &args) {
   
+  Log *log = GetLog(LLDBLog::Language);
+  LLDB_LOG(log, "[GNUstep] CallRuntimeFunction: {0} with {1} args", function_name, args.size());
+  
   if (!m_process || function_name.empty()) {
+    LLDB_LOG(log, "[GNUstep] CallRuntimeFunction: Invalid process or empty function name");
     return LLDB_INVALID_ADDRESS;
   }
   
   // Setup execution context
   ExecutionContext exe_ctx;
   if (!SetupExecutionContext(exe_ctx)) {
-    Log *log = GetLog(LLDBLog::Language);
-    LLDB_LOG(log, "[GNUstep] Failed to setup execution context for {0}",
+    LLDB_LOG(log, "[GNUstep] CallRuntimeFunction: Failed to setup execution context for {0}",
              function_name);
     return LLDB_INVALID_ADDRESS;
   }
+  
+  LLDB_LOG(log, "[GNUstep] CallRuntimeFunction: Execution context setup successful");
   
   // Get scratch type system for argument and return types
   TypeSystemClangSP scratch_ts_sp = 
       ScratchTypeSystemClang::GetForTarget(exe_ctx.GetTargetRef());
   if (!scratch_ts_sp) {
+    LLDB_LOG(log, "[GNUstep] CallRuntimeFunction: Failed to get scratch type system");
     return LLDB_INVALID_ADDRESS;
   }
+  
+  LLDB_LOG(log, "[GNUstep] CallRuntimeFunction: Got scratch type system");
   
   // Build argument list
   ValueList arg_values;
@@ -295,18 +320,21 @@ lldb::addr_t GNUstepObjCRuntimeIntrospector::CallRuntimeFunction(
   CompilerType return_type = 
       scratch_ts_sp->GetBasicType(eBasicTypeVoid).GetPointerType();
   
+  LLDB_LOG(log, "[GNUstep] CallRuntimeFunction: Prepared {0} arguments, calling implementation", arg_values.GetSize());
+  
   // Call the implementation
   Status error;
   lldb::addr_t result = CallRuntimeFunctionImpl(
       function_name.c_str(), return_type, arg_values, exe_ctx, error);
       
   if (error.Fail()) {
-    Log *log = GetLog(LLDBLog::Language);
-    LLDB_LOG(log, "[GNUstep] Failed to call {0}: {1}",
+    LLDB_LOG(log, "[GNUstep] CallRuntimeFunction: Failed to call {0}: {1}",
              function_name, error.AsCString());
     return LLDB_INVALID_ADDRESS;
   }
   
+  LLDB_LOG(log, "[GNUstep] CallRuntimeFunction: Successfully called {0}, result = 0x{1:x}",
+           function_name, result);
   return result;
 }
 
@@ -315,21 +343,34 @@ bool GNUstepObjCRuntimeIntrospector::IsTaggedPointer(lldb::addr_t obj_addr) {
     return false;
   }
   
-  // GNUstep uses tagged pointers for small objects to avoid allocations.
-  // The tag is in the lower 3 bits:
-  // - Tag 4: Tiny strings (up to 8 characters)
-  // - Tag 1: Small integers (NSNumber)
-  // - Tag 2: Dates or other small objects
+  // CRITICAL FIX: GNUstep/libobjc2 tagged pointer detection
+  // From libobjc2/objc/runtime.h lines 1005-1008:
+  // "In both cases, the lowest bit must be 1"
   // 
-  // Check if any of the lower 3 bits are set (indicating a tagged pointer)
-  uint64_t tag = obj_addr & 0x7;
+  // Correct logic:
+  // - The lowest bit MUST be 1 for tagged pointers
+  // - On 32-bit: mask = 1, so (addr & 1) == 1 means tagged
+  // - On 64-bit: mask = 7, but bit 0 must still be 1
+  // 
+  // This fixes the bug where heap objects with non-aligned addresses 
+  // were incorrectly identified as tagged pointers.
   
-  // Valid tags are 1, 2, 4 (not 0, 3, 5, 6, 7)
-  if (tag == 1 || tag == 2 || tag == 4) {
-    return true;
+  // First check: lowest bit must be 1
+  if ((obj_addr & 1) == 0) {
+    return false; // Bit 0 is 0, cannot be tagged pointer
   }
   
-  return false;
+  // Get the architecture-appropriate mask
+  uint64_t small_object_mask;
+  if (m_address_size == 4) {
+    small_object_mask = 1; // 32-bit: only bit 0 matters
+  } else {
+    small_object_mask = 7; // 64-bit: bits 0-2, but bit 0 must be 1
+  }
+  
+  // Check if this address matches the small object pattern
+  // Since we already confirmed bit 0 is 1, this checks the pattern
+  return (obj_addr & small_object_mask) != 0;
 }
 
 std::string GNUstepObjCRuntimeIntrospector::DecodeTaggedString(lldb::addr_t obj_addr) {
@@ -449,16 +490,20 @@ lldb::addr_t GNUstepObjCRuntimeIntrospector::CallRuntimeFunctionImpl(
     ExecutionContext &exe_ctx,
     Status &error) const {
     
+  Log *log = GetLog(LLDBLog::Language);
+  LLDB_LOG(log, "[GNUstep] CallRuntimeFunctionImpl: Starting function call for {0}", function_name);
+    
   // Get or create the function caller
   std::unique_ptr<FunctionCaller> &caller = 
       GetOrCreateFunctionCaller(function_name, return_type, args, 
                                 exe_ctx, error);
   if (!caller || error.Fail()) {
-    Log *log = GetLog(LLDBLog::Language);
-    LLDB_LOG(log, "[GNUstep] Failed to get/create function caller for {0}: {1}",
+    LLDB_LOG(log, "[GNUstep] CallRuntimeFunctionImpl: Failed to get/create function caller for {0}: {1}",
              function_name, error.Fail() ? error.AsCString() : "null caller");
     return LLDB_INVALID_ADDRESS;
   }
+  
+  LLDB_LOG(log, "[GNUstep] CallRuntimeFunctionImpl: Got function caller for {0}", function_name);
   
   // Prepare for execution
   DiagnosticManager diagnostics;
@@ -521,8 +566,7 @@ lldb::addr_t GNUstepObjCRuntimeIntrospector::CallRuntimeFunctionImpl(
   lldb::addr_t return_addr = result_value.GetScalar().ULongLong(
       LLDB_INVALID_ADDRESS);
       
-  Log *log = GetLog(LLDBLog::Language);
-  LLDB_LOG(log, "[GNUstep] Called {0}({1:x}) = {2:x}",
+  LLDB_LOG(log, "[GNUstep] CallRuntimeFunctionImpl: Called {0}({1:x}) = {2:x}",
            function_name, 
            mutable_args.GetSize() > 0 ? mutable_args.GetValueAtIndex(0)->GetScalar().ULongLong() : 0,
            return_addr);
@@ -725,4 +769,187 @@ lldb::ModuleSP GNUstepObjCRuntimeIntrospector::GetFoundationModule() const {
   }
   
   return ModuleSP();
+}
+
+void GNUstepObjCRuntimeIntrospector::EnsureRuntimeSymbolsLoaded() {
+  if (!m_runtime_symbols_loaded && m_process) {
+    Log *log = GetLog(LLDBLog::Language);
+    LLDB_LOG(log, "[GNUstepIntrospector] Loading runtime symbols on-demand");
+    LoadRuntimeSymbols();
+    m_runtime_symbols_loaded = true;
+  }
+}
+
+bool GNUstepObjCRuntimeIntrospector::LoadRuntimeSymbols() {
+  if (!m_process) {
+    return false;
+  }
+
+  Log *log = GetLog(LLDBLog::Language);
+  LLDB_LOG(log, "[GNUstepIntrospector] Loading runtime function symbols");
+
+  // Load essential ObjC runtime functions for enhanced introspection
+  m_object_getClass_addr = GetRuntimeFunctionAddress("object_getClass");
+  m_class_getSuperclass_addr = GetRuntimeFunctionAddress("class_getSuperclass");  
+  m_class_getInstanceSize_addr = GetRuntimeFunctionAddress("class_getInstanceSize");
+  m_class_getMethodImplementation_addr = GetRuntimeFunctionAddress("class_getMethodImplementation");
+  m_objc_msgSend_addr = GetRuntimeFunctionAddress("objc_msgSend");
+  m_objc_copyClassList_addr = GetRuntimeFunctionAddress("objc_copyClassList");
+  m_class_getName_addr = GetRuntimeFunctionAddress("class_getName");
+  m_free_addr = GetRuntimeFunctionAddress("free");
+
+  // Count successful resolutions
+  int resolved_count = 0;
+  if (m_object_getClass_addr != LLDB_INVALID_ADDRESS) resolved_count++;
+  if (m_class_getSuperclass_addr != LLDB_INVALID_ADDRESS) resolved_count++;
+  if (m_class_getInstanceSize_addr != LLDB_INVALID_ADDRESS) resolved_count++;
+  if (m_class_getMethodImplementation_addr != LLDB_INVALID_ADDRESS) resolved_count++;
+  if (m_objc_msgSend_addr != LLDB_INVALID_ADDRESS) resolved_count++;
+  if (m_objc_copyClassList_addr != LLDB_INVALID_ADDRESS) resolved_count++;
+  if (m_class_getName_addr != LLDB_INVALID_ADDRESS) resolved_count++;
+  if (m_free_addr != LLDB_INVALID_ADDRESS) resolved_count++;
+
+  LLDB_LOG(log, "[GNUstepIntrospector] Resolved {0}/8 runtime function symbols", resolved_count);
+
+  // Log individual resolutions for debugging
+  if (log) {
+    LLDB_LOG(log, "[GNUstepIntrospector]   object_getClass: 0x{0:x}", m_object_getClass_addr);
+    LLDB_LOG(log, "[GNUstepIntrospector]   class_getSuperclass: 0x{0:x}", m_class_getSuperclass_addr);
+    LLDB_LOG(log, "[GNUstepIntrospector]   class_getInstanceSize: 0x{0:x}", m_class_getInstanceSize_addr);
+    LLDB_LOG(log, "[GNUstepIntrospector]   class_getMethodImplementation: 0x{0:x}", m_class_getMethodImplementation_addr);
+    LLDB_LOG(log, "[GNUstepIntrospector]   objc_msgSend: 0x{0:x}", m_objc_msgSend_addr);
+    LLDB_LOG(log, "[GNUstepIntrospector]   objc_copyClassList: 0x{0:x}", m_objc_copyClassList_addr);
+    LLDB_LOG(log, "[GNUstepIntrospector]   class_getName: 0x{0:x}", m_class_getName_addr);
+    LLDB_LOG(log, "[GNUstepIntrospector]   free: 0x{0:x}", m_free_addr);
+  }
+
+  // We consider it successful if we got at least the core functions
+  bool success = (m_object_getClass_addr != LLDB_INVALID_ADDRESS &&
+                  m_class_getSuperclass_addr != LLDB_INVALID_ADDRESS &&
+                  m_class_getName_addr != LLDB_INVALID_ADDRESS);
+
+  if (success) {
+    LLDB_LOG(log, "[GNUstepIntrospector] Runtime symbol loading successful - core functions available");
+  } else {
+    LLDB_LOG(log, "[GNUstepIntrospector] Runtime symbol loading incomplete - missing core functions");
+  }
+
+  return success;
+}
+
+lldb::addr_t GNUstepObjCRuntimeIntrospector::GetRuntimeFunctionAddress(const char *function_name) {
+  if (!m_process || !function_name) {
+    return LLDB_INVALID_ADDRESS;
+  }
+
+  Target &target = m_process->GetTarget();
+  const ModuleList &modules = target.GetImages();
+
+  // First try to find in libobjc2/libobjc.so (primary runtime)
+  for (uint32_t idx = 0; idx < modules.GetSize(); idx++) {
+    ModuleSP module_sp = modules.GetModuleAtIndex(idx);
+    if (!module_sp) continue;
+
+    const char *module_name = module_sp->GetFileSpec().GetFilename().GetCString();
+    if (!module_name) continue;
+
+    // Check if this is a GNUstep runtime module
+    if (strstr(module_name, "libobjc.so") || 
+        strstr(module_name, "libobjc2") ||
+        strstr(module_name, "libgnustep-base.so")) {
+
+      const Symbol *symbol = module_sp->FindFirstSymbolWithNameAndType(
+          ConstString(function_name), eSymbolTypeCode);
+
+      if (symbol) {
+        lldb::addr_t addr = symbol->GetAddress().GetLoadAddress(&target);
+        if (addr != LLDB_INVALID_ADDRESS) {
+          Log *log = GetLog(LLDBLog::Language);
+          LLDB_LOG(log, "[GNUstepIntrospector] Resolved {0} to 0x{1:x} in {2}",
+                   function_name, addr, module_name);
+          return addr;
+        }
+      }
+    }
+  }
+
+  // Fallback: try to find in any module (for system functions like 'free')
+  SymbolContextList sc_list;
+  target.GetImages().FindSymbolsWithNameAndType(
+      ConstString(function_name), eSymbolTypeCode, sc_list);
+
+  if (sc_list.GetSize() > 0) {
+    SymbolContext sc;
+    if (sc_list.GetContextAtIndex(0, sc) && sc.symbol) {
+      lldb::addr_t addr = sc.symbol->GetAddress().GetLoadAddress(&target);
+      if (addr != LLDB_INVALID_ADDRESS) {
+        Log *log = GetLog(LLDBLog::Language);
+        LLDB_LOG(log, "[GNUstepIntrospector] Resolved {0} to 0x{1:x} (fallback search)",
+                 function_name, addr);
+        return addr;
+      }
+    }
+  }
+
+  Log *log = GetLog(LLDBLog::Language);
+  LLDB_LOG(log, "[GNUstepIntrospector] Failed to resolve symbol: {0}", function_name);
+  return LLDB_INVALID_ADDRESS;
+}
+
+lldb::addr_t GNUstepObjCRuntimeIntrospector::GetTaggedPointerClass(lldb::addr_t obj_addr) {
+  if (!IsTaggedPointer(obj_addr)) {
+    return LLDB_INVALID_ADDRESS;
+  }
+  
+  // Use the runtime's object_getClass function to get the proper class
+  // This will use classForObject() internally which handles SmallObjectClasses lookup
+  std::vector<lldb::addr_t> args;
+  args.push_back(obj_addr);
+  
+  lldb::addr_t class_addr = CallRuntimeFunction("object_getClass", args);
+  if (class_addr == LLDB_INVALID_ADDRESS) {
+    // Fallback: Try to resolve manually using the tag bits
+    // This is less reliable but better than nothing
+    uint64_t tag_index;
+    if (m_address_size == 4) {
+      tag_index = 0; // 32-bit has only one small object class
+    } else {
+      tag_index = obj_addr & 0x7; // 64-bit uses lower 3 bits as index
+    }
+    
+    Log *log = GetLog(LLDBLog::Language);
+    LLDB_LOG(log, "[GNUstep] Failed to get tagged pointer class via runtime, tag_index={0}", tag_index);
+  }
+  
+  return class_addr;
+}
+
+std::string GNUstepObjCRuntimeIntrospector::GetTaggedPointerClassName(lldb::addr_t obj_addr) {
+  if (!IsTaggedPointer(obj_addr)) {
+    return "";
+  }
+  
+  // Get the class pointer first
+  lldb::addr_t class_addr = GetTaggedPointerClass(obj_addr);
+  if (class_addr == LLDB_INVALID_ADDRESS) {
+    // Fallback to educated guessing based on common GNUstep patterns
+    uint64_t tag;
+    if (m_address_size == 4) {
+      tag = obj_addr & 1;
+    } else {
+      tag = obj_addr & 7;
+    }
+    
+    // Common small object classes in GNUstep (based on libobjc2 source)
+    switch (tag) {
+      case 1: return "NSNumber";  // Most common tagged pointer
+      case 2: return "NSDate";    // Sometimes used for dates
+      case 4: return "NSString";  // Tiny strings
+      default: return "UnknownTaggedObject";
+    }
+  }
+  
+  // Get the class name using standard ISA resolution
+  ConstString class_name = GetClassNameFromISA(class_addr);
+  return class_name.GetCString() ? class_name.GetCString() : "";
 }

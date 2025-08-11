@@ -14,6 +14,7 @@
 #include "lldb/DataFormatters/FormattersHelpers.h"
 #include "lldb/Target/Process.h"
 #include "lldb/Target/Target.h"
+#include "lldb/Core/Module.h"
 #include "lldb/Utility/DataExtractor.h"
 #include "lldb/Utility/Stream.h"
 #include "lldb/Utility/Status.h"
@@ -23,7 +24,9 @@
 
 using namespace lldb;
 using namespace lldb_private;
-using namespace lldb_private::formatters;
+
+namespace lldb_private {
+namespace formatters {
 
 bool GNUstepNSProcessInfoSummaryProvider::FormatObject(
     ValueObject &valobj, Stream &stream, const TypeSummaryOptions &options) {
@@ -80,10 +83,20 @@ std::string GNUstepNSProcessInfoSummaryProvider::GetProcessName(ValueObject &val
   if (!process_sp)
     return GetProcessNameFromSystem();
   
-  // Since CallRuntimeFunction is not available for formatters,
-  // we'll use the system fallback approach for now.
-  // Future improvements could implement memory-based method calling
-  // but that's complex and beyond the current scope.
+  // Try to get the executable module name from the target
+  TargetSP target_sp = valobj.GetTargetSP();
+  if (target_sp) {
+    ModuleSP exe_module = target_sp->GetExecutableModule();
+    if (exe_module) {
+      const FileSpec &exe_spec = exe_module->GetFileSpec();
+      if (exe_spec) {
+        // Get just the filename without the path
+        const char *filename = exe_spec.GetFilename().GetCString();
+        if (filename && *filename)
+          return std::string(filename);
+      }
+    }
+  }
   
   // Fallback to system calls
   return GetProcessNameFromSystem();
@@ -117,12 +130,15 @@ std::string GNUstepNSProcessInfoSummaryProvider::GetProcessNameFromSystem() {
   // 1. Read the target's argv[0] from its memory space
   // 2. Use /proc/PID/comm for Linux targets
   // 3. Extract from the executable path in the target info
-  return "test_nsprocessinfo"; // For testing purposes
+  
+  // For now, return a generic name that indicates we couldn't get the real name
+  return "process"; // Generic fallback
 }
 
 int32_t GNUstepNSProcessInfoSummaryProvider::GetProcessIdentifierFromSystem() {
-  // Return the current process ID
-  return static_cast<int32_t>(getpid());
+  // This fallback should not use getpid() as that returns LLDB's PID
+  // Return 0 to indicate we couldn't get the real PID
+  return 0;
 }
 
 size_t GNUstepNSProcessInfoSummaryProvider::GetArgumentCountFromSystem(ValueObject &valobj) {
@@ -148,3 +164,6 @@ bool GNUstepNSProcessInfoFormatterFunction(ValueObject &valobj, Stream &stream,
   GNUstepNSProcessInfoSummaryProvider formatter;
   return formatter.FormatObject(valobj, stream, options);
 }
+
+} // namespace formatters
+} // namespace lldb_private

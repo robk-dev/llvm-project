@@ -1,0 +1,16 @@
+#!/usr/bin/env lldb -s
+file custom_class_test
+breakpoint set -f custom_class_test.m -l 125
+run
+
+# Get the actual address and type info
+p account
+p/x account
+p (void*)account
+expr -T 1.0 -- (void*)account
+
+# Test what the introspector thinks about this address
+p sizeof(void*)
+
+continue
+quit

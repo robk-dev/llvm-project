@@ -138,7 +138,7 @@ TEST_F(NSArrayFormatterTest, TaggedPointerHandling) {
   
   // Verify tag extraction logic
   EXPECT_EQ((tagged_int >> 3), 42ULL) << "Tagged int value extraction";
-  EXPECT_NE(regular_pointer & TAG_MASK, 0U) ? false : true << "Regular pointers should not be tagged";
+  EXPECT_EQ((regular_pointer & TAG_MASK) == 0U, true) << "Regular pointers should not be tagged";
 }
 
 TEST_F(NSArrayFormatterTest, RecursionPrevention) {
@@ -266,7 +266,8 @@ TEST_F(NSArrayFormatterTest, MutableArraySupport) {
   
   // Validate mutable detection logic
   for (const auto& class_name : mutable_class_names) {
-    bool has_mutable = class_name.find("Mutable") != std::string::npos;
+    bool has_mutable = class_name.find("Mutable") != std::string::npos || 
+                       class_name.find("__NSArrayM") != std::string::npos;
     EXPECT_TRUE(has_mutable) << "Class " << class_name << " should be detected as mutable";
   }
   
@@ -427,12 +428,21 @@ TEST_F(NSArrayFormatterTest, SyntheticChildrenArchitecture) {
   uint64_t tagged_pointer = 0x123 | 0x1; // Tagged with bit 0
   uint64_t regular_pointer = 0x123456780; // 8-byte aligned
   
-  bool is_tagged = (tagged_pointer & 0x7) != 0;
-  bool is_regular = (regular_pointer & 0x7) == 0;
+  bool tagged_is_tagged = (tagged_pointer & 0x7) != 0;
+  bool tagged_is_regular = (tagged_pointer & 0x7) == 0;
   
-  EXPECT_TRUE(is_tagged) << "Tagged pointers should be detected correctly";
-  EXPECT_TRUE(is_regular) << "Regular pointers should be detected correctly";
-  EXPECT_NE(is_tagged, is_regular) << "Tagged and regular pointers should be distinguished";
+  bool regular_is_tagged = (regular_pointer & 0x7) != 0;
+  bool regular_is_regular = (regular_pointer & 0x7) == 0;
+  
+  EXPECT_TRUE(tagged_is_tagged) << "Tagged pointer should be detected as tagged";
+  EXPECT_FALSE(tagged_is_regular) << "Tagged pointer should not be detected as regular";
+  
+  EXPECT_FALSE(regular_is_tagged) << "Regular pointer should not be detected as tagged";
+  EXPECT_TRUE(regular_is_regular) << "Regular pointer should be detected as regular";
+  
+  // Tagged and regular detection should be mutually exclusive for the same pointer
+  EXPECT_NE(tagged_is_tagged, tagged_is_regular) << "Tagged pointer detection should be consistent";
+  EXPECT_NE(regular_is_tagged, regular_is_regular) << "Regular pointer detection should be consistent";
 }
 
 TEST_F(NSArrayFormatterTest, ThreadSafety) {

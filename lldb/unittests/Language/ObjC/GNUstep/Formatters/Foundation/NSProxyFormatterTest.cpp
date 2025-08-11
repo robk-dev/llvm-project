@@ -12,7 +12,7 @@
 #include "lldb/Host/HostInfo.h"
 #include "lldb/Utility/ConstString.h"
 #include "lldb/Utility/Stream.h"
-#include "lldb/Core/ValueObject.h"
+#include "lldb/ValueObject/ValueObject.h"
 #include "lldb/Utility/StreamString.h"
 #include "lldb/Core/Debugger.h"
 #include "lldb/Target/Platform.h"
@@ -62,10 +62,9 @@ TEST_F(NSProxyFormatterTest, AbstractBaseClassDesign) {
   // - NSProxy: Minimal implementation, forwards most messages
   
   // Test actual NSProxy abstract base class understanding
-  lldb::TargetSP target = std::make_shared<Target>(DebuggerSP(), ArchSpec("x86_64"), 
-                                                   PlatformSP(), true);
+  lldb::TargetSP target = std::make_shared<MockTarget>(*Debugger::CreateInstance(), ArchSpec("x86_64"), 
+                                                   PlatformSP());
   lldb::ProcessSP process = std::make_shared<MockProcess>(target, ListenerSP());
-  target->SetProcessSP(process);
   
   // Create NSProxy base class object (should be rare in practice)
   struct {
@@ -123,10 +122,9 @@ TEST_F(NSProxyFormatterTest, CommonProxySubclasses) {
   EXPECT_TRUE(CUSTOM_PROXY_CLASS.find("Proxy") != std::string::npos) << "Custom proxy classes typically include 'Proxy' in name";
   
   // Test actual NSProxy subclass handling
-  lldb::TargetSP target = std::make_shared<Target>(DebuggerSP(), ArchSpec("x86_64"), 
-                                                   PlatformSP(), true);
+  lldb::TargetSP target = std::make_shared<MockTarget>(*Debugger::CreateInstance(), ArchSpec("x86_64"), 
+                                                   PlatformSP());
   lldb::ProcessSP process = std::make_shared<MockProcess>(target, ListenerSP());
-  target->SetProcessSP(process);
   
   GNUstepNSProxySummaryProvider provider;
   
@@ -195,10 +193,9 @@ TEST_F(NSProxyFormatterTest, MemoryLayoutAnalysis) {
   // NSProtocolChecker: isa + protocol reference + target object
   
   // Test actual NSProxy memory layout understanding
-  lldb::TargetSP target = std::make_shared<Target>(DebuggerSP(), ArchSpec("x86_64"), 
-                                                   PlatformSP(), true);
+  lldb::TargetSP target = std::make_shared<MockTarget>(*Debugger::CreateInstance(), ArchSpec("x86_64"), 
+                                                   PlatformSP());
   lldb::ProcessSP process = std::make_shared<MockProcess>(target, ListenerSP());
-  target->SetProcessSP(process);
   
   GNUstepNSProxySummaryProvider provider;
   
@@ -277,10 +274,9 @@ TEST_F(NSProxyFormatterTest, ProxyTargetIdentification) {
   EXPECT_FALSE(CONNECTION_IVAR.empty()) << "Distant objects use _connection";
   
   // Test actual proxy target identification with real formatter methods
-  lldb::TargetSP target = std::make_shared<Target>(DebuggerSP(), ArchSpec("x86_64"), 
-                                                   PlatformSP(), true);
+  lldb::TargetSP target = std::make_shared<MockTarget>(*Debugger::CreateInstance(), ArchSpec("x86_64"), 
+                                                   PlatformSP());
   lldb::ProcessSP process = std::make_shared<MockProcess>(target, ListenerSP());
-  target->SetProcessSP(process);
   
   GNUstepNSProxySummaryProvider provider;
   
@@ -349,10 +345,9 @@ TEST_F(NSProxyFormatterTest, MethodForwardingDetection) {
   // 4. Handles invocation forwarding
   
   // Test method forwarding detection in proxy objects
-  lldb::TargetSP target = std::make_shared<Target>(DebuggerSP(), ArchSpec("x86_64"), 
-                                                   PlatformSP(), true);
+  lldb::TargetSP target = std::make_shared<MockTarget>(*Debugger::CreateInstance(), ArchSpec("x86_64"), 
+                                                   PlatformSP());
   lldb::ProcessSP process = std::make_shared<MockProcess>(target, ListenerSP());
-  target->SetProcessSP(process);
   
   GNUstepNSProxySummaryProvider provider;
   
@@ -425,10 +420,9 @@ TEST_F(NSProxyFormatterTest, FormatterOutputExpectations) {
   // - Protocol information for protocol checkers
   
   // Test actual formatter output patterns for different proxy types
-  lldb::TargetSP target = std::make_shared<Target>(DebuggerSP(), ArchSpec("x86_64"), 
-                                                   PlatformSP(), true);
+  lldb::TargetSP target = std::make_shared<MockTarget>(*Debugger::CreateInstance(), ArchSpec("x86_64"), 
+                                                   PlatformSP());
   lldb::ProcessSP process = std::make_shared<MockProcess>(target, ListenerSP());
-  target->SetProcessSP(process);
   
   GNUstepNSProxySummaryProvider provider;
   
@@ -517,10 +511,9 @@ TEST_F(NSProxyFormatterTest, ErrorHandlingScenarios) {
   EXPECT_FALSE(CORRUPTED_MSG.empty()) << "Should handle corrupted proxy data";
   
   // Test actual error handling for proxy-specific failure modes
-  lldb::TargetSP target = std::make_shared<Target>(DebuggerSP(), ArchSpec("x86_64"), 
-                                                   PlatformSP(), true);
+  lldb::TargetSP target = std::make_shared<MockTarget>(*Debugger::CreateInstance(), ArchSpec("x86_64"), 
+                                                   PlatformSP());
   lldb::ProcessSP process = std::make_shared<MockProcess>(target, ListenerSP());
-  target->SetProcessSP(process);
   
   GNUstepNSProxySummaryProvider provider;
   
@@ -707,10 +700,9 @@ TEST_F(NSProxyFormatterTest, EdgeCaseHandling) {
   EXPECT_NE(DEALLOCATED_TARGET, 0) << "Should detect potentially invalid target addresses";
   
   // Test actual edge case handling for proxy objects
-  lldb::TargetSP target = std::make_shared<Target>(DebuggerSP(), ArchSpec("x86_64"), 
-                                                   PlatformSP(), true);
+  lldb::TargetSP target = std::make_shared<MockTarget>(*Debugger::CreateInstance(), ArchSpec("x86_64"), 
+                                                   PlatformSP());
   lldb::ProcessSP process = std::make_shared<MockProcess>(target, ListenerSP());
-  target->SetProcessSP(process);
   
   GNUstepNSProxySummaryProvider provider;
   
@@ -761,7 +753,7 @@ TEST_F(NSProxyFormatterTest, EdgeCaseHandling) {
   }
   
   // Test proxy chain detection (unusual but possible)
-  const lldb::addr_t DEALLOCATED_TARGET = 0xdeadbeef;
+  // Using the previously declared DEALLOCATED_TARGET constant
   EXPECT_NE(DEALLOCATED_TARGET, 0) << "Should detect potentially invalid target addresses";
 }
 
@@ -799,10 +791,9 @@ TEST_F(NSProxyFormatterTest, GNUstepSpecificBehavior) {
   }
   
   // Test actual GNUstep-specific proxy handling
-  lldb::TargetSP target = std::make_shared<Target>(DebuggerSP(), ArchSpec("x86_64"), 
-                                                   PlatformSP(), true);
+  lldb::TargetSP target = std::make_shared<MockTarget>(*Debugger::CreateInstance(), ArchSpec("x86_64"), 
+                                                   PlatformSP());
   lldb::ProcessSP process = std::make_shared<MockProcess>(target, ListenerSP());
-  target->SetProcessSP(process);
   
   GNUstepNSProxySummaryProvider provider;
   
@@ -884,19 +875,18 @@ TEST_F(NSProxyFormatterTest, DebugInformationExtraction) {
   EXPECT_LT(MEDIUM_PRIORITY, LOW_PRIORITY) << "Priority levels should be ordered";
   
   // Test actual debug information extraction from proxy objects
-  lldb::TargetSP target = std::make_shared<Target>(DebuggerSP(), ArchSpec("x86_64"), 
-                                                   PlatformSP(), true);
+  lldb::TargetSP target = std::make_shared<MockTarget>(*Debugger::CreateInstance(), ArchSpec("x86_64"), 
+                                                   PlatformSP());
   lldb::ProcessSP process = std::make_shared<MockProcess>(target, ListenerSP());
-  target->SetProcessSP(process);
   
   GNUstepNSProxySummaryProvider provider;
   
   // Test debug information extraction priorities
-  const std::vector<std::string> DEBUG_INFO_PATTERNS = {
+  const std::vector<std::string> DEBUG_INFO_PATTERNS_VEC = {
     "class=", "target=", "connection=", "protocol=", "state="
   };
   
-  for (const auto& pattern : DEBUG_INFO_PATTERNS) {
+  for (const auto& pattern : DEBUG_INFO_PATTERNS_VEC) {
     EXPECT_FALSE(pattern.empty()) << "Debug info patterns should be defined";
     EXPECT_TRUE(pattern.find("=") != std::string::npos) << "Should use key=value format";
   }

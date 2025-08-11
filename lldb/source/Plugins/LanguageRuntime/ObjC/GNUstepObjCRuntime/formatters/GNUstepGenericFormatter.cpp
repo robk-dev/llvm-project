@@ -278,12 +278,36 @@ std::vector<IvarInfo> GNUstepGenericFormatter::ExtractIvarsFromClass(
     
     // Read the offset value with proper validation (it's a pointer to the offset)
     if (ivar_data.offset != 0 && ivar_data.offset != LLDB_INVALID_ADDRESS) {
-      int32_t offset_value = 0;
+      // CRITICAL FIX: The offset stored in runtime is usually ptrdiff_t or size_t, not int32_t
+      // On 64-bit systems, we need to check if this is stored as 32-bit or 64-bit integer
+      // Let's try reading as size_t (pointer-sized) first, then fall back to int32_t if needed
+      
+      // First try to read as pointer-sized integer (size_t/ptrdiff_t)
+      size_t offset_value_sizet = 0;
+      bool read_success = false;
+      
       if (GNUstepRuntimeHelper::ReadMemory(process, ivar_data.offset, 
-                                           &offset_value, sizeof(int32_t))) {
-        info.offset = offset_value;
+                                           &offset_value_sizet, sizeof(size_t))) {
+        // Validate that the value is reasonable (offsets should be small)
+        if (offset_value_sizet < 65536) { // Reasonable object size limit
+          info.offset = static_cast<int32_t>(offset_value_sizet);
+          read_success = true;
+        }
+      }
+      
+      // If pointer-sized read failed or gave unreasonable result, try int32_t
+      if (!read_success) {
+        int32_t offset_value_int32 = 0;
+        if (GNUstepRuntimeHelper::ReadMemory(process, ivar_data.offset, 
+                                             &offset_value_int32, sizeof(int32_t))) {
+          info.offset = offset_value_int32;
+          read_success = true;
+        }
+      }
+      
+      if (read_success) {
   // printf("  Ivar '%s': Offset: %d, Size: %u, Type: %s\n", 
-  //        info.name.c_str(), offset_value, ivar_data.size, info.type_encoding.c_str());
+  //        info.name.c_str(), info.offset, ivar_data.size, info.type_encoding.c_str());
       } else {
   // printf("ExtractIvarsFromClass: Failed to read ivar offset at 0x%llx\n", (unsigned long long)ivar_data.offset);
         info.offset = -1; // Invalid offset

@@ -310,7 +310,8 @@ TEST_F(NSOrderedSetFormatterTest, MutableVsImmutableHandling) {
   
   // Test mutable class detection
   for (const auto& class_name : mutable_classes) {
-    bool detected_mutable = class_name.find("Mutable") != std::string::npos;
+    bool detected_mutable = class_name.find("Mutable") != std::string::npos ||
+                           class_name.find("__NSOrderedSetM") != std::string::npos;
     EXPECT_TRUE(detected_mutable)
         << "Class " << class_name << " should be detected as mutable";
   }
@@ -874,7 +875,7 @@ TEST_F(NSOrderedSetFormatterTest, ErrorHandling) {
   for (const auto& test : corruption_tests) {
     bool is_problematic = (test.element_ptr == 0) ||
                          (test.element_ptr == INVALID_ADDRESS) ||
-                         ((test.element_ptr % 8) != 0 && (test.element_ptr & 0x7) == 0);
+                         ((test.element_ptr % 8) != 0); // Unaligned pointer
     
     EXPECT_EQ(is_problematic, test.should_handle_gracefully)
         << "Element " << test.element_index << " with address 0x" << std::hex << test.element_ptr

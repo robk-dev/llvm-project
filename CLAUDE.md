@@ -74,7 +74,32 @@ make custom_class_test  # Build specific test
 
 ## Testing the Plugin
 
-### Quick Validation
+The project includes a comprehensive three-tier automated test suite.
+
+### Automated Testing (Recommended)
+
+#### Run All Tests
+```bash
+cd /home/robk/code/llvm-project/lldb
+./dev.sh test
+# Executes: unit tests + API tests + integration tests
+```
+
+#### Individual Test Suites
+```bash
+# Unit Tests - Test formatter logic and runtime components
+./dev.sh test-unit
+
+# API Tests - Test GNUstep program compilation and execution  
+./dev.sh test-api
+
+# Integration Tests - Test formatters working within LLDB
+./dev.sh test-integration
+```
+
+### Manual Testing
+
+#### Quick LLDB Validation
 ```bash
 cd /home/robk/code/llvm-project/lldb/examples
 /home/robk/code/llvm-project/build/bin/lldb custom_class_test
@@ -93,17 +118,29 @@ cd /home/robk/code/llvm-project/lldb/examples
 
 (lldb) po magicNumber  # Test NSNumber
 # Expected: 42
-
-(lldb) po currentTime  # Test NSDate (when Phase 4 complete)
-# Expected: Date formatter output
 ```
 
-### Running LLDB Tests
+#### Direct Test Program Execution
 ```bash
-# Run specific LLDB tests (if implemented)
-cd /home/robk/code/llvm-project/build
-ninja check-lldb-plugins-languageruntime-objc-gnustep
+# Test GNUstep compilation and execution directly
+cd /home/robk/code/llvm-project/lldb/test/API/lang/objc/gnustep
+OBJC=/home/robk/code/llvm-project/build/bin/clang make
+./a.out
+# Should output: "All test objects created successfully"
 ```
+
+### Test Infrastructure Details
+
+- **Unit Tests**: GoogleTest-based C++ tests for formatter components
+- **API Tests**: Compilation/execution tests for GNUstep programs  
+- **Integration Tests**: End-to-end LLDB debugging with formatter validation
+- **Continuous Integration**: `./dev.sh full` runs complete build + test cycle
+
+### Test Results Interpretation
+
+✅ **All tests pass**: Plugin is production-ready  
+⚠️ **Unit tests pass, others fail**: Core logic works, integration issues  
+❌ **Unit tests fail**: Core functionality broken, investigate immediately
 
 ## Architecture Overview
 

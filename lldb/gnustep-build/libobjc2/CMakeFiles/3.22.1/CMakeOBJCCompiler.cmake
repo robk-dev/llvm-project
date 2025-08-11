@@ -49,7 +49,7 @@ endforeach()
 set(CMAKE_OBJC_SIZEOF_DATA_PTR "8")
 set(CMAKE_OBJC_COMPILER_ABI "ELF")
 set(CMAKE_OBJC_BYTE_ORDER "LITTLE_ENDIAN")
-set(CMAKE_OBJC_LIBRARY_ARCHITECTURE "x86_64-linux-gnu")
+set(CMAKE_OBJC_LIBRARY_ARCHITECTURE "")
 
 if(CMAKE_OBJC_SIZEOF_DATA_PTR)
   set(CMAKE_SIZEOF_VOID_P "${CMAKE_OBJC_SIZEOF_DATA_PTR}")
@@ -60,7 +60,7 @@ if(CMAKE_OBJC_COMPILER_ABI)
 endif()
 
 if(CMAKE_OBJC_LIBRARY_ARCHITECTURE)
-  set(CMAKE_LIBRARY_ARCHITECTURE "x86_64-linux-gnu")
+  set(CMAKE_LIBRARY_ARCHITECTURE "")
 endif()
 
 
@@ -68,6 +68,6 @@ endif()
 
 
 set(CMAKE_OBJC_IMPLICIT_INCLUDE_DIRECTORIES "/home/robk/code/llvm-project/build/lib/clang/20/include;/usr/local/include;/usr/include/x86_64-linux-gnu;/usr/include")
-set(CMAKE_OBJC_IMPLICIT_LINK_LIBRARIES "gcc;gcc_s;c;gcc;gcc_s")
-set(CMAKE_OBJC_IMPLICIT_LINK_DIRECTORIES "/home/robk/code/llvm-project/build/lib/clang/20/lib/x86_64-unknown-linux-gnu;/usr/lib/gcc/x86_64-linux-gnu/11;/usr/lib64;/lib/x86_64-linux-gnu;/lib64;/usr/lib/x86_64-linux-gnu;/lib;/usr/lib")
+set(CMAKE_OBJC_IMPLICIT_LINK_LIBRARIES "")
+set(CMAKE_OBJC_IMPLICIT_LINK_DIRECTORIES "")
 set(CMAKE_OBJC_IMPLICIT_LINK_FRAMEWORK_DIRECTORIES "")

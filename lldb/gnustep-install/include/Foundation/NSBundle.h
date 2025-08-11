@@ -1,7 +1,7 @@
 /** Interface for NSBundle for GNUStep   -*-objc-*-
    Copyright (C) 1995, 1997, 1999, 2001, 2002 Free Software Foundation, Inc.
 
-   Written by:  Adam Fedor <fedor@boulder.colorado.edu>
+   Written by:  Adam Fedor <fedor@gnu.org>
    Date: 1995
 
    Updates by various authors.
@@ -21,8 +21,7 @@
   
    You should have received a copy of the GNU Lesser General Public
    License along with this library; if not, write to the Free
-   Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
-   Boston, MA 02110 USA.
+   Software Foundation, Inc., 31 Milk Street #960789 Boston, MA 02196 USA.
   */
 
 #ifndef __NSBundle_h_GNUSTEP_BASE_INCLUDE
@@ -345,7 +344,7 @@ GS_EXPORT_CLASS
  */
 - (NSString*) localizedStringForKey: (NSString*)key
 			      value: (NSString*)value
-			      table: (NSString*)tableName;
+			      table: (NSString*)tableName NS_FORMAT_ARGUMENT(1);
 
 /** Returns the absolute path to the resources directory of the bundle.  */
 - (NSString*) resourcePath;
@@ -530,13 +529,12 @@ GS_EXPORT_CLASS
  *  not exist on disk.
  * </p>
  */
-+ (NSBundle *) bundleForLibrary: (NSString *)libraryName
-                        version: (NSString *)interfaceVersion;
++ (NSBundle *) bundleForLibrary: (NSString*)libraryName
+                        version: (NSString*)interfaceVersion;
 
-/** This method is a equivalent to bundleForLibrary:version: with a nil
- * version.
+/** Use +bundleForLibrary:version: instead.
  */
-+ (NSBundle *) bundleForLibrary: (NSString *)libraryName;
++ (NSBundle*) bundleForLibrary: (NSString*)libraryName NS_DEPRECATED();
 
 
 
@@ -565,7 +563,7 @@ GS_EXPORT_CLASS
  * Returns the Android asset for the given path if path is in main bundle
  * resources and asset exists.
  * Uses `AASSET_MODE_UNKNOWN` to open the asset if it exists.
- * The returned object must be released using AAsset_close().
+ * The returned object must be released using the AAsset_close function.
  */
 + (AAsset *) assetForPath: (NSString *)path;
 
@@ -573,14 +571,14 @@ GS_EXPORT_CLASS
  * Returns the Android asset for the given path if path is in main bundle
  * resources and asset exists.
  * Uses the given mode to open the AAsset if it exists.
- * The returned object must be released using AAsset_close().
+ * The returned object must be released using the AAsset_close function.
  */
 + (AAsset *) assetForPath: (NSString *)path withMode: (int)mode;
 
 /**
  * Returns the Android asset dir for the given path if path is in main bundle
  * resources and the asset directory exists.
- * The returned object must be released using AAssetDir_close().
+ * The returned object must be released using the AAssetDir_close function.
  */
 + (AAssetDir *) assetDirForPath: (NSString *)path;
 

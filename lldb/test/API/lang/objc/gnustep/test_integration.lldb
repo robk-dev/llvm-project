@@ -1,0 +1,19 @@
+# Integration test for GNUstep formatters
+target create ./a.out
+breakpoint set --line 105
+run
+# Test string formatters
+po emptyString
+po asciiString
+po taggedString
+# Test number formatters
+po intNumber
+po boolNumber
+# Test collection formatters
+po simpleArray
+po simpleDict
+po simpleSet
+# Test custom class
+po account
+continue
+quit

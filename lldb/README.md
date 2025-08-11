@@ -45,35 +45,80 @@ cd /home/robk/code/llvm-project/lldb/examples && make custom_class_test
 
 ## Testing the GNUstep Plugin
 
-### Quick Test
+### Automated Test Suite
+
+The project includes a comprehensive automated test suite with three levels of testing:
+
+#### All Tests (Recommended)
+```bash
+./dev.sh test
+# Runs unit tests, API tests, and integration tests
+```
+
+#### Individual Test Suites
+
+**Unit Tests** - Test formatter logic and runtime detection:
+```bash
+./dev.sh test-unit
+# Tests: tagged pointers, runtime detection, formatter instantiation
+```
+
+**API Tests** - Test GNUstep program compilation and execution:
+```bash
+./dev.sh test-api
+# Tests: main.m, test_collections.m, test_new_formatters.m compilation/execution
+```
+
+**Integration Tests** - Test formatters working in LLDB:
+```bash
+./dev.sh test-integration
+# Tests: LLDB can debug GNUstep programs and formatters activate correctly
+```
+
+### Manual Testing
+
+#### Quick LLDB Validation
 ```bash
 cd /home/robk/code/llvm-project/lldb/examples
 /home/robk/code/llvm-project/build/bin/lldb custom_class_test
 
 # In LLDB:
-(lldb) b custom_class_test.m:125
+(lldb) b custom_class_test.m:228
 (lldb) run
-(lldb) po account  # Should show GNUstep object with our plugin
+(lldb) po account  # Test GNUstep object inspection
+# Expected: BankAccount(12345, owner=John Doe2, balance=1000.00, transactions=3)
+
+(lldb) po personInfo  # Test NSDictionary
+# Expected: { occupation = Developer; name = "John Doe2"; }
+
+(lldb) po fruits  # Test NSArray
+# Expected: ( "Apple", "Banana", "Cherry" )
+
+(lldb) po magicNumber  # Test NSNumber
+# Expected: 42
 ```
 
-### Expected Output
-With our new `GNUstepObjCRuntime` plugin, you should see:
+#### Test Program Validation
+```bash
+# Build and run test programs directly
+cd /home/robk/code/llvm-project/lldb/test/API/lang/objc/gnustep
+OBJC=/home/robk/code/llvm-project/build/bin/clang make
+./a.out
+# Should show: "All test objects created successfully"
 ```
-(lldb) po account
-BankAccount(12345, owner=John Doe2, balance=1000.00, transactions=3)
 
-(lldb) po personInfo
-{
-    occupation = Developer;
-    name = "John Doe2";
-}
+### Test Results Interpretation
 
-(lldb) po fruits
-(
-    "Apple",
-    "Banana", 
-    "Cherry"
-)
+- **Unit Tests**: Core functionality working if tagged pointer and runtime tests pass
+- **API Tests**: GNUstep compilation working if programs build and execute  
+- **Integration Tests**: Formatters active in LLDB if string/collection output detected
+
+### Continuous Integration
+
+For automated CI/CD, use:
+```bash
+./dev.sh full
+# Complete cycle: clean examples, clean build, run all tests
 ```
 
 ## Architecture

@@ -472,7 +472,7 @@ std::string GNUstepNSSetSummaryProvider::GetElementSummary(Process *process, lld
   }
   
   // For non-string objects where we couldn't get a better summary
-  return "<object>";
+  return "";
 }
 
 bool GNUstepNSSetSummaryProvider::IsGNUstepTaggedPointer(lldb::addr_t addr) {
@@ -781,6 +781,48 @@ llvm::Expected<uint32_t> GNUstepNSSetSyntheticProvider::CalculateNumChildren() {
   return m_count;
 }
 
+// Helper function to get summary for tagged pointers without creating ValueObjects
+static std::string GetTaggedPointerSummary(Process *process, lldb::addr_t tagged_ptr) {
+  if (!process || tagged_ptr == 0) {
+    return "<nil>";
+  }
+  
+  // Check the tag in the low 3 bits
+  uint8_t tag = tagged_ptr & 0x7;
+  
+  // GSTinyString (tag 4)
+  if (tag == 4) {
+    // Length is in bits 3-7 (5 bits)
+    int length = (tagged_ptr >> 3) & 0x1F;
+    
+    if (length > 0 && length <= 9) {
+      std::string result = "\"";
+      // Characters are extracted using the TINY_STRING_CHAR macro
+      for (int i = 0; i < length; i++) {
+        uint64_t mask = 0xFE00000000000000ULL >> (i * 7);
+        char c = (tagged_ptr & mask) >> (57 - (i * 7));
+        if (c >= 0x20 && c <= 0x7e) {
+          result += c;
+        } else if (c != 0) {
+          result += '?';
+        }
+      }
+      result += "\"";
+      return result;
+    }
+  }
+  
+  // GSTaggedNumber (tag 1 or 3)
+  if (tag == 1 || tag == 3) {
+    // For tagged numbers, extract the value
+    int64_t value = (int64_t)(tagged_ptr >> 3);  // Remove tag bits
+    return std::to_string(value);
+  }
+  
+  // Other tagged types - show raw value for debugging
+  return llvm::formatv("<tagged:0x{0:x}>", tagged_ptr);
+}
+
 lldb::ValueObjectSP GNUstepNSSetSyntheticProvider::GetChildAtIndex(uint32_t idx) {
   if (idx >= m_count || idx >= m_elements.size()) {
     return nullptr;
@@ -799,53 +841,80 @@ lldb::ValueObjectSP GNUstepNSSetSyntheticProvider::GetChildAtIndex(uint32_t idx)
     return nullptr;
   }
   
-  // Use the generic 'id' type for all synthetic children.
-  // LLDB's dynamic type resolution will automatically determine and apply
-  // the correct concrete type (NSString, NSNumber, etc.) via the runtime.
-  CompilerType element_type = GetConcreteTypeForObject(element_value);
-  if (!element_type.IsValid()) {
-    element_type = m_id_type;
-  }
-  
-  // CRITICAL FIX: Handle tagged pointers vs. real object pointers differently
-  // GNUstep uses tagged pointers extensively for strings and numbers
-  
   // Check if this is a tagged pointer (low 3 bits set)
   bool is_tagged_pointer = (element_value & 0x7) != 0;
   
   if (is_tagged_pointer) {
-    // For tagged pointers, create ValueObject from DATA, not ADDRESS
-    // The tagged pointer value IS the data, not a pointer to memory
+    // NEW APPROACH: Instead of trying to create synthetic pointer ValueObjects,
+    // create ValueObjects with the actual decoded primitive values
     
-    // Create a data buffer containing the tagged pointer value (following Apple's pattern)
-    size_t ptr_size = exe_ctx.GetAddressByteSize();
-    DataBufferSP buffer_sp;
+    uint8_t tag = element_value & 0x7;
     
-    if (ptr_size == 8) {
-      uint64_t value64 = element_value;
-      buffer_sp = DataBufferSP(new DataBufferHeap(&value64, sizeof(uint64_t)));
-    } else {
-      uint32_t value32 = static_cast<uint32_t>(element_value);
-      buffer_sp = DataBufferSP(new DataBufferHeap(&value32, sizeof(uint32_t)));
+    // Get type system for creating primitive types
+    auto type_system_or_err = exe_ctx.GetTargetRef().GetScratchTypeSystemForLanguage(lldb::eLanguageTypeC);
+    if (!type_system_or_err) {
+      return nullptr;
     }
+    auto type_system = type_system_or_err.get();
     
-    // Create DataExtractor from the buffer
-    DataExtractor data_extractor(buffer_sp, exe_ctx.GetByteOrder(), ptr_size);
-    
-    // Create ValueObject from the data buffer containing the tagged pointer
-    return ValueObject::CreateValueObjectFromData(idx_name.GetString(), 
-                                                  data_extractor, exe_ctx, element_type);
+    if (tag == 4) {
+      // GSTinyString - create a string ValueObject
+      std::string decoded_string = GetTaggedPointerSummary(m_process, element_value);
+      
+      // Remove quotes from the decoded string for the actual value
+      if (decoded_string.front() == '"' && decoded_string.back() == '"' && decoded_string.length() > 1) {
+        decoded_string = decoded_string.substr(1, decoded_string.length() - 2);
+      }
+      
+      // Create a C string constant
+      CompilerType char_type = type_system->GetBasicTypeFromAST(eBasicTypeChar);
+      CompilerType const_char_ptr_type = char_type.GetPointerType();
+      
+      // Create string data buffer
+      DataBufferSP string_buffer = std::make_shared<DataBufferHeap>(decoded_string.c_str(), decoded_string.length() + 1);
+      DataExtractor string_data(string_buffer, exe_ctx.GetByteOrder(), exe_ctx.GetAddressByteSize());
+      
+      return ValueObjectConstResult::Create(exe_ctx.GetBestExecutionContextScope(),
+                                            const_char_ptr_type,
+                                            ConstString(idx_name.GetString()),
+                                            string_data);
+      
+    } else if (tag == 1 || tag == 3) {
+      // GSTaggedNumber - create an integer ValueObject  
+      int64_t decoded_number = (int64_t)(element_value >> 3);  // Remove tag bits
+      
+      // Create integer type
+      CompilerType int_type = type_system->GetBasicTypeFromAST(eBasicTypeLongLong);
+      
+      // Create number data buffer
+      DataBufferSP number_buffer = std::make_shared<DataBufferHeap>(&decoded_number, sizeof(decoded_number));
+      DataExtractor number_data(number_buffer, exe_ctx.GetByteOrder(), exe_ctx.GetAddressByteSize());
+      
+      return ValueObjectConstResult::Create(exe_ctx.GetBestExecutionContextScope(),
+                                            int_type,
+                                            ConstString(idx_name.GetString()),
+                                            number_data);
+    } else {
+      // Unknown tagged pointer - show as hex value
+      CompilerType ptr_type = type_system->GetBasicTypeFromAST(eBasicTypeVoid).GetPointerType();
+      
+      DataBufferSP ptr_buffer = std::make_shared<DataBufferHeap>(&element_value, sizeof(element_value));
+      DataExtractor ptr_data(ptr_buffer, exe_ctx.GetByteOrder(), exe_ctx.GetAddressByteSize());
+      
+      return ValueObjectConstResult::Create(exe_ctx.GetBestExecutionContextScope(),
+                                            ptr_type,
+                                            ConstString(idx_name.GetString()),
+                                            ptr_data);
+    }
   } else {
-    // For regular object pointers in sets, we need to create synthetic storage
-    // because unlike arrays, set elements aren't stored in a contiguous array
-    // but in hash table nodes scattered throughout memory.
-    //
-    // SOLUTION: Create synthetic storage for the pointer value and use that address.
-    // This matches the pattern used by Apple's LLDB formatters for similar scenarios.
+    // For regular object pointers, use the standard approach with synthetic storage
+    CompilerType element_type = GetConcreteTypeForObject(element_value);
+    if (!element_type.IsValid()) {
+      element_type = m_id_type;
+    }
     
     if (!m_synthetic_storage.get()) {
       // Create synthetic storage for element pointers on first use
-      // We need space for all elements to maintain stable addresses
       size_t ptr_size = exe_ctx.GetAddressByteSize(); 
       size_t storage_size = m_count * ptr_size;
       m_synthetic_storage = std::make_unique<DataBufferHeap>(storage_size, 0);
@@ -863,38 +932,16 @@ lldb::ValueObjectSP GNUstepNSSetSyntheticProvider::GetChildAtIndex(uint32_t idx)
       }
     }
     
-    // Calculate the synthetic address for this element's pointer
-    // Use a high address range that won't conflict with real memory
-    lldb::addr_t synthetic_base_addr = 0x7FFFFFFF00000000ULL;
-    lldb::addr_t synthetic_storage_addr = synthetic_base_addr + (idx * exe_ctx.GetAddressByteSize());
+    // Create DataExtractor for this element's storage
+    size_t ptr_size = exe_ctx.GetAddressByteSize();
+    uint8_t *element_storage_ptr = (uint8_t*)m_synthetic_storage->GetBytes() + (idx * ptr_size);
     
-    // Register the synthetic storage with LLDB's memory subsystem
-    // This allows LLDB to read from our synthetic buffer when accessing these addresses
-    Target &target = exe_ctx.GetTargetRef();
-    Process *process = exe_ctx.GetProcessPtr();
-    if (process) {
-      // Add our synthetic memory region to the process's memory cache
-      // This is a standard LLDB technique for synthetic children providers
-      
-      // Create a synthetic memory region that maps our buffer
-      // Note: This follows the same pattern as Apple's CoreFoundation formatters
-      size_t ptr_size = exe_ctx.GetAddressByteSize();
-      uint8_t *element_storage_ptr = (uint8_t*)m_synthetic_storage->GetBytes() + (idx * ptr_size);
-      
-      // Create DataExtractor for just this element's storage
-      DataExtractor element_data(element_storage_ptr, ptr_size, 
-                               exe_ctx.GetByteOrder(), ptr_size);
-      
-      // Create ValueObject from synthetic storage address
-      // LLDB will read the pointer from synthetic storage and apply dynamic type resolution  
-      return ValueObject::CreateValueObjectFromData(idx_name.GetString(), 
-                                                    element_data, exe_ctx, element_type);
-    }
+    DataExtractor element_data(element_storage_ptr, ptr_size, 
+                             exe_ctx.GetByteOrder(), ptr_size);
     
-    // Fallback: Create ValueObject directly from the object address
-    // This may not work perfectly but is better than returning nothing
-    return ValueObject::CreateValueObjectFromAddress(idx_name.GetString(), element_value, 
-                                                     exe_ctx, element_type);
+    // Create ValueObject from synthetic storage
+    return ValueObject::CreateValueObjectFromData(idx_name.GetString(), 
+                                                  element_data, exe_ctx, element_type);
   }
 }
 

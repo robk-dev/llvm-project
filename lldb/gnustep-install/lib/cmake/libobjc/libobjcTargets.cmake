@@ -55,7 +55,7 @@ add_library(objc SHARED IMPORTED)
 
 set_target_properties(objc PROPERTIES
   INTERFACE_INCLUDE_DIRECTORIES "${_IMPORT_PREFIX}/include"
-  INTERFACE_LINK_LIBRARIES "Threads::Threads;/usr/lib/x86_64-linux-gnu/libm.so"
+  INTERFACE_LINK_LIBRARIES "Threads::Threads"
 )
 
 if(CMAKE_VERSION VERSION_LESS 2.8.12)

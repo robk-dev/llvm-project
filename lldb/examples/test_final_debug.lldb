@@ -1,0 +1,11 @@
+# Final comprehensive test of po functionality
+file test_po_debug
+log enable lldb process types
+b test_po_debug.m:21
+run
+po string
+po number
+po array
+po dict
+continue
+quit

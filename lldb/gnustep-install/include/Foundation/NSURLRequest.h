@@ -1,4 +1,4 @@
-/* Interface for NSURLRequest for GNUstep
+/**Interface for NSURLRequest for GNUstep
    Copyright (C) 2006 Software Foundation, Inc.
 
    Written by:  Richard Frith-Macdonald <frm@gnu.org>
@@ -18,8 +18,7 @@
    
    You should have received a copy of the GNU Lesser General Public
    License along with this library; if not, write to the Free
-   Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
-   Boston, MA 02110 USA.
+   Software Foundation, Inc., 31 Milk Street #960789 Boston, MA 02196 USA.
    */ 
 
 #ifndef __NSURLRequest_h_GNUSTEP_BASE_INCLUDE
@@ -81,6 +80,49 @@ enum {
  */
 typedef NSUInteger NSURLRequestCachePolicy;
 
+#if OS_API_VERSION(MAC_OS_X_VERSION_10_7,GS_API_LATEST)
+enum
+{
+    NSURLNetworkServiceTypeDefault    = 0,  // Standard internet traffic
+    NSURLNetworkServiceTypeVoIP       = 1,  // Voice over IP control traffic
+    NSURLNetworkServiceTypeVideo      = 2,  // Video traffic
+    NSURLNetworkServiceTypeBackground = 3,  // Background traffic
+    NSURLNetworkServiceTypeVoice      = 4,  // Voice data
+#if OS_API_VERSION(MAC_OS_X_VERSION_10_12,GS_API_LATEST)
+    NSURLNetworkServiceTypeCallSignaling = 11    // Call Signaling - enumeration cases
+#endif
+};
+/**
+ * <deflist>
+ *   <term>NSURLNetworkServiceTypeDefault</term>
+ *   <desc>
+ *     Specifies standard network traffic. Most connections should be made using this service type
+ *     this is the default.
+ *   </desc>
+ *   <term>NSURLNetworkServiceTypeVoIP</term>
+ *   <desc>
+ *     Specifies that the request is for VoIP traffic.
+ *   </desc>
+ *   <term>NSURLNetworkServiceTypeVideo</term>
+ *   <desc>
+ *     Specifies that the request is for video traffic.
+ *   </desc>
+ *   <term>NSURLNetworkServiceTypeBackground</term>
+ *   <desc>
+ *     Specifies that the request is for background traffic.
+ *   </desc>
+ *   <term>NSURLNetworkServiceTypeVoice</term>
+ *   <desc>
+ *     Specifies that the request is for voice traffic.
+ *   </desc>
+ *   <term>NSURLNetworkServiceTypeCallSignaling</term>
+ *   <desc>
+ *     Call Signaling - enumeration cases.
+ *   </desc>
+ * </deflist>
+ */
+typedef NSUInteger NSURLRequestNetworkServiceType;
+#endif
 
 /**
  * This class encapsulates information about a request to load a
@@ -228,6 +270,16 @@ GS_EXPORT_CLASS
  */
 - (NSString *) valueForHTTPHeaderField: (NSString *)field;
 
+#if OS_API_VERSION(MAC_OS_VERSION_11_0, GS_API_LATEST)
+/**
+ * Indicates whether the URL loading system assumes the host is HTTP/3 capable.
+ *
+ * This method returns the current assumption of the URL loading system regarding
+ * the server's HTTP capabilities.
+ */
+- (BOOL) assumesHTTP3Capable;
+#endif
+
 @end
 
 
@@ -278,10 +330,22 @@ GS_EXPORT_CLASS
 - (void) setHTTPShouldHandleCookies: (BOOL)should;
 
 /**
- * Sets the value for the sapecified header field, replacing any
- * previously set value.
+ * Sets the value for the specified header field, replacing any
+ * previously set value. Setting a nil value deletes a previously set
+ * header field.
  */
 - (void) setValue: (NSString *)value forHTTPHeaderField: (NSString *)field;
+
+#if OS_API_VERSION(MAC_OS_VERSION_11_0, GS_API_LATEST)
+/**
+ * Sets whether the URL loading system should assume the host is HTTP/3 capable.
+ *
+ * This method configures the URL loading system's assumptions about the
+ * server's HTTP capabilities, optimizing the connection process if HTTP/3 is
+ * supported.
+ */
+- (void) setAssumesHTTP3Capable: (BOOL)capable;
+#endif
 
 @end
 

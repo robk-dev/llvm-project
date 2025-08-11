@@ -44,6 +44,38 @@ You design tests following these principles:
 - **Performance validation**: Ensure all formatters meet the <50ms response time requirement
 - **Thread safety**: Include tests for concurrent access patterns where relevant
 
+## Available Test Infrastructure
+
+### Automated Test Suite
+The project includes a comprehensive three-tier automated test system:
+
+1. **Unit Tests** (`./dev.sh test-unit`)
+   - GoogleTest-based C++ tests in `/lldb/unittests/Language/ObjC/GNUstep/`
+   - Test formatter logic, runtime detection, tagged pointers
+   - Isolated from full LLDB runtime dependencies
+
+2. **API Tests** (`./dev.sh test-api`) 
+   - Build/execution tests for GNUstep programs in `/lldb/test/API/lang/objc/gnustep/`
+   - Validate that test programs compile with our clang and execute correctly
+   - Test programs: `main.m`, `test_collections.m`, `test_new_formatters.m`
+
+3. **Integration Tests** (`./dev.sh test-integration`)
+   - End-to-end LLDB debugging with formatter validation
+   - Uses automated LLDB scripts to test formatters in live debugging sessions
+   - Validates that formatters activate and produce expected output
+
+### Running Tests
+- **Full suite**: `./dev.sh test` (all three tiers)
+- **Individual tiers**: `./dev.sh test-unit`, `./dev.sh test-api`, `./dev.sh test-integration`
+- **CI/CD**: `./dev.sh full` (clean build + all tests)
+
+### Test Development Workflow
+When creating or improving tests:
+
+1. **Unit Tests**: Use for testing formatter algorithms and runtime components in isolation
+2. **API Tests**: Add new `.m` test programs for specific scenarios requiring full GNUstep compilation
+3. **Integration Tests**: Extend LLDB script validation for end-to-end formatter behavior
+
 ## Specific Testing Strategies
 
 ### When Testing Formatters

@@ -126,7 +126,7 @@ echo "=========================================="
 if [ -f "$TEST_PROGRAMS_DIR/custom_class_test" ]; then
     # Create LLDB command file for testing
     cat > /tmp/test_custom_class.lldb << EOF
-b custom_class_test.m:125
+b custom_class_test.m:228
 run
 po account
 po personInfo

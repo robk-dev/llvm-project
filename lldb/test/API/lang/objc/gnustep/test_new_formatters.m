@@ -11,7 +11,7 @@ int main() {
                                                    userInfo:nil];
     
     NSAttributedString *attrString = [[NSAttributedString alloc] 
-        initWithString:@"Hello, World\!"];
+        initWithString:@"Hello, World!"];
     
     NSIndexPath *indexPath = [NSIndexPath indexPathWithIndex:1];
     indexPath = [indexPath indexPathByAddingIndex:2];

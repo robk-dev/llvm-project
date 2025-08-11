@@ -19,8 +19,7 @@
    
    You should have received a copy of the GNU Lesser General Public
    License along with this library; if not, write to the Free
-   Software Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston,
-   MA 02111 USA.
+   Software Foundation, Inc., 31 Milk Street #960789 Boston, MA 02196 USA.
 */ 
 
 #ifndef __NSUserDefaults_h_OBJECTS_INCLUDE
@@ -49,7 +48,7 @@ extern "C" {
  * User defaults domain for process arguments.  Command-line arguments
  * (key-value pairs, as in "-NSFoo bar") are placed in this domain.<br />
  * Where there is a sequence of arguments beginning with '-', only the
- * last one is used (so "-a -b -c d" will produce a single user default
+ * last one is used (so "-a" "-b" "-c" "d" will produce a single user default
  * 'c' with value 'd').<br />
  * NB. On OSX the argument "-" means a key consisting of an empty string
  * (so you can't use a '-' as a default value), while in GNUstep a "-" is
@@ -190,6 +189,11 @@ GS_EXPORT NSString* const NSFormalName;
 /** Key for locale dictionary: name of locale. */
 GS_EXPORT NSString* const GSLocale;
 #endif
+#endif
+
+#if !NO_GNUSTEP
+/* Path to PEM Encoded Certificate File (NSString). Used by NSURLSession if set. */
+GS_EXPORT NSString *const GSCACertificateFilePath;
 #endif
 
 /* General implementation notes: 
