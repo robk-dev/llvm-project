@@ -1,0 +1,45 @@
+#!/usr/bin/env lldb
+# Test date formatter functionality and diagnose hex value issues
+
+target create test_date_formatter
+
+b test_date_formatter.m:46
+run
+
+# Test basic NSDate formatting
+po currentTime
+fr var currentTime
+
+# Test NSDate in dictionary context
+po timeDict
+expr -O -- timeDict
+
+# Check the nested dictionary issue
+po complexDict
+expr -O -- [[complexDict objectForKey:@"session"] objectForKey:@"expires"]
+
+# Test the specific expires field that shows as hex
+expr -O -- [complexDict valueForKeyPath:@"session.expires"]
+po [complexDict valueForKeyPath:@"session.expires"]
+
+# Check the class of the date object
+expr (void*)[(id)[complexDict valueForKeyPath:@"session.expires"] class]
+expr (char*)[(id)[complexDict valueForKeyPath:@"session.expires"] description]
+
+# Check if our formatter is being called
+type summary list -w gnustep
+type category list
+
+# Force our category to be active
+type category enable gnustep
+
+# Try again with gnustep category enabled
+po currentTime
+po [complexDict valueForKeyPath:@"session.expires"]
+
+# Debug the actual object type
+expr (void*)[currentTime class]
+expr (char*)[[currentTime class] description]
+
+continue
+quit

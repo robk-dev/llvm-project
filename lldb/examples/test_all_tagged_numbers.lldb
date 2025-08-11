@@ -1,0 +1,7 @@
+file custom_class_test
+breakpoint set --line 384
+run
+# Test arrays with different tagged number types
+frame variable numberArray
+frame variable mixedTypeArray
+quit

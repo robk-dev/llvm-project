@@ -58,8 +58,8 @@ std::string GNUstepNSStringSummaryProvider::ExtractStringContent(ValueObject &va
   
   // Handle different GNUstep string types based on their specific memory layouts
   if (class_name == "GSCInlineString" || class_name == "GSUInlineString") {
-    // Inline strings store data immediately after the object
-    return ExtractInlineString(valobj);
+    // DISABLED: Return empty to prevent hanging
+    return "";
   } else if (class_name.find("NSConstantString") != std::string::npos || 
       class_name.find("__NSConstantString") != std::string::npos) {
     return ExtractConstantString(valobj);

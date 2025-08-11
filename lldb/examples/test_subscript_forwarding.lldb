@@ -1,0 +1,66 @@
+# Test script for runtime method forwarding - modern subscript syntax
+# This tests that array[index] and dict[key] work correctly in LLDB expressions
+
+# Start the program
+target create ./test_subscript_forwarding
+run
+
+# Set breakpoint after objects are created
+b test_subscript_forwarding.m:42
+
+# Continue to breakpoint
+continue
+
+# Test modern array subscript syntax in LLDB expressions
+echo "=== Testing Array Subscript Forwarding ==="
+po testArray
+po testArray[0]  # Should forward to objectAtIndex:0
+po testArray[1]  # Should forward to objectAtIndex:1
+po testArray[2]  # Should forward to objectAtIndex:2
+
+# Compare with traditional method calls
+echo "=== Comparing with Traditional Method Calls ==="
+po [testArray objectAtIndex:0]
+po [testArray objectAtIndex:1]
+po [testArray objectAtIndex:2]
+
+# Test modern dictionary subscript syntax in LLDB expressions
+echo "=== Testing Dictionary Subscript Forwarding ==="
+po testDict
+po testDict[@"name"]        # Should forward to objectForKey:@"name"
+po testDict[@"occupation"]  # Should forward to objectForKey:@"occupation"
+po testDict[@"language"]    # Should forward to objectForKey:@"language"
+
+# Compare with traditional method calls
+echo "=== Comparing with Traditional Method Calls ==="
+po [testDict objectForKey:@"name"]
+po [testDict objectForKey:@"occupation"]
+po [testDict objectForKey:@"language"]
+
+# Test mutable collections
+continue
+echo "=== Testing Mutable Array Subscript Forwarding ==="
+po mutableArray
+po mutableArray[0]  # Should forward to objectAtIndex:0
+po mutableArray[1]  # Should forward to objectAtIndex:1
+
+echo "=== Testing Mutable Dictionary Subscript Forwarding ==="
+po mutableDict
+po mutableDict[@"name"]        # Should forward to objectForKey:@"name"
+po mutableDict[@"occupation"]  # Should forward to objectForKey:@"occupation"
+
+# Test mixed expressions
+echo "=== Testing Complex Expressions with Subscripts ==="
+expr NSString *greeting = [NSString stringWithFormat:@"Hello, %@", testDict[@"name"]]
+po greeting
+
+expr NSArray *combined = @[testArray[0], testDict[@"occupation"]]
+po combined
+
+# Test error cases
+echo "=== Testing Error Cases ==="
+expr testArray[99]  # Should handle out of bounds gracefully
+expr testDict[@"nonexistent"]  # Should return nil
+
+echo "=== All subscript forwarding tests completed ==="
+quit

@@ -1,0 +1,13 @@
+target create test_inline_string_formatter
+breakpoint set -f test_inline_string_formatter.m -l 93
+run
+frame variable -R concat1
+frame variable --raw-output concat1  
+frame variable --show-all-children concat1
+p *(GSCInlineString*)concat1
+expr -R -- concat1
+type summary add -x "GSCInlineString" -s "GSCInlineString(_contents=<unknown type>, _count=${var._count}, _flags=${var._flags})"
+frame variable concat1
+type summary clear -a
+frame variable concat1
+quit

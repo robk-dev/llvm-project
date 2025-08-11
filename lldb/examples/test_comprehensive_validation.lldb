@@ -1,0 +1,40 @@
+# Comprehensive validation of GNUstep formatters
+
+# Break at line 570 in custom_class_test
+break set -l 570
+run
+
+# Basic types
+frame variable emptyString
+frame variable unicodeString
+frame variable longString
+frame variable mutableString
+
+frame variable positiveInt
+frame variable negativeInt
+frame variable floatNum
+frame variable boolYES
+
+# Collections
+frame variable emptyArray
+frame variable mixedTypeArray
+frame variable stringArray
+frame variable numberArray
+frame variable growingArray
+
+frame variable emptySet
+frame variable mixedSet
+frame variable stringSet
+frame variable numberSet
+
+frame variable emptyDict
+frame variable simpleDict
+frame variable mixedDict
+
+# Custom class
+frame variable account
+
+# Test po command on NSConstantString
+po unicodeString
+
+quit

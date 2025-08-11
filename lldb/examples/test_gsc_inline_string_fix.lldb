@@ -1,0 +1,18 @@
+# Test GSCInlineString formatter fix
+# This tests that GSCInlineString objects display properly in collections
+# and don't cause hanging/blocking issues
+
+target create custom_class_test
+breakpoint set --file custom_class_test.m --line 387
+run
+
+# Test the growingArray that contains stringWithFormat objects (likely GSCInlineString)
+frame variable growingArray
+print "=== Testing growingArray expansion ==="
+frame variable growingArray --show-all-children
+
+# Test individual string elements 
+expr (NSString *)[growingArray objectAtIndex:0]
+expr (NSString *)[growingArray objectAtIndex:1]
+
+continue

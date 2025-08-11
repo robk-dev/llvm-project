@@ -1,0 +1,23 @@
+#!/usr/bin/env lldb -S
+# Debug script to understand NSTimeInterval type detection
+
+file test_nstime_interval
+breakpoint set -f test_nstime_interval.m -l 40
+run
+
+# Check the actual types LLDB sees
+frame variable timestamp1 --raw
+frame variable duration1 --raw
+frame variable duration3 --raw
+frame variable zero_duration --raw
+
+# Check type names
+expr -R -- timestamp1
+expr -R -- duration1
+expr -R -- duration3
+
+# Try printing the raw memory
+memory read &timestamp1 8
+memory read &duration1 8
+
+quit
