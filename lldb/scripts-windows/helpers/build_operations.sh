@@ -17,8 +17,8 @@ configure_windows_build() {
     cd "$LLVM_BUILD_DIR/build"
     
     # Set up environment for finding MSYS2 libraries
-    export PKG_CONFIG_PATH="/usr/lib/pkgconfig:/ucrt64/lib/pkgconfig:$PKG_CONFIG_PATH"
-    export CMAKE_PREFIX_PATH="/usr:/ucrt64:$CMAKE_PREFIX_PATH"
+    export PKG_CONFIG_PATH="/usr/lib/pkgconfig:/ucrt64/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+    export CMAKE_PREFIX_PATH="/usr:/ucrt64:${CMAKE_PREFIX_PATH:-}"
     print_info "PKG_CONFIG_PATH: $PKG_CONFIG_PATH"
     print_info "CMAKE_PREFIX_PATH: $CMAKE_PREFIX_PATH"
     
