@@ -1,0 +1,23 @@
+# GNUstep Formatter Integration Test Script
+target create ./a.out
+# Set breakpoint at final NSLog line where all variables are in scope
+breakpoint set --file main.m --line 127
+run
+# Now we should be stopped with all variables available for testing
+# Test basic formatters using frame variable (more reliable than po)
+frame variable -O emptyString
+frame variable -O asciiString  
+frame variable -O intNumber
+frame variable -O emptyArray
+frame variable -O simpleArray
+frame variable -O emptyDict
+frame variable -O simpleDict
+frame variable -O emptySet
+frame variable -O account
+# Test summary strings
+frame variable emptyString
+frame variable asciiString
+frame variable simpleArray
+frame variable simpleDict
+continue
+quit

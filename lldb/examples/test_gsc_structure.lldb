@@ -1,0 +1,14 @@
+target create test_inline_string_formatter
+breakpoint set -f test_inline_string_formatter.m -l 93
+run
+frame variable -T concat1
+frame variable --show-types --raw concat1
+frame variable --show-types concat1._contents
+frame variable --show-types concat1._count  
+frame variable --show-types concat1._flags
+expr *(GSCInlineString*)concat1
+type format add -f x uint32_t
+frame variable concat1._count
+frame variable concat1._flags
+memory read concat1 -c 32 -s 4 --format x
+quit

@@ -1,7 +1,8 @@
 OBJC_SOURCES := main.m
 
-# Use GNUstep runtime
-CFLAGS_EXTRAS := -fobjc-runtime=gnustep-2.1 \
+# Use GNUstep runtime with debug symbols
+CFLAGS_EXTRAS := -g -O0 \
+                 -fobjc-runtime=gnustep-2.1 \
                  -fblocks \
                  -fno-strict-aliasing \
                  -fexceptions \

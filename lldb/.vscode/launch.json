@@ -7,13 +7,13 @@
         {
             "type": "lldb",
             "request": "launch",
-            "name": "🚀 Bridge v2 - Modular Debug",
+            "name": "🚀 GNUstep/libobjc2 - Debug",
             "program": "${workspaceFolder}/examples/custom_class_test",
             "args": [],
             "cwd": "${workspaceFolder}",
             "preLaunchTask": "build-all-examples",
             "initCommands": [
-                "log enable lldb formatters",
+                // "log enable lldb formatters",
                 // "b main",
                 // "settings set target.language objc",
                 // "type category enable gnustep/libobjc2",

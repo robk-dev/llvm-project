@@ -1,0 +1,145 @@
+# GSCInlineString Synthetic Provider Validation Script
+#
+# This script comprehensively validates:
+# 1. GSCInlineString structural view (synthetic children) 
+# 2. GSCInlineString summary view (po command)
+# 3. Regression testing for all string types
+# 4. Edge cases and error handling
+
+# Load the test program
+file ./test_gsc_inline_string_validation
+
+# Set breakpoint at the validation point
+b test_gsc_inline_string_validation.m:89
+
+# Run the program
+run
+
+echo "=== STARTING GSCInlineString VALIDATION ==="
+
+# ===== TEST 1: GSCInlineString Summary Formatting (po command) =====
+echo "\n=== TEST 1: GSCInlineString Summary Formatting ==="
+echo "Testing po shortString (GSCInlineString):"
+po shortString
+
+echo "\nTesting po dynamicString (GSCInlineString):"
+po dynamicString
+
+echo "\nTesting po shortDynamic (GSCInlineString):"
+po shortDynamic
+
+echo "\nTesting po longString (GSCInlineString):"
+po longString
+
+# ===== TEST 2: GSCInlineString Structural View (synthetic children) =====
+echo "\n=== TEST 2: GSCInlineString Structural View (Synthetic Children) ==="
+echo "Testing p shortString (should show _contents, _count, _flags):"
+p shortString
+
+echo "\nExpanded view of shortString:"
+expr -d run-target -- shortString
+
+echo "\nTesting p dynamicString structural view:"
+p dynamicString
+
+echo "\nTesting p longString structural view:"
+p longString
+
+# ===== TEST 3: Inspect GSCInlineString Children Individually =====
+echo "\n=== TEST 3: Individual Child Inspection ==="
+echo "Inspecting shortString children:"
+p shortString._contents
+p shortString._count  
+p shortString._flags
+
+echo "\nInspecting dynamicString children:"
+p dynamicString._contents
+p dynamicString._count
+p dynamicString._flags
+
+# ===== TEST 4: Regression Testing - Other String Types =====
+echo "\n=== TEST 4: Regression Testing - Other String Types ==="
+echo "Testing NSConstantString:"
+po constString
+p constString
+
+echo "\nTesting NSMutableString:"
+po mutableString
+p mutableString
+
+echo "\nTesting Unicode string:"
+po unicodeString
+p unicodeString
+
+echo "\nTesting complex unicode:"
+po complexUnicode
+p complexUnicode
+
+echo "\nTesting data-created string:"
+po dataString
+p dataString
+
+# ===== TEST 5: Edge Cases =====
+echo "\n=== TEST 5: Edge Cases ==="
+echo "Testing empty string:"
+po emptyString
+p emptyString
+
+echo "\nTesting empty mutable string:"
+po emptyMutable
+p emptyMutable
+
+echo "\nTesting nil string (should handle gracefully):"
+po nilString
+p nilString
+
+# ===== TEST 6: Class Verification =====
+echo "\n=== TEST 6: Class Type Verification ==="
+echo "Verifying class types (should show actual GNUstep classes):"
+po [shortString class]
+po [dynamicString class] 
+po [constString class]
+po [mutableString class]
+po [dataString class]
+
+# ===== TEST 7: String Length and Content Verification =====
+echo "\n=== TEST 7: Content and Length Verification ==="
+echo "Verifying string lengths:"
+p [shortString length]
+p [dynamicString length]
+p [longString length]
+p [constString length]
+p [unicodeString length]
+
+# ===== TEST 8: Memory Address Verification =====
+echo "\n=== TEST 8: Memory Address Verification ==="
+echo "Checking object addresses (should be valid):"
+p &shortString
+p &dynamicString
+p &longString
+
+# ===== TEST 9: Formatter Performance Test =====
+echo "\n=== TEST 9: Performance Test ==="
+echo "Testing formatter speed (should be < 50ms each):"
+time po shortString
+time po dynamicString 
+time po longString
+time p shortString
+time p dynamicString
+
+# ===== TEST 10: Error Handling Test =====
+echo "\n=== TEST 10: Error Handling Test ==="
+echo "Testing with potentially corrupted object (safety test):"
+# Create a pointer to an arbitrary address and try to format it as string
+# This should not crash the debugger
+expr -d run-target -- (NSString*)0x1000
+
+echo "\n=== VALIDATION COMPLETE ==="
+echo "Check output above for:"
+echo "✅ GSCInlineString po commands show string content"
+echo "✅ GSCInlineString p commands show _contents, _count, _flags (not <unknown type>)"
+echo "✅ All other string types work without regression"
+echo "✅ Edge cases handled gracefully"
+echo "✅ No crashes or hangs"
+
+quit

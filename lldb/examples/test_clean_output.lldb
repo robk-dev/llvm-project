@@ -1,0 +1,12 @@
+# Test script to verify clean output (no debug messages)
+file test_clean_output
+b test_clean_output.m:16
+run
+po fruits
+po person
+po message
+po number
+frame variable fruits
+frame variable person
+continue
+quit

@@ -1,0 +1,15 @@
+target create test_inline_string_formatter
+breakpoint set -f test_inline_string_formatter.m -l 93
+run
+frame variable -T concat1
+frame variable --show-types --raw concat1
+frame variable concat1->_contents
+frame variable concat1->_count
+frame variable concat1->_flags
+p *(GSCInlineString*)concat1
+p ((GSCInlineString*)concat1)->_contents
+p ((GSCInlineString*)concat1)->_count
+p ((GSCInlineString*)concat1)->_flags
+expr -f x -- ((GSCInlineString*)concat1)->_flags
+expr -f d -- ((GSCInlineString*)concat1)->_count
+quit

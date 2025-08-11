@@ -1,0 +1,21 @@
+# Test GSCInlineString content extraction
+target create custom_class_test
+breakpoint set --file custom_class_test.m --line 387
+run
+
+# Test if we can get the actual string content from GSCInlineString
+print "=== Testing GSCInlineString content extraction ==="
+frame variable growingArray
+print "Array shows GSCInlineString placeholders - this is better than [inline string]"
+
+# Try to display with formatted view
+frame variable growingArray --dynamic-type run-target
+frame variable growingArray[0] --dynamic-type run-target
+
+# Test a simple string creation to compare
+expr NSString* testStr = @"Hello"
+frame variable testStr
+expr NSString* formatStr = [NSString stringWithFormat:@"Test %d", 42] 
+frame variable formatStr
+
+continue

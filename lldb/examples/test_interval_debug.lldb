@@ -1,0 +1,29 @@
+#!/usr/bin/env lldb
+# Test NSTimeInterval display
+
+target create test_nstime_interval
+
+b test_nstime_interval.m:28
+run
+
+# Test raw NSTimeInterval (double) - might show as hex in some contexts
+fr var rawInterval
+expr rawInterval
+po @(rawInterval)
+
+# Test wrapped NSNumber
+po wrappedInterval
+expr wrappedInterval
+
+# Test local variable display
+fr var localVar
+
+# Test dictionary display
+po probDict
+
+# Check memory dump of the double
+x/8b &rawInterval
+x/1gx &rawInterval
+
+continue
+quit

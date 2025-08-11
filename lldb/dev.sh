@@ -192,13 +192,6 @@ run_api_tests() {
     # Build and run individual test programs
     cd "$api_test_dir" || exit 1
     
-    # Backup original Makefile and create test-specific one
-    if [[ -f "Makefile.orig" ]]; then
-        cp Makefile.orig Makefile
-    else
-        cp Makefile Makefile.orig
-    fi
-    
     # Test each main program individually
     local test_programs=("main.m" "test_collections.m" "test_new_formatters.m")
     local test_results=()
@@ -225,11 +218,6 @@ run_api_tests() {
             test_results+=("$program: BUILD_FAIL")
         fi
     done
-    
-    # Restore original Makefile
-    if [[ -f "Makefile.orig" ]]; then
-        mv Makefile.orig Makefile
-    fi
     
     # Show results summary
     echo ""
@@ -266,29 +254,32 @@ run_integration_tests() {
     
     cd "$api_test_dir" || exit 1
     
-    # Build main test program
-    if [[ -f "Makefile.orig" ]]; then
-        cp Makefile.orig Makefile
-    else
-        cp Makefile Makefile.orig
-    fi
-    
+    # Ensure OBJC_SOURCES is set to main.m (Makefile already has debug flags)
     sed -i "1s/.*/OBJC_SOURCES := main.m/" Makefile
+    
+    log_info "Building test program with debug symbols..."
+    
+    # Clean and build using the Makefile (which now includes -g -O0)
+    if ! OBJC="$our_clang" make clean >/dev/null 2>&1; then
+        log_warning "Clean failed, continuing..."
+    fi
     
     if ! OBJC="$our_clang" make; then
         log_error "Failed to build main test program for integration tests"
         return 1
     fi
     
-    # Create LLDB test script
+    # Create improved LLDB test script with proper file specification
     cat > test_formatters.lldb << 'EOF'
 # GNUstep Formatter Integration Test Script
 target create ./a.out
-breakpoint set --line 105
+# Set breakpoint at final NSLog line where all variables are in scope
+breakpoint set --file main.m --line 127
 run
-# Test basic formatters using frame variable (po causes hanging)
+# Now we should be stopped with all variables available for testing
+# Test basic formatters using frame variable (more reliable than po)
 frame variable -O emptyString
-frame variable -O asciiString
+frame variable -O asciiString  
 frame variable -O intNumber
 frame variable -O emptyArray
 frame variable -O simpleArray
@@ -296,14 +287,42 @@ frame variable -O emptyDict
 frame variable -O simpleDict
 frame variable -O emptySet
 frame variable -O account
+# Test summary strings
+frame variable emptyString
+frame variable asciiString
+frame variable simpleArray
+frame variable simpleDict
 continue
 quit
 EOF
     
     log_info "Running LLDB integration test..."
-    if timeout 30s "$LLDB_BIN" -s test_formatters.lldb > integration_test_output.txt 2>&1; then
+    local test_result=0
+    
+    # Run with timeout and capture both stdout and stderr
+    if timeout 45s "$LLDB_BIN" -s test_formatters.lldb > integration_test_output.txt 2>&1; then
+        test_result=0
+    else
+        test_result=$?
+    fi
+    
+    # Always show the output for debugging
+    echo ""
+    log_info "LLDB Integration Test Output:"
+    echo "----------------------------------------"
+    cat integration_test_output.txt
+    echo "----------------------------------------"
+    
+    if [[ $test_result -eq 0 ]]; then
         # Check if formatters worked by looking for expected output patterns
         local formatter_working=false
+        local error_found=false
+        
+        # Check for errors first
+        if grep -q "error:" integration_test_output.txt; then
+            error_found=true
+            log_warning "LLDB errors detected in output"
+        fi
         
         # Check for basic string output
         if grep -q '@""' integration_test_output.txt || grep -q 'NSString' integration_test_output.txt; then
@@ -323,29 +342,35 @@ EOF
             log_success "Custom class formatting detected"
         fi
         
-        if $formatter_working; then
+        if $formatter_working && ! $error_found; then
             log_success "Integration tests show formatters are active"
+            test_result=0
+        elif $formatter_working && $error_found; then
+            log_warning "Integration tests show formatters working but with errors"
+            test_result=0
         else
             log_warning "Integration tests completed but formatter output unclear"
+            test_result=1
         fi
         
-        # Show key output lines
-        echo ""
-        log_info "Key output samples:"
-        grep -E '^(lldb)|\(.*\)|@|NSArray|NSDictionary|NSString' integration_test_output.txt | head -10 || true
-        
     else
-        log_error "LLDB integration test failed or timed out"
-        return 1
+        log_error "LLDB integration test failed or timed out (exit code: $test_result)"
+        echo ""
+        log_info "Last few lines of output:"
+        tail -10 integration_test_output.txt || true
     fi
     
-    # Cleanup
-    rm -f test_formatters.lldb integration_test_output.txt
-    
-    # Restore Makefile
-    if [[ -f "Makefile.orig" ]]; then
-        mv Makefile.orig Makefile
+    # Keep output file for manual debugging
+    if [[ $test_result -ne 0 ]]; then
+        log_info "Integration test output saved to: $api_test_dir/integration_test_output.txt"
+        log_info "LLDB script saved to: $api_test_dir/test_formatters.lldb"
+        log_info "To debug manually: cd $api_test_dir && $LLDB_BIN -s test_formatters.lldb"
+    else
+        # Cleanup on success
+        rm -f test_formatters.lldb integration_test_output.txt
     fi
+    
+    return $test_result
 }
 
 # Run all tests (comprehensive)
@@ -399,6 +424,107 @@ run_all_tests() {
         log_error "$total_failed test suite(s) failed"
         return 1
     fi
+}
+
+# Manual integration test for debugging
+debug_integration() {
+    log_section "🔍 Manual Integration Test Debug Mode..."
+    check_prerequisites
+    
+    local api_test_dir="$SCRIPT_DIR/test/API/lang/objc/gnustep"
+    local our_clang="$BUILD_DIR/bin/clang"
+    
+    if [[ ! -d "$api_test_dir" ]]; then
+        log_error "API test directory not found: $api_test_dir"
+        return 1
+    fi
+    
+    cd "$api_test_dir" || exit 1
+    
+    # Ensure OBJC_SOURCES is set to main.m (Makefile already has debug flags)
+    sed -i "1s/.*/OBJC_SOURCES := main.m/" Makefile
+    
+    log_info "Building test program with debug symbols..."
+    if ! OBJC="$our_clang" make clean && OBJC="$our_clang" make; then
+        log_error "Failed to build main test program"
+        return 1
+    fi
+    
+    # Create improved LLDB test script
+    cat > debug_formatters.lldb << 'EOF'
+# Manual Debug LLDB Script for GNUstep Formatters
+settings set auto-confirm true
+target create ./a.out
+# Set breakpoint at NSLog to stop when variables are initialized
+breakpoint set --name NSLog
+run
+# Continue through the first several NSLog calls to get to the end
+continue
+continue
+continue
+continue
+continue
+continue
+continue
+continue
+# Show all variables first
+frame variable
+echo "=== Testing String Formatters ==="
+frame variable -O emptyString
+frame variable -O asciiString
+echo "=== Testing Number Formatters ==="
+frame variable -O intNumber
+echo "=== Testing Collection Formatters ==="
+frame variable -O emptyArray
+frame variable -O simpleArray
+frame variable -O emptyDict
+frame variable -O simpleDict
+frame variable -O emptySet
+echo "=== Testing Custom Class Formatters ==="
+frame variable -O account
+echo "=== Integration Test Complete ==="
+continue
+quit
+EOF
+    
+    log_info "Created debug script: $api_test_dir/debug_formatters.lldb"
+    log_info "Test program: $api_test_dir/a.out"
+    
+    echo -e "\n${CYAN}Manual Debug Options:${NC}"
+    echo "1. Run with script:     cd $api_test_dir && $LLDB_BIN -s debug_formatters.lldb"
+    echo "2. Interactive debug:   cd $api_test_dir && $LLDB_BIN ./a.out"
+    echo "3. Quick test:          ./dev.sh test-integration"
+    
+    echo -e "\n${CYAN}Key LLDB Commands for Manual Testing:${NC}"
+    echo "  target create ./a.out"
+    echo "  breakpoint set --file main.m --line 115"
+    echo "  run"
+    echo "  frame variable -O [variable_name]"
+    echo "  po [variable_name]  # (may hang with current formatters)"
+    
+    # Ask user what they want to do
+    echo -e "\n${YELLOW}What would you like to do?${NC}"
+    echo "1) Run debug script automatically"
+    echo "2) Start interactive LLDB session"
+    echo "3) Just prepare files (manual run)"
+    read -p "Choice [1-3]: " choice
+    
+    case "$choice" in
+        1)
+            log_info "Running debug script..."
+            "$LLDB_BIN" -s debug_formatters.lldb
+            ;;
+        2)
+            log_info "Starting interactive LLDB session..."
+            "$LLDB_BIN" ./a.out
+            ;;
+        3)
+            log_info "Files prepared for manual testing"
+            ;;
+        *)
+            log_info "Files prepared. Run manually when ready."
+            ;;
+    esac
 }
 
 # Legacy test function for backward compatibility
@@ -583,6 +709,7 @@ show_usage() {
     echo -e "  ${GREEN}test-unit${NC}       Run unit tests only"
     echo -e "  ${GREEN}test-api${NC}        Run API tests only"
     echo -e "  ${GREEN}test-integration${NC} Run LLDB integration tests only"
+    echo -e "  ${GREEN}debug-integration${NC} Manual integration test debugging"
     echo ""
     echo -e "${CYAN}Debug Commands:${NC}"
     echo -e "  ${GREEN}debug [example]${NC} Start LLDB debug session with example"
@@ -599,6 +726,7 @@ show_usage() {
     echo "  $0 test-unit                      # Run just unit tests"
     echo "  $0 test-api                       # Test GNUstep program compilation"
     echo "  $0 test-integration               # Test formatters in LLDB"
+    echo "  $0 debug-integration              # Manual integration test debugging"
     echo "  $0 debug custom_class_test        # Debug with custom class example"
     echo "  $0 full                           # Complete development cycle"
     echo ""
@@ -699,6 +827,9 @@ main() {
             ;;
         "test-integration")
             run_integration_tests
+            ;;
+        "debug-integration")
+            debug_integration
             ;;
         "clean-examples")
             clean_examples
