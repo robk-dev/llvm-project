@@ -1,0 +1,33 @@
+# Manual Debug LLDB Script for GNUstep Formatters
+settings set auto-confirm true
+target create ./a.out
+# Step 1: Break on main function entry
+breakpoint set --name main
+run
+# Step 2: Set breakpoint at line 127 where all variables are initialized and in scope
+breakpoint set --line 127
+continue
+# Step 3: Now we should be stopped with all variables available for testing
+# Show all variables first
+frame variable
+# Testing String Formatters
+frame variable -O emptyString
+frame variable -O asciiString
+# Testing Number Formatters
+frame variable -O intNumber
+# Testing Collection Formatters
+frame variable -O emptyArray
+frame variable -O simpleArray
+frame variable -O emptyDict
+frame variable -O simpleDict
+frame variable -O emptySet
+# Testing Custom Class Formatters
+frame variable -O account
+# Testing Summary Strings
+frame variable emptyString
+frame variable asciiString
+frame variable simpleArray
+frame variable simpleDict
+# Integration Test Complete
+continue
+quit

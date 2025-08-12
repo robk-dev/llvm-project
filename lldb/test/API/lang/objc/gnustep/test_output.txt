@@ -1,0 +1,94 @@
+*** GNUstepObjCRuntime::Initialize() called - Plugin registered ***
+🎯 Global .lldbinit loaded - project-specific .lldbinit files will now be read
+(lldb) command source -s 0 'test_formatters.lldb'
+Executing commands in '/home/robk/code/llvm-project/lldb/test/API/lang/objc/gnustep/test_formatters.lldb'.
+(lldb) # GNUstep Formatter Integration Test Script
+(lldb) settings set auto-confirm true
+(lldb) target create ./a.out
+Current executable set to '/home/robk/code/llvm-project/lldb/test/API/lang/objc/gnustep/a.out' (x86_64).
+(lldb) # Step 1: Break on main function entry
+(lldb) b main
+Breakpoint 1: where = a.out`main + 25 at main.m:56:32, address = 0x00000000000026e9
+(lldb) run
+*** GNUstepObjCRuntime::CreateInstance() called for language 16 ***
+*** GNUstepObjCRuntime::CreateInstance() called for language 17 ***
+5 locations added to breakpoint 1
+*** GNUstepObjCRuntime::CreateInstance() called for language 2 ***
+*** GNUstepObjCRuntime::CreateInstance() called for language 2 ***
+*** GNUstepObjCRuntime::CreateInstance() called for language 2 ***
+*** GNUstepObjCRuntime::CreateInstance() called for language 2 ***
+Process 59750 launched: '/home/robk/code/llvm-project/lldb/test/API/lang/objc/gnustep/a.out' (x86_64)
+Process 59750 stopped
+* thread #1, name = 'a.out', stop reason = breakpoint 1.1
+    frame #0: 0x00005555555566e9 a.out`main(argc=1, argv=0x00007fffffffcb78) at main.m:56:32
+   53  	@end
+   54  	
+   55  	int main(int argc, char *argv[]) {
+-> 56  	    NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
+    	                               ^
+   57  	    
+   58  	    // String test objects
+   59  	    NSString *emptyString = @"";
+(lldb) # Step 2: Set breakpoint at line 127 where all variables are initialized and in scope  
+(lldb) br set -l 127
+Breakpoint 2: where = a.out`main + 2297 at main.m:127:5, address = 0x0000555555556fc9
+(lldb) continue
+2025-08-12 01:34:55.467 a.out[59750:59750] GNUstep formatter test program ready
+2025-08-12 01:34:55.468 a.out[59750:59750] String tests: , Hello, World!, Unicode: 你好 👋, Hi
+2025-08-12 01:34:55.468 a.out[59750:59750] Number tests: 42, 3.14159, 1, 7
+2025-08-12 01:34:55.468 a.out[59750:59750] Array tests: 0, 3, 3
+2025-08-12 01:34:55.468 a.out[59750:59750] Dictionary tests: 0, 2, 2
+2025-08-12 01:34:55.468 a.out[59750:59750] Set tests: 0, 3, 3
+2025-08-12 01:34:55.468 a.out[59750:59750] Custom class: BankAccount(12345, owner=John Doe, balance=1025.00, transactions=3)
+2025-08-12 01:34:55.468 a.out[59750:59750] Large collections: 1000 items, 500 pairs
+*** GNUstepObjCRuntime::CreateInstance() called for language 2 ***
+*** GNUstepObjCRuntime::CreateInstance() called for language 2 ***
+Process 59750 resuming
+Process 59750 stopped
+* thread #1, name = 'a.out', stop reason = breakpoint 2.1
+    frame #0: 0x0000555555556fc9 a.out`main(argc=1, argv=0x00007fffffffcb78) at main.m:127:5
+   124 	    NSLog(@"Large collections: %lu items, %lu pairs", [largeArray count], [largeDict count]);
+   125 	    
+   126 	    // Break here for testing
+-> 127 	    NSLog(@"All test objects created successfully");
+    	    ^
+   128 	    
+   129 	    [account release];
+   130 	    [pool drain];
+(lldb) # Step 3: Now we should be stopped with all variables available for testing
+(lldb) # Test basic variable display first
+(lldb) frame variable emptyString
+(NSString *) emptyString = 0x0000000000000004
+(lldb) frame variable asciiString
+(NSString *) asciiString = "Hello, World!"
+(lldb) frame variable simpleArray
+(NSArray *) simpleArray = @["Apple", "Banana", "Cherry"]
+(lldb) frame variable simpleDict
+(NSDictionary *) simpleDict = @{"name": "John", "age": 30}
+(lldb) frame variable account
+(BankAccount *) account = BankAccount(accountNumber=12345, owner="John Doe", balance=1025.00, transactions=@[<NSObject>])
+(lldb) # Test formatters
+(lldb) frame variable -O emptyString
+(NSString *) emptyString = 0x0000000000000004 <GSTinyString tagged pointer: 0x4>
+
+(lldb) frame variable -O asciiString  
+*** GNUstepObjCRuntime::CreateInstance() called for language 2 ***
+(NSString *) asciiString = 0x000055555555a700 Hello, World!
+
+(lldb) frame variable -O simpleArray
+*** GNUstepObjCRuntime::CreateInstance() called for language 2 ***
+(NSArray *) simpleArray = 0x00005555557d0ab8 (Apple, Banana, Cherry)
+
+(lldb) frame variable -O simpleDict
+*** GNUstepObjCRuntime::CreateInstance() called for language 2 ***
+(NSDictionary *) simpleDict = 0x00005555557e64f8 {age = 30; name = John; }
+
+(lldb) frame variable -O account
+*** GNUstepObjCRuntime::CreateInstance() called for language 2 ***
+(BankAccount *) account = 0x0000555555805a78 BankAccount(12345, owner=John Doe, balance=1025.00, transactions=3)
+
+(lldb) continue
+2025-08-12 01:34:56.134 a.out[59750:59750] All test objects created successfully
+Process 59750 resuming
+Process 59750 exited with status = 0 (0x00000000)
+(lldb) quit
