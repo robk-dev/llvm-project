@@ -132,6 +132,7 @@ configure_build() {
     cmake -G Ninja \
           -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
           -DLLVM_ENABLE_PROJECTS="clang;lldb" \
+          -DBUILD_SHARED_LIBS=ON \
           -DLLVM_ENABLE_ASSERTIONS=ON \
           -DLLVM_PARALLEL_LINK_JOBS=2 \
           -DLLDB_ENABLE_PYTHON=ON \
