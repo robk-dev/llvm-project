@@ -1,7 +1,0 @@
-file test_characterset
-run
-breakpoint set --line 20
-continue
-type summary list | head -50
-type category list
-quit

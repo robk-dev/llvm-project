@@ -1,9 +1,0 @@
-target create custom_class_test
-breakpoint set --name main
-process launch
-breakpoint set --line 200 --file custom_class_test.m
-continue
-# This should stop after more variables are created
-frame variable
-po personInfo
-quit

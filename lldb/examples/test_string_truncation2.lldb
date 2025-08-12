@@ -1,6 +1,0 @@
-b test_string_truncation.m:11
-run
-frame variable skills --no-summary-depth 0
-frame variable skills
-frame variable -d run-target skills
-quit

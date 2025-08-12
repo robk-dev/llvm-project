@@ -1,6 +1,0 @@
-b test_string_truncation.m:11
-run
-expr -o -- skills
-expr -p -- (id *)((char *)skills + 8)
-memory read `(void *)((char *)skills + 8)` -c 5
-quit

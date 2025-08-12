@@ -1,5 +1,0 @@
-file custom_class_test
-breakpoint set --line 382
-run
-frame variable mixedTypeArray
-quit

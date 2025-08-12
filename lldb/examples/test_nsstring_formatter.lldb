@@ -1,7 +1,0 @@
-file ./test_nsstring_formatter
-b main
-run
-po nil
-po emptyString
-po simpleString
-quit

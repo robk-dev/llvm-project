@@ -1,9 +1,0 @@
-file test_characterset
-breakpoint set --name main
-run
-breakpoint set --line 45
-continue
-frame variable letters
-frame variable digits
-frame variable custom
-quit

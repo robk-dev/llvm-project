@@ -1,7 +1,0 @@
-# Test script for dictionary key display fix
-file test_dict_keys
-b 16
-run
-type category disable objc
-expr -P 1 -- dict
-quit

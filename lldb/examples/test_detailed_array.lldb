@@ -1,5 +1,0 @@
-b test_string_truncation.m:11
-run
-log enable lldb formatters
-frame variable skills -T -L -R
-quit
