@@ -120,7 +120,7 @@ void GNUstepNSJSONSerializationSummaryProvider::FormatJSONInstance(ValueObject &
     lldb::addr_t object_addr = valobj.GetPointerValue();
     GNUstepObjCRuntimeIntrospector introspector(process);
     std::string class_name = introspector.GetClassName(object_addr);
-    oss << class_name.empty() ? "JSON object" : class_name;
+    oss << (class_name.empty() ? "JSON object" : class_name);
   }
   
   WriteQuotedString(stream, oss.str());

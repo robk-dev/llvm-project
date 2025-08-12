@@ -1,7 +1,5 @@
 #!/bin/bash
 # Path replacement functionality for Windows MSYS2 workspace portability
-# Author: LLDB GNUstep Development Team
-# Date: August 2025
 
 set -euo pipefail
 

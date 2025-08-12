@@ -2,7 +2,7 @@
 
 ## Created Components
 
-### 1. Unit Tests (`/home/robk/code/llvm-project/lldb/unittests/Language/ObjC/GNUstep/`)
+### 1. Unit Tests (`../lldb/unittests/Language/ObjC/GNUstep/`)
 - **CMakeLists.txt**: Build configuration for unit tests
 - **GNUstepIntrospectorTest.cpp**: Tests for runtime introspection
   - Class name extraction
@@ -19,7 +19,7 @@
   - Integer, string, and extended tags
   - Edge cases and validation
 
-### 2. Integration Tests (`/home/robk/code/llvm-project/lldb/test/API/lang/objc/gnustep/`)
+### 2. Integration Tests (`../lldb/test/API/lang/objc/gnustep/`)
 - **TestGNUstepFormatters.py**: Python-based API tests
   - String, number, collection formatters
   - Custom classes
@@ -32,7 +32,7 @@
 - **Makefile**: Build configuration with GNUstep flags
 - **Makefile.rules**: Common build rules
 
-### 3. Test Infrastructure Scripts (`/home/robk/code/llvm-project/lldb/scripts2/`)
+### 3. Test Infrastructure Scripts (`../lldb/scripts2/`)
 - **run_gnustep_tests.sh**: Main test runner
   - Runs unit tests, integration tests, and validation
   - Provides colored output and summary
@@ -55,7 +55,7 @@
   - Performance metrics
 
 ### 4. Build System Updates
-- Modified `/home/robk/code/llvm-project/lldb/unittests/Language/ObjC/CMakeLists.txt` to include GNUstep subdirectory
+- Modified `../lldb/unittests/Language/ObjC/CMakeLists.txt` to include GNUstep subdirectory
 - Created proper CMake configuration for unit tests
 
 ## Test Coverage Areas
@@ -85,25 +85,25 @@
 
 ### Quick Validation
 ```bash
-cd /home/robk/code/llvm-project/lldb/scripts2
+cd ../lldb/scripts2
 ./quick_test.sh
 ```
 
 ### Full Test Suite
 ```bash
-cd /home/robk/code/llvm-project/lldb/scripts2
+cd ../lldb/scripts2
 ./run_gnustep_tests.sh
 ```
 
 ### Build Only
 ```bash
-cd /home/robk/code/llvm-project/lldb/scripts2
+cd ../lldb/scripts2
 ./build_test_programs.sh
 ```
 
 ### Formatter Validation
 ```bash
-cd /home/robk/code/llvm-project/lldb/scripts2
+cd ../lldb/scripts2
 ./validate_formatters.py
 ```
 
@@ -127,7 +127,7 @@ Tests provide:
 
 1. **Build unit tests**: 
    ```bash
-   cd /home/robk/code/llvm-project/build
+   cd ../build
    ninja LanguageObjCGNUstepTests
    ```
 
@@ -151,6 +151,6 @@ Tests provide:
 ## File Paths Summary
 
 All created files use absolute paths as requested:
-- `/home/robk/code/llvm-project/lldb/unittests/Language/ObjC/GNUstep/*`
-- `/home/robk/code/llvm-project/lldb/test/API/lang/objc/gnustep/*`
-- `/home/robk/code/llvm-project/lldb/scripts2/*`
+- `../lldb/unittests/Language/ObjC/GNUstep/*`
+- `../lldb/test/API/lang/objc/gnustep/*`
+- `../lldb/scripts2/*`

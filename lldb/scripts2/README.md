@@ -39,7 +39,7 @@ llvm-project/
 
 1. **Build LLDB with GNUstep plugin:**
    ```bash
-   cd /home/robk/code/llvm-project/build
+   cd ../build
    ninja lldb lldbPluginGNUstepObjCRuntime
    ```
 
@@ -52,7 +52,7 @@ llvm-project/
 
 3. **Python 3 with LLDB bindings:**
    ```bash
-   export PYTHONPATH=/home/robk/code/llvm-project/build/lib/python3/dist-packages:$PYTHONPATH
+   export PYTHONPATH=../build/lib/python3/dist-packages:$PYTHONPATH
    ```
 
 ## Running Tests
@@ -60,7 +60,7 @@ llvm-project/
 ### Quick Start - Run All Tests
 
 ```bash
-cd /home/robk/code/llvm-project/lldb/scripts2
+cd ../lldb/scripts2
 ./run_gnustep_tests.sh
 ```
 
@@ -75,20 +75,20 @@ This will:
 
 #### Unit Tests Only
 ```bash
-cd /home/robk/code/llvm-project/build
+cd ../build
 ninja LanguageObjCGNUstepTests
 ./tools/lldb/unittests/Language/ObjC/GNUstep/LanguageObjCGNUstepTests
 ```
 
 #### Integration Tests Only
 ```bash
-cd /home/robk/code/llvm-project/lldb/test
+cd ../lldb/test
 python -m lldb.dotest -p TestGNUstepFormatters.py
 ```
 
 #### Formatter Validation Only
 ```bash
-cd /home/robk/code/llvm-project/lldb/scripts2
+cd ../lldb/scripts2
 ./build_test_programs.sh  # Build test programs first
 ./validate_formatters.py
 ```
@@ -98,13 +98,13 @@ cd /home/robk/code/llvm-project/lldb/scripts2
 To build all test programs without running tests:
 
 ```bash
-cd /home/robk/code/llvm-project/lldb/scripts2
+cd ../lldb/scripts2
 ./build_test_programs.sh
 ```
 
 This builds programs in:
-- `/home/robk/code/llvm-project/lldb/examples/`
-- `/home/robk/code/llvm-project/lldb/test/API/lang/objc/gnustep/`
+- `../lldb/examples/`
+- `../lldb/test/API/lang/objc/gnustep/`
 
 ## Adding New Tests
 
@@ -130,7 +130,7 @@ This builds programs in:
 
 3. Rebuild and run:
    ```bash
-   cd /home/robk/code/llvm-project/build
+   cd ../build
    ninja LanguageObjCGNUstepTests
    ```
 

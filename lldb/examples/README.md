@@ -7,7 +7,7 @@ This directory contains test programs for validating the GNUstep ObjectiveC Runt
 **Use the development script from the parent directory:**
 
 ```bash
-cd /home/robk/code/llvm-project/lldb
+cd ./lldb
 
 # Show available commands
 ./dev.sh help
@@ -150,4 +150,4 @@ ldd custom_class_test | grep gnustep
 
 ---
 
-For more details, see `/home/robk/code/llvm-project/CLAUDE.md`
+For more details, see `../CLAUDE.md`

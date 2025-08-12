@@ -2,9 +2,12 @@
 # Development Environment Configuration
 # Source this file to set up environment variables for GNUstep LLDB development
 
+# Get the directory where this script is located
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 # LLDB Build Configuration
-export LLDB_ROOT="/home/robk/code/llvm-project/lldb"
-export LLDB_BUILD_DIR="/home/robk/code/llvm-project/build"  
+export LLDB_ROOT="$SCRIPT_DIR"
+export LLDB_BUILD_DIR="$SCRIPT_DIR/../build"  
 export LLDB_BIN="$LLDB_BUILD_DIR/bin/lldb"
 export LLDB_SERVER="$LLDB_BUILD_DIR/bin/lldb-server"
 

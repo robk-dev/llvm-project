@@ -1,7 +1,5 @@
 #!/bin/bash
 # System requirements and dependency installation for Windows MSYS2/UCRT64
-# Author: LLDB GNUstep Development Team
-# Date: August 2025
 
 # Source common utilities
 HELPERS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -248,11 +246,13 @@ install_windows_dependencies() {
     local llvm_packages=(
         mingw-w64-ucrt-x86_64-clang
         mingw-w64-ucrt-x86_64-lld
+        mingw-w64-ucrt-x86_64-dlfcn
         mingw-w64-ucrt-x86_64-libxml2
         mingw-w64-ucrt-x86_64-libffi
         mingw-w64-ucrt-x86_64-zlib
         mingw-w64-ucrt-x86_64-zstd
         mingw-w64-ucrt-x86_64-ncurses
+        mingw-w64-x86_64-doxygen
         mingw-w64-ucrt-x86_64-swig
         mingw-w64-ucrt-x86_64-ccache
     )

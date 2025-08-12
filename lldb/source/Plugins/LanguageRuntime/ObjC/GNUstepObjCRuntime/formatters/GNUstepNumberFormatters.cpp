@@ -49,6 +49,7 @@ bool GNUstepNSNumberSummaryProvider::FormatObject(
   
   // Get architecture to handle pointer size differences
   uint32_t addr_size = process_sp->GetAddressByteSize();
+  (void)addr_size; // Mark as used to suppress warning
   
   // Check if this is a tagged pointer (GNUstep small object)
   // Tagged pointers have non-zero low bits (OBJC_SMALL_OBJECT_SHIFT = 3)

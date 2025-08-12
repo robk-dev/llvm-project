@@ -5,7 +5,9 @@
             "label": "build-plugin",
             "type": "shell",
             "command": "ninja",
-            "args": ["lldbPluginGNUstepObjCRuntime"],
+            "args": [
+                "lldbPluginGNUstepObjCRuntime"
+            ],
             "options": {
                 "cwd": "${workspaceFolder}/../build"
             },
@@ -13,14 +15,43 @@
             "problemMatcher": "$gcc"
         },
         {
+            "label": "build-one-example",
+            "type": "shell",
+            "command": "make",
+            "args": [
+                "simple_test"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}/examples",
+                "env": {
+                    "PATH": "/ucrt64/lib:/ucrt64/bin:${workspaceFolder}/../build/bin:${env:PATH}"
+                }
+            },
+            // "dependsOn": [
+            //     "build-full-development"
+            // ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": "$gcc"
+        },
+        {
             "label": "build-all-examples",
             "type": "shell",
             "command": "make",
-            "args": ["all"],
+            "args": [
+                "all"
+            ],
             "options": {
-                "cwd": "${workspaceFolder}/examples"
+                "cwd": "${workspaceFolder}/examples",
+                "env": {
+                    "PATH": "/ucrt64/lib:/ucrt64/bin:${workspaceFolder}/../build/bin:${env:PATH}"
+                }
             },
-            "dependsOn": ["build-plugin", "build-full-development"],
+            "dependsOn": [
+                "build-full-development"
+            ],
             "group": {
                 "kind": "build",
                 "isDefault": true
@@ -30,8 +61,14 @@
         {
             "label": "build-full-development",
             "type": "shell",
+            "dependsOn": [
+                "build-plugin"
+            ],
             "command": "ninja",
-            "args": ["lldb", "lldb-server"],
+            "args": [
+                "lldb",
+                "lldb-server"
+            ],
             "options": {
                 "cwd": "${workspaceFolder}/../build"
             },

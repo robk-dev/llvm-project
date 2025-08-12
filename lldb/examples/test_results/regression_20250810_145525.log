@@ -1,9 +1,0 @@
-=== GNUstep LLDB Formatter Regression Tests ===
-Started at: Sun Aug 10 14:55:25 BST 2025
-LLDB: /home/robk/code/llvm-project/build/bin/lldb
-
-Building test programs...
-[0;32m✓[0m Test programs built successfully
-
-Running test: NSString_Basic
-[0;31m✗[0m NSString_Basic: LLDB crashed or returned error

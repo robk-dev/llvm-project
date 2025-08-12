@@ -1,0 +1,143 @@
+# Makefile for LLDB Bridge Examples - System GNUstep Edition
+
+# Use the LLVM build clang for consistency
+CC = clang
+LLDB = ../build/bin/lldb
+
+# System GNUstep compilation flags (avoiding Foundation header conflicts)
+CFLAGS = -fobjc-runtime=gnustep-2.1 \
+         -fblocks \
+         -fno-strict-aliasing \
+         -fexceptions \
+         -fobjc-exceptions \
+         -g -gdwarf-5 -O0 \
+         -fno-omit-frame-pointer \
+         -I/ucrt64/include \
+         -I/ucrt64/include/objc \
+         -fconstant-string-class=NSConstantString \
+         -DGNUSTEP -DGNUSTEP_BASE_LIBRARY=1 -DDEBUG=1 \
+         -Wno-error=int-conversion
+
+LDFLAGS = -L/ucrt64/lib \
+          -g
+
+LIBS = -lobjc -lBlocksRuntime -lpthread -lm
+
+# Minimal source files (avoiding Foundation for now)
+MINIMAL_SOURCES = minimal_objc_test.m runtime_test.m
+MINIMAL_EXECUTABLES = $(MINIMAL_SOURCES:.m=)
+
+.PHONY: all clean minimal help
+
+# Default target - build minimal tests that work
+all: minimal
+
+minimal: $(MINIMAL_EXECUTABLES)
+
+%: %.m
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $< $(LIBS)
+
+# Minimal Objective-C test without Foundation
+minimal_objc_test.m:
+	@cat > $@ << 'EOF'
+#include <stdio.h>
+#include <objc/runtime.h>
+
+@interface TestClass {
+    int value;
+}
+- (void)setValue:(int)newValue;
+- (int)getValue;
+- (void)printValue;
+@end
+
+@implementation TestClass
+- (void)setValue:(int)newValue {
+    value = newValue;
+}
+
+- (int)getValue {
+    return value;
+}
+
+- (void)printValue {
+    printf("TestClass value: %d\n", value);
+}
+@end
+
+int main(int argc, const char *argv[]) {
+    // Test basic Objective-C functionality
+    TestClass *obj = class_createInstance([TestClass class], 0);
+    [obj setValue:42];
+    [obj printValue];
+    
+    printf("Objective-C runtime test completed successfully!\n");
+    return 0;
+}
+EOF
+
+# Runtime introspection test
+runtime_test.m:
+	@cat > $@ << 'EOF'
+#include <stdio.h>
+#include <stdlib.h>
+#include <objc/runtime.h>
+
+@interface RuntimeTest {
+    int testProperty;
+}
+- (void)testMethod;
+@end
+
+@implementation RuntimeTest
+- (void)testMethod {
+    printf("RuntimeTest method executed\n");
+}
+@end
+
+int main(int argc, const char *argv[]) {
+    printf("=== Objective-C Runtime Introspection Test ===\n");
+    
+    // Test class enumeration
+    unsigned int classCount = 0;
+    Class *classes = objc_copyClassList(&classCount);
+    printf("Total classes in runtime: %u\n", classCount);
+    
+    // Find our test class
+    Class testClass = [RuntimeTest class];
+    printf("Test class: %s\n", class_getName(testClass));
+    
+    // Test method enumeration
+    unsigned int methodCount = 0;
+    Method *methods = class_copyMethodList(testClass, &methodCount);
+    printf("Methods in RuntimeTest class: %u\n", methodCount);
+    
+    for (unsigned int i = 0; i < methodCount; i++) {
+        SEL selector = method_getName(methods[i]);
+        printf("  Method %u: %s\n", i, sel_getName(selector));
+    }
+    
+    // Test instance creation and method calling
+    RuntimeTest *instance = class_createInstance(testClass, 0);
+    [instance testMethod];
+    
+    // Cleanup
+    if (classes) free(classes);
+    if (methods) free(methods);
+    
+    printf("Runtime introspection test completed successfully!\n");
+    return 0;
+}
+EOF
+
+clean:
+	rm -f $(MINIMAL_EXECUTABLES) minimal_objc_test.m runtime_test.m
+
+help:
+	@echo "Available targets:"
+	@echo "  all/minimal    - Build minimal Objective-C tests (no Foundation)"
+	@echo "  clean          - Remove built executables"
+	@echo "  help           - Show this help message"
+	@echo ""
+	@echo "Note: This Makefile uses system GNUstep packages and avoids"
+	@echo "Foundation headers to prevent typedef conflicts on Windows."

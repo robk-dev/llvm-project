@@ -1,8 +1,10 @@
 {
-    "lldb.library": "/home/robk/code/llvm-project/build/lib/liblldb.so",
+    "lldb.executable": "c:/tools/msys64/home/kardjali/code/llvm-project/build/bin/lldb.exe",
     "lldb.adapterEnv": {
-        "LLDB_DEBUGSERVER_PATH": "/home/robk/code/llvm-project/build/bin/lldb-server",
-        "LD_LIBRARY_PATH": "/home/robk/code/llvm-project/build/lib:/usr/local/lib"
+        "LLDB_DEBUGSERVER_PATH": "c:/tools/msys64/home/kardjali/code/llvm-project/build/bin/lldb-server.exe",
+        "PYTHONHOME": "/ucrt64",
+        "PYTHONPATH": "/ucrt64/lib/python3.12:/ucrt64/lib/python3.12/site-packages",
+        "PATH": "/ucrt64/lib:/ucrt64/bin:c:/tools/msys64/home/kardjali/code/llvm-project/build/bin"
     },
     "lldb.verboseLogging": true,
     "lldb.showDisassembly": "never",
@@ -52,16 +54,18 @@
     "terminal.integrated.env.windows": {},
     "lldb.reproducer": true,
     "C_Cpp.default.includePath": [
-        "/usr/local/include/GNUstep",
-        "/usr/include/GNUstep",
-        "/usr/local/include",
-        "/usr/include"
+        "/ucrt64/include",
+        "/ucrt64/include/GNUstepBase", 
+        "/ucrt64/include/Foundation",
+        "${workspaceFolder}/../build/include"
     ],
     "C_Cpp.default.defines": [
         "GNUSTEP",
-        "GNUSTEP_BASE_LIBRARY=1"
+        "GNUSTEP_BASE_LIBRARY=1",
+        "HAVE_MODE_T",
+        "_GNU_SOURCE"
     ],
-    "C_Cpp.default.compilerPath": "/usr/bin/clang",
+    "C_Cpp.default.compilerPath": "/ucrt64/bin/clang.exe",
     "C_Cpp.default.cStandard": "gnu11",
     "C_Cpp.default.cppStandard": "gnu++17",
     "python.defaultInterpreterPath": "/usr/bin/python3"

@@ -14,6 +14,25 @@ These scripts automate the complete setup process for the LLDB GNUstep debugger 
 - **Verification**: Includes comprehensive testing and verification scripts
 - **Windows Optimization**: Tailored for Windows MSYS2/UCRT64 environment with memory management
 
+```
+cd ~/code/llvm-project/build && cmake ../llvm \
+  -G "Ninja" \
+  -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+  -DLLVM_ENABLE_PROJECTS="clang;lldb" \
+  -DLLVM_TARGETS_TO_BUILD="X86" \
+  -DLLVM_ENABLE_RTTI=ON \
+  -DLLVM_ENABLE_EH=ON \
+  -DLLVM_ENABLE_THREADS=ON \
+  -DLLDB_ENABLE_PYTHON=ON \
+  -DLLDB_USE_SYSTEM_DEBUGSERVER=ON \
+  -DLLDB_PYTHON_EXE_RELATIVE_PATH="python3.12" \
+  -DCMAKE_C_COMPILER=/c/tools/msys64/home/kardjali/code/llvm-project/build/bin/clang.exe \
+  -DCMAKE_CXX_COMPILER=/c/tools/msys64/home/kardjali/code/llvm-project/build/bin/clang++.exe \
+  -DCMAKE_CXX_FLAGS="-stdlib=libstdc++ -I/ucrt64/include/c++/15.1.0 -I/ucrt64/include/c++/15.1.0/x86_64-w64-mingw32" \
+  -DCMAKE_EXE_LINKER_FLAGS="-L/ucrt64/lib -lstdc++" \
+  -DCMAKE_CROSSCOMPILING=FALSE
+```
+
 ## 📋 Prerequisites
 
 ### System Requirements
@@ -61,12 +80,12 @@ ls   # Should show: llvm/ lldb/ clang/ etc.
 ### 4. Source the Environment
 ```bash
 # After successful build
-source ~/llvm-project/build-windows/setup_environment.sh
+source ~/llvm-project/build/setup_environment.sh
 ```
 
 ### 5. Test the Installation
 ```bash
-cd ~/llvm-project/build-windows/examples
+cd ~/llvm-project/build/examples
 make
 ./test_custom_class.exe
 
@@ -90,11 +109,11 @@ lldb test_custom_class.exe
 ### Build Locations
 ```
 ~/llvm-project/
-├── build-windows/          # LLVM build directory
+├── build/          # LLVM build directory
 │   ├── bin/               # lldb.exe, clang.exe, etc.
 │   ├── lib/               # LLVM libraries
 │   └── examples/          # Test programs
-├── gnustep-install-windows/  # GNUstep installation
+├── gnustep-install/  # GNUstep installation
 │   ├── bin/               # GNUstep tools
 │   ├── lib/               # libobjc.dll, etc.
 │   └── include/           # Headers
@@ -124,8 +143,8 @@ This mode will:
 After completion:
 ```bash
 # Test the GNUstep environment
-source ./gnustep-install-windows/setup-gnustep-env.sh
-cd gnustep-install-windows/examples
+source ./gnustep-install/setup-gnustep-env.sh
+cd gnustep-install/examples
 ./test_environment.sh
 ```
 
@@ -191,10 +210,10 @@ The setup script automatically:
 ### Manual Testing
 ```bash
 # Run verification script
-~/llvm-project/build-windows/verify_gnustep_patch.sh
+~/llvm-project/build/verify_gnustep_patch.sh
 
 # Build and run test programs
-cd ~/llvm-project/build-windows/examples
+cd ~/llvm-project/build/examples
 make run
 
 # Debug test program
@@ -231,7 +250,7 @@ lldb test_custom_class.exe
 ### VS Code Integration
 1. Copy generated settings:
    ```bash
-   cp ~/llvm-project/build-windows/vscode_settings.json /path/to/project/.vscode/settings.json
+   cp ~/llvm-project/build/vscode_settings.json /path/to/project/.vscode/settings.json
    ```
 
 2. Install CodeLLDB extension in VS Code
@@ -256,7 +275,7 @@ The scripts automatically replace hardcoded paths like `/home/robk` with your cu
 - Build artifacts are portable
 
 ### Path Mapping
-After build, check `~/llvm-project/build-windows/path-mapping.txt` for:
+After build, check `~/llvm-project/build/path-mapping.txt` for:
 - Original Linux paths → Your Windows paths
 - Environment variables to set
 - VS Code configuration paths
@@ -308,16 +327,16 @@ export LDFLAGS="-Wl,--no-keep-memory"
 
 ### Getting Help
 Check the generated files:
-- `build-windows/build-report.txt`: Build configuration summary
-- `build-windows/DEBUGGING_TIPS.md`: Debugging guide
-- Build logs in `build-windows/build/`
+- `build/build-report.txt`: Build configuration summary
+- `build/DEBUGGING_TIPS.md`: Debugging guide
+- Build logs in `build/build/`
 
 ## 📝 Development Workflow
 
 ### After Initial Build
 ```bash
 # Quick rebuild after code changes
-cd ~/llvm-project/build-windows
+cd ~/llvm-project/build
 ./quick_rebuild.sh
 
 # Or use developer mode

@@ -1,8 +1,8 @@
 # Makefile for LLDB Bridge Examples - Debug Symbol Edition
 
-# Use the LLVM build clang for consistency
+# Use system clang 20.1.8 (compatible with current environment)
 CC = clang
-LLDB = /home/robk/code/llvm-project/build/bin/lldb
+LLDB = ../build/bin/lldb
 
 # Enhanced compilation flags for better debugging experience
 CFLAGS = -fobjc-runtime=gnustep-2.1 \
@@ -10,21 +10,17 @@ CFLAGS = -fobjc-runtime=gnustep-2.1 \
          -fno-strict-aliasing \
          -fexceptions \
          -fobjc-exceptions \
-         -g -gdwarf-5 -O0 \
+         -g -O0 \
          -fno-omit-frame-pointer \
-         -I/home/robk/code/llvm-project/lldb/gnustep-install/include \
-         -I/home/robk/code/llvm-project/lldb/gnustep-install/include/GNUstepBase \
-         -I/home/robk/code/llvm-project/lldb/gnustep-install/include/Foundation \
-         -I/usr/local/include/GNUstep \
-         -I/usr/include/GNUstep \
+         -I/ucrt64/include \
+         -I/ucrt64/include/GNUstepBase \
+         -I/ucrt64/include/Foundation \
          -fconstant-string-class=NSConstantString \
          -DGNUSTEP -DGNUSTEP_BASE_LIBRARY=1 -DDEBUG=1 \
-         -Wno-error=int-conversion
+         -Wno-typedef-redefinition \
+         -include $(shell pwd)/gnustep_fix.h
 
-LDFLAGS = -L/home/robk/code/llvm-project/lldb/gnustep-install/lib \
-          -Wl,-rpath,/home/robk/code/llvm-project/lldb/gnustep-install/lib \
-          -L/usr/local/lib \
-          -Wl,-rpath,/usr/local/lib \
+LDFLAGS = -L/ucrt64/lib \
           -g
 
 LIBS = -lgnustep-base -lobjc -lBlocksRuntime -lpthread -lm

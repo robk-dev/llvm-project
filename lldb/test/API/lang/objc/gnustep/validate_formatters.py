@@ -11,7 +11,7 @@ from typing import Dict, List, Tuple
 
 class FormatterValidator:
     def __init__(self):
-        self.lldb = "/home/robk/code/llvm-project/build/bin/lldb"
+        self.lldb = "../../../../../../../build/bin/lldb"
         self.test_program = "test_comprehensive_formatters"
         self.results = {}
         self.coverage = {}

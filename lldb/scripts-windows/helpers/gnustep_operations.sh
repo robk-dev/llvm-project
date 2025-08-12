@@ -1,7 +1,5 @@
 #!/bin/bash
-# GNUstep build operations for Windows MSYS2/UCRT64
-# Author: LLDB GNUstep Development Team
-# Date: August 2025
+# GNUstep operations for Windows MSYS2/UCRT64 - Using System Packages
 
 set -euo pipefail
 
@@ -9,51 +7,139 @@ set -euo pipefail
 HELPERS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$HELPERS_DIR/common.sh"
 
-# GNUstep build configuration for Windows
-GNUSTEP_BUILD_DIR="${GNUSTEP_BUILD_DIR:-$WORKSPACE_ROOT/gnustep-build-windows}"
-GNUSTEP_INSTALL_DIR="${GNUSTEP_INSTALL_DIR:-$WORKSPACE_ROOT/gnustep-install-windows}"
-LIBOBJC2_BUILD_DIR="${LIBOBJC2_BUILD_DIR:-$GNUSTEP_BUILD_DIR/libobjc2}"
-LIBS_BASE_BUILD_DIR="${LIBS_BASE_BUILD_DIR:-$GNUSTEP_BUILD_DIR/libs-base}"
+# GNUstep system package configuration for Windows
+GNUSTEP_SYSTEM_DIR="/ucrt64"
+GNUSTEP_INCLUDE_DIR="/ucrt64/include"
+GNUSTEP_LIB_DIR="/ucrt64/lib"
 
-# Source directories
-LIBOBJC2_SOURCE_DIR="$WORKSPACE_ROOT/libobjc2"
-LIBS_BASE_SOURCE_DIR="$WORKSPACE_ROOT/libs-base"
-
-# Windows-specific build flags
-export GNUSTEP_CFLAGS="-g -O2 -fno-omit-frame-pointer -DDEBUG=1"
-export GNUSTEP_CXXFLAGS="-g -O2 -fno-omit-frame-pointer -DDEBUG=1 -std=c++17"
-export GNUSTEP_OBJCFLAGS="-g -O2 -fno-omit-frame-pointer -DDEBUG=1 -fobjc-runtime=gnustep-2.0 -fblocks"
-export GNUSTEP_LDFLAGS="-g -fuse-ld=lld"
-
-# Function to build libobjc2 on Windows
-build_libobjc2_windows() {
-    print_section "Building libobjc2 for Windows"
+# Function to install GNUstep system packages
+install_gnustep_system_packages() {
+    print_section "Installing GNUstep System Packages"
     
-    # Clone or update libobjc2
-    if [ ! -d "$LIBOBJC2_SOURCE_DIR" ]; then
-        print_progress "Cloning libobjc2..."
-        cd "$WORKSPACE_ROOT"
-        git clone https://github.com/gnustep/libobjc2.git
-    else
-        print_progress "Updating libobjc2..."
-        cd "$LIBOBJC2_SOURCE_DIR"
-        git fetch origin
-        git reset --hard origin/master
+    print_progress "Installing GNUstep packages via pacman..."
+    
+    # Install core GNUstep packages
+    pacman -S --needed --noconfirm \
+        mingw-w64-ucrt-x86_64-libobjc2 \
+        mingw-w64-ucrt-x86_64-gnustep-base \
+        mingw-w64-ucrt-x86_64-gnustep-make \
+        mingw-w64-ucrt-x86_64-libblocksruntime-swift \
+        --overwrite '*' || {
+            print_warning "Some packages had conflicts, resolving..."
+            # Force overwrite conflicting files
+            pacman -S --needed --noconfirm \
+                mingw-w64-ucrt-x86_64-libobjc2 \
+                mingw-w64-ucrt-x86_64-gnustep-base \
+                mingw-w64-ucrt-x86_64-gnustep-make \
+                --overwrite '*'
+        }
+    
+    # Verify installation
+    verify_gnustep_system_installation
+    
+    print_success "GNUstep system packages installed successfully"
+}
+
+# Function to verify GNUstep system installation
+verify_gnustep_system_installation() {
+    print_progress "Verifying GNUstep system installation..."
+    
+    local missing_components=()
+    
+    # Check critical headers
+    if [ ! -f "$GNUSTEP_INCLUDE_DIR/Foundation/Foundation.h" ]; then
+        missing_components+=("Foundation headers")
     fi
     
-    # Create build directory
-    ensure_directory "$LIBOBJC2_BUILD_DIR" "libobjc2 build directory"
-    cd "$LIBOBJC2_BUILD_DIR"
+    if [ ! -f "$GNUSTEP_INCLUDE_DIR/objc/runtime.h" ]; then
+        missing_components+=("Objective-C runtime headers")
+    fi
     
-    # Configure with our built clang
+    # Check critical libraries
+    if [ ! -f "$GNUSTEP_LIB_DIR/libobjc.dll.a" ] && [ ! -f "$GNUSTEP_LIB_DIR/libobjc.a" ]; then
+        missing_components+=("libobjc library")
+    fi
+    
+    if [ ! -f "$GNUSTEP_LIB_DIR/libgnustep-base.dll.a" ] && [ ! -f "$GNUSTEP_LIB_DIR/libgnustep-base.a" ]; then
+        missing_components+=("gnustep-base library")
+    fi
+    
+    if [ ${#missing_components[@]} -gt 0 ]; then
+        print_error "Missing GNUstep components:"
+        for component in "${missing_components[@]}"; do
+            echo "  - $component"
+        done
+        return 1
+    fi
+    
+    print_success "GNUstep system installation verified"
+    return 0
+}
+
+# Function to create GNUstep environment setup
+create_gnustep_system_environment() {
+    print_section "Creating GNUstep System Environment"
+    
+    local env_script="$WORKSPACE_ROOT/gnustep-system-env.sh"
+    
+    cat > "$env_script" << 'EOF'
+#!/bin/bash
+# GNUstep System Environment for Windows MSYS2/UCRT64
+
+# GNUstep system paths
+export GNUSTEP_SYSTEM_ROOT="/ucrt64"
+export GNUSTEP_LOCAL_ROOT="/ucrt64"
+export GNUSTEP_USER_ROOT="$HOME/GNUstep"
+
+# Include paths
+export GNUSTEP_SYSTEM_HEADERS="/ucrt64/include"
+export GNUSTEP_SYSTEM_LIBRARIES="/ucrt64/lib"
+
+# Tool paths
+export GNUSTEP_MAKEFILES="/ucrt64/share/GNUstep/Makefiles"
+
+# Compiler flags for GNUstep
+export GNUSTEP_CFLAGS="-fobjc-runtime=gnustep-2.1 -fblocks -I/ucrt64/include -I/ucrt64/include/GNUstepBase"
+export GNUSTEP_LDFLAGS="-L/ucrt64/lib"
+export GNUSTEP_LIBS="-lgnustep-base -lobjc -lBlocksRuntime"
+
+# Add to PATH
+export PATH="/ucrt64/bin:$PATH"
+
+echo "GNUstep system environment configured"
+echo "Include path: $GNUSTEP_SYSTEM_HEADERS"
+echo "Library path: $GNUSTEP_SYSTEM_LIBRARIES"
+EOF
+    
+    chmod +x "$env_script"
+    print_success "GNUstep system environment script created: $env_script"
+}
+
+# Function to create minimal working test programs
+create_gnustep_system_test_programs() {
+    print_section "Creating GNUstep System Test Programs"
+    
+    local test_dir="$WORKSPACE_ROOT/gnustep-system-tests"
+    ensure_directory "$test_dir" "GNUstep system test directory"
+    
+    # Create a minimal C test (no Objective-C) to verify linking
+    cat > "$test_dir/minimal_c_test.c" << 'EOF'
+        print_info "Using locally built clang: $CLANG_BIN"
+    else
+        CLANG_BIN="/ucrt64/bin/clang.exe"
+        CLANGPP_BIN="/ucrt64/bin/clang++.exe"
+        print_info "Using system clang: $CLANG_BIN"
+    fi
+
+    # Configure with selected clang
     print_progress "Configuring libobjc2..."
     local cmake_args=(
         "-G" "Ninja"
         "-DCMAKE_BUILD_TYPE=RelWithDebInfo"
         "-DCMAKE_INSTALL_PREFIX=$GNUSTEP_INSTALL_DIR"
-        "-DCMAKE_C_COMPILER=$LLVM_BUILD_DIR/build/bin/clang.exe"
-        "-DCMAKE_CXX_COMPILER=$LLVM_BUILD_DIR/build/bin/clang++.exe"
-        "-DCMAKE_ASM_COMPILER=$LLVM_BUILD_DIR/build/bin/clang.exe"
+        "-DCMAKE_C_COMPILER=$CLANG_BIN"
+        "-DCMAKE_CXX_COMPILER=$CLANGPP_BIN"
+        "-DCMAKE_ASM_COMPILER=$CLANG_BIN"
         "-DCMAKE_C_FLAGS=$GNUSTEP_CFLAGS"
         "-DCMAKE_CXX_FLAGS=$GNUSTEP_CXXFLAGS"
         "-DCMAKE_SHARED_LINKER_FLAGS=$GNUSTEP_LDFLAGS"
@@ -115,6 +201,19 @@ build_gnustep_make_windows() {
     
     cd "$MAKE_SOURCE_DIR"
     
+    # Choose compiler: prefer local build if available, fallback to system
+    local CLANG_BIN
+    local CLANGPP_BIN
+    if [ -f "$LLVM_BUILD_DIR/bin/clang.exe" ]; then
+        CLANG_BIN="$LLVM_BUILD_DIR/bin/clang.exe"
+        CLANGPP_BIN="$LLVM_BUILD_DIR/bin/clang++.exe"
+        print_info "Using locally built clang: $CLANG_BIN"
+    else
+        CLANG_BIN="/ucrt64/bin/clang.exe"
+        CLANGPP_BIN="/ucrt64/bin/clang++.exe"
+        print_info "Using system clang: $CLANG_BIN"
+    fi
+
     # Configure gnustep-make
     print_progress "Configuring gnustep-make..."
     ./configure \
@@ -122,10 +221,10 @@ build_gnustep_make_windows() {
         --with-library-combo=ng-gnu-gnu \
         --with-objc-lib-flag=-lobjc \
         --enable-objc-arc \
-        CC="$LLVM_BUILD_DIR/build/bin/clang.exe" \
-        CXX="$LLVM_BUILD_DIR/build/bin/clang++.exe" \
-        OBJC="$LLVM_BUILD_DIR/build/bin/clang.exe" \
-        OBJCXX="$LLVM_BUILD_DIR/build/bin/clang++.exe" \
+        CC="$CLANG_BIN" \
+        CXX="$CLANGPP_BIN" \
+        OBJC="$CLANG_BIN" \
+        OBJCXX="$CLANGPP_BIN" \
         CFLAGS="$GNUSTEP_CFLAGS" \
         OBJCFLAGS="$GNUSTEP_OBJCFLAGS" \
         LDFLAGS="-L$GNUSTEP_INSTALL_DIR/lib $GNUSTEP_LDFLAGS"
@@ -171,6 +270,19 @@ build_gnustep_base_windows() {
     ensure_directory "$LIBS_BASE_BUILD_DIR" "gnustep-base build directory"
     cd "$LIBS_BASE_BUILD_DIR"
     
+    # Choose compiler: prefer local build if available, fallback to system
+    local CLANG_BIN
+    local CLANGPP_BIN
+    if [ -f "$LLVM_BUILD_DIR/bin/clang.exe" ]; then
+        CLANG_BIN="$LLVM_BUILD_DIR/bin/clang.exe"
+        CLANGPP_BIN="$LLVM_BUILD_DIR/bin/clang++.exe"
+        print_info "Using locally built clang: $CLANG_BIN"
+    else
+        CLANG_BIN="/ucrt64/bin/clang.exe"
+        CLANGPP_BIN="/ucrt64/bin/clang++.exe"
+        print_info "Using system clang: $CLANG_BIN"
+    fi
+
     # Configure gnustep-base for Windows
     print_progress "Configuring gnustep-base..."
     "$LIBS_BASE_SOURCE_DIR/configure" \
@@ -179,9 +291,9 @@ build_gnustep_base_windows() {
         --disable-icu \
         --disable-xml \
         --with-installation-domain=SYSTEM \
-        CC="$LLVM_BUILD_DIR/build/bin/clang.exe" \
-        CXX="$LLVM_BUILD_DIR/build/bin/clang++.exe" \
-        OBJC="$LLVM_BUILD_DIR/build/bin/clang.exe" \
+        CC="$CLANG_BIN" \
+        CXX="$CLANGPP_BIN" \
+        OBJC="$CLANG_BIN" \
         CFLAGS="$GNUSTEP_CFLAGS -I$GNUSTEP_INSTALL_DIR/include" \
         OBJCFLAGS="$GNUSTEP_OBJCFLAGS -I$GNUSTEP_INSTALL_DIR/include" \
         LDFLAGS="-L$GNUSTEP_INSTALL_DIR/lib $GNUSTEP_LDFLAGS" \

@@ -2,17 +2,17 @@
 
 ## Build Instructions
 
-```
--- to rebuild just the plugin (what we need most of the time)
-● Bash(cd /home/robk/code/llvm-project/build && ninja lldbPluginGNUstepObjCRuntime -j$(nproc))
-  ⎿ [1/2] Building CXX object tools/lldb/source/Plugins/LanguageRuntime/ObjC/GNUstepObjCRuntime/CMakeFiles/lldbPluginGN
-    UstepObjCRuntime.dir/formatters/GNUstepArrayFormatters.cpp.o
-    [2/2] Linking CXX static library lib/liblldbPluginGNUstepObjCRuntime.a
+```bash
+<!-- WSL2 -->
+./scripts/setup.sh
+<!-- MSYS2 -->
+./scripts-windows/setup.sh
 ```
 
 ### Initial Configuration
 ```bash
-cd /home/robk/code/llvm-project/build
+mkdir build
+cd build
 cmake -G Ninja ../llvm \
     -DCMAKE_BUILD_TYPE=RelWithDebInfo \
     -DLLVM_ENABLE_PROJECTS="clang;lldb;lld" \
@@ -35,10 +35,10 @@ ccache --set-config compression_level=6
 
 ```bash
 # Build both LLDB and LLDB-server (required for debugging)
-cd /home/robk/code/llvm-project/build && ninja lldb lldb-server -j$(nproc)
+cd /c/tools/msys64/home/kardjali/code/llvm-project/build && ninja lldb lldb-server -j$(nproc)
 
 # Alternative: Build all LLDB tools at once
-cd /home/robk/code/llvm-project/build && ninja install-lldb install-lldb-server -j$(nproc)
+cd /c/tools/msys64/home/kardjali/code/llvm-project/build && ninja install-lldb install-lldb-server -j$(nproc)
 ```
 
 **Note:** `lldb-server` is essential for debugging functionality. Without it, you'll get "unable to locate lldb-server" errors when trying to run programs in LLDB.
@@ -47,10 +47,10 @@ cd /home/robk/code/llvm-project/build && ninja install-lldb install-lldb-server 
 
 ```bash
 # Build all test examples
-cd /home/robk/code/llvm-project/lldb/examples && make all
+cd /c/tools/msys64/home/kardjali/code/llvm-project/lldb/examples && make all
 
 # Build specific test program
-cd /home/robk/code/llvm-project/lldb/examples && make custom_class_test
+cd /c/tools/msys64/home/kardjali/code/llvm-project/lldb/examples && make custom_class_test
 ```
 
 ## Testing the GNUstep Plugin
@@ -89,8 +89,8 @@ The project includes a comprehensive automated test suite with three levels of t
 
 #### Quick LLDB Validation
 ```bash
-cd /home/robk/code/llvm-project/lldb/examples
-/home/robk/code/llvm-project/build/bin/lldb custom_class_test
+cd /c/tools/msys64/home/kardjali/code/llvm-project/lldb/examples
+/c/tools/msys64/home/kardjali/code/llvm-project/build/bin/lldb custom_class_test
 
 # In LLDB:
 (lldb) b custom_class_test.m:228
@@ -111,8 +111,8 @@ cd /home/robk/code/llvm-project/lldb/examples
 #### Test Program Validation
 ```bash
 # Build and run test programs directly
-cd /home/robk/code/llvm-project/lldb/test/API/lang/objc/gnustep
-OBJC=/home/robk/code/llvm-project/build/bin/clang make
+cd /c/tools/msys64/home/kardjali/code/llvm-project/lldb/test/API/lang/objc/gnustep
+OBJC=/c/tools/msys64/home/kardjali/code/llvm-project/build/bin/clang make
 ./a.out
 # Should show: "All test objects created successfully"
 ```
@@ -174,7 +174,7 @@ Always use these compilation flags:
 
 ### "unable to locate lldb-server"
 - Make sure `lldb-server` is built: `ninja install-lldb-server`
-- Check if it exists: `ls /home/robk/code/llvm-project/build/bin/lldb-server`
+- Check if it exists: `ls /c/tools/msys64/home/kardjali/code/llvm-project/build/bin/lldb-server`
 
 ### GNUstep Plugin Not Loading
 - Verify libraries are linked: `ldd custom_class_test | grep gnustep`

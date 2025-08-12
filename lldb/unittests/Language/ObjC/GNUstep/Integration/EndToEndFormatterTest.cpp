@@ -44,7 +44,7 @@ protected:
     m_debugger.SkipLLDBInitFiles(true);
     
     // Find the example test program
-    m_test_program_path = "/home/robk/code/llvm-project/lldb/examples/custom_class_test";
+    m_test_program_path = "../../../../../../examples/custom_class_test";
   }
   
   void TearDown() override {

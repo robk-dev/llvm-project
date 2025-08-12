@@ -21,7 +21,7 @@ from typing import List, Dict, Optional, Tuple
 from pathlib import Path
 
 # Add LLDB Python path
-sys.path.append('/home/robk/code/llvm-project/build/lib/python3/dist-packages')
+sys.path.append('../build/lib/python3/dist-packages')
 
 try:
     import lldb
@@ -291,9 +291,9 @@ def get_standard_test_cases() -> List[TestCase]:
 
 def main():
     parser = argparse.ArgumentParser(description='Validate GNUstep LLDB formatters')
-    parser.add_argument('--lldb', default='/home/robk/code/llvm-project/build/bin/lldb',
+    parser.add_argument('--lldb', default='../build/bin/lldb',
                        help='Path to LLDB executable')
-    parser.add_argument('--program', default='/home/robk/code/llvm-project/lldb/test/API/lang/objc/gnustep/a.out',
+    parser.add_argument('--program', default='../lldb/test/API/lang/objc/gnustep/a.out',
                        help='Test program to debug')
     parser.add_argument('--test-file', help='JSON file with custom test cases')
     parser.add_argument('--verbose', action='store_true', help='Verbose output')
@@ -303,7 +303,7 @@ def main():
     # Check if test program exists
     if not Path(args.program).exists():
         print(f"{Colors.RED}Error: Test program not found: {args.program}{Colors.NC}")
-        print(f"Build it first with: {Colors.YELLOW}cd /home/robk/code/llvm-project/lldb/scripts2 && ./build_test_programs.sh{Colors.NC}")
+        print(f"Build it first with: {Colors.YELLOW}cd ../lldb/scripts2 && ./build_test_programs.sh{Colors.NC}")
         sys.exit(1)
         
     # Load test cases

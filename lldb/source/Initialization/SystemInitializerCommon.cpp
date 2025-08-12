@@ -55,12 +55,15 @@ llvm::Error SystemInitializerCommon::Initialize() {
     ::SetErrorMode(GetErrorMode() | SEM_FAILCRITICALERRORS |
                    SEM_NOGPFAULTERRORBOX);
 
+#ifdef _MSC_VER
+    // CRT debugging functions are only available with Microsoft Visual C++
     _CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_FILE | _CRTDBG_MODE_DEBUG);
     _CrtSetReportMode(_CRT_WARN, _CRTDBG_MODE_FILE | _CRTDBG_MODE_DEBUG);
     _CrtSetReportMode(_CRT_ERROR, _CRTDBG_MODE_FILE | _CRTDBG_MODE_DEBUG);
     _CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);
     _CrtSetReportFile(_CRT_WARN, _CRTDBG_FILE_STDERR);
     _CrtSetReportFile(_CRT_ERROR, _CRTDBG_FILE_STDERR);
+#endif // _MSC_VER
   }
 #endif
 

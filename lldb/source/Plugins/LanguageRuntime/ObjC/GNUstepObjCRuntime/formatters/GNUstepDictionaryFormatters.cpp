@@ -1485,7 +1485,7 @@ std::string GNUstepNSDictionarySyntheticProvider::GetElementSummary(Process *pro
 }
 
 // Helper function to get summary for tagged pointers without creating ValueObjects
-static std::string GetTaggedPointerSummary(Process *process, lldb::addr_t tagged_ptr) {
+[[maybe_unused]] static std::string GetTaggedPointerSummary(Process *process, lldb::addr_t tagged_ptr) {
   if (!process || tagged_ptr == 0) {
     return "<nil>";
   }

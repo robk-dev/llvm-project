@@ -5,7 +5,7 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LLDB_BUILD_DIR="/home/robk/code/llvm-project/build"
+LLDB_BUILD_DIR="../../../../../../../build"
 LLDB="${LLDB_BUILD_DIR}/bin/lldb"
 
 # Colors for output

@@ -34,6 +34,7 @@ add_lldb_library(lldbPluginObjCLanguage PLUGIN
     lldbPluginAppleObjCRuntime
     lldbPluginClangCommon
     lldbPluginTypeSystemClang
+    lldbPluginGNUstepObjCRuntime
   CLANG_LIBS
     clangAST
 

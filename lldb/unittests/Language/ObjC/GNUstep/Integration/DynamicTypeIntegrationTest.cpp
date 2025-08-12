@@ -53,12 +53,12 @@ protected:
   SBProcess m_process;
 
   bool CheckTestProgramExists() {
-    std::string test_program = "/home/robk/code/llvm-project/lldb/examples/dynamic_type_test";
+    std::string test_program = "../../../../../../examples/dynamic_type_test";
     return llvm::sys::fs::exists(test_program);
   }
 
   SBTarget CreateTestTarget() {
-    std::string test_program = "/home/robk/code/llvm-project/lldb/examples/dynamic_type_test";
+    std::string test_program = "../../../../../../examples/dynamic_type_test";
     
     if (!llvm::sys::fs::exists(test_program)) {
       return SBTarget(); // Return invalid target

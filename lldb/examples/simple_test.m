@@ -1,4 +1,5 @@
-#import <Foundation/Foundation.h>
+// Don't include Foundation directly - use the fix header
+// #import <Foundation/Foundation.h>
 
 int main(int argc, const char *argv[]) {
   @autoreleasepool {

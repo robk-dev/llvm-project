@@ -1,6 +1,6 @@
 // Test program for NSData, NSURL, and NSUUID formatters
 // Build with: make test_data_url_uuid
-// Debug with: /home/robk/code/llvm-project/build/bin/lldb test_data_url_uuid
+// Debug with: ../build/bin/lldb test_data_url_uuid
 
 #import <Foundation/Foundation.h>
 #include <stdio.h>
@@ -57,7 +57,7 @@
     printf("\n=== Testing NSURL objects ===\n");
     
     // File URL - absolute path
-    NSURL *fileURL = [NSURL fileURLWithPath:@"/home/robk/code/llvm-project/README.md"];
+    NSURL *fileURL = [NSURL fileURLWithPath:@"../README.md"];
     printf("Created file URL for absolute path\n");
     
     // File URL - relative path
@@ -161,7 +161,7 @@ int main(int argc, const char * argv[]) {
         
         // Create all NSURL objects for testing
         printf("\n=== Creating NSURL objects ===\n");
-        NSURL *fileURL = [NSURL fileURLWithPath:@"/home/robk/code/llvm-project/README.md"];
+        NSURL *fileURL = [NSURL fileURLWithPath:@"../README.md"];
         NSURL *relativeFileURL = [NSURL fileURLWithPath:@"./test_data_url_uuid.m"];
         NSURL *httpURL = [NSURL URLWithString:@"https://llvm.org/docs/"];
         NSURL *complexHttpURL = [NSURL URLWithString:@"https://github.com/llvm/llvm-project/search?q=objc&type=code"];

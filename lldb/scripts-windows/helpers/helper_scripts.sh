@@ -1,7 +1,5 @@
 #!/bin/bash
 # Helper script generation for Windows MSYS2 LLDB/GNUstep environment
-# Author: LLDB GNUstep Development Team
-# Date: August 2025
 
 set -euo pipefail
 

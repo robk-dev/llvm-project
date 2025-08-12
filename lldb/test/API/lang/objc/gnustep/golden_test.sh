@@ -1,7 +1,7 @@
 #!/bin/bash
 # Golden test - Quick validation that all formatters work
 
-LLDB="/home/robk/code/llvm-project/build/bin/lldb"
+LLDB="../../../../../../../build/bin/lldb"
 
 echo "==================================="
 echo "GOLDEN FORMATTER TEST"

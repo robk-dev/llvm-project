@@ -1,7 +1,5 @@
 #!/bin/bash
 # Common utilities and functions for Windows MSYS2/UCRT64 LLVM/LLDB build scripts
-# Author: LLDB GNUstep Development Team
-# Date: August 2025
 
 # Colors for output
 RED='\033[0;31m'

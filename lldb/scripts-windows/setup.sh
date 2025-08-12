@@ -1,8 +1,6 @@
 #!/bin/bash
 # Complete End-to-End LLVM/LLDB Build with GNUstep Runtime Patch for Windows MSYS2/UCRT64
 # This script automates the entire process from download to verification on Windows
-# Author: LLDB GNUstep Development Team
-# Date: August 2025
 
 set -euo pipefail  # Exit on error, undefined variables, and pipe failures
 
@@ -18,7 +16,7 @@ if [[ "$OSTYPE" == "msys" ]] || [[ "$OSTYPE" == "cygwin" ]]; then
 fi
 
 # Build configuration
-LLVM_BUILD_DIR="${LLVM_BUILD_DIR:-$PROJECT_ROOT/build-windows}"
+LLVM_BUILD_DIR="${LLVM_BUILD_DIR:-$PROJECT_ROOT/build}"
 LLVM_REPO="https://github.com/llvm/llvm-project.git"
 LLVM_BRANCH="llvmorg-20.1.8"
 BUILD_TYPE="RelWithDebInfo"
@@ -38,7 +36,7 @@ else
 fi
 
 # GNUstep install directory (for workspace builds)
-GNUSTEP_INSTALL_DIR="${WORKSPACE_ROOT}/gnustep-install-windows"
+GNUSTEP_INSTALL_DIR="${WORKSPACE_ROOT}/gnustep-install"
 
 # Export variables for use in helper scripts
 export SCRIPT_DIR WORKSPACE_ROOT PROJECT_ROOT LLVM_BUILD_DIR LLVM_REPO LLVM_BRANCH 
@@ -178,7 +176,7 @@ main() {
                 echo "  --help              Show this help"
                 echo ""
                 echo "Environment variables:"
-                echo "  LLVM_BUILD_DIR      Build directory (default: PROJECT_ROOT/build-windows)"
+                echo "  LLVM_BUILD_DIR      Build directory (default: PROJECT_ROOT/build)"
                 echo "  PARALLEL_JOBS       Number of parallel jobs (default: CPU cores / 2 on Windows)"
                 echo ""
                 echo "Example usage:"
@@ -214,6 +212,11 @@ main() {
         rm -rf "$LLVM_BUILD_DIR"
     fi
     
+    # Auto-detect and fix CMake cache issues
+    if [ -d "$LLVM_BUILD_DIR/build" ]; then
+        fix_cmake_python_paths
+    fi
+    
     # Developer mode: quick rebuild
     if $DEV_MODE; then
         print_section "🚀 Developer Mode: Quick rebuild"
@@ -224,7 +227,7 @@ main() {
     # Handle GNUstep-only mode
     if $GNUSTEP_ONLY; then
         print_section "🔧 GNUstep-Only Build Mode"
-        print_info "Building only GNUstep environment (libobjc2, gnustep-make, gnustep-base)"
+        print_info "Installing GNUstep system packages (faster alternative to building from source)"
         
         # Basic system checks
         check_windows_environment
@@ -235,15 +238,18 @@ main() {
             install_windows_dependencies
         fi
         
-        print_section "Building GNUstep Environment"
-        build_complete_gnustep_windows
+        print_section "Installing GNUstep System Packages"
+        install_gnustep_system_packages
+        
+        print_section "Creating GNUstep Environment"
+        create_gnustep_system_environment
         
         print_section "Creating GNUstep Test Programs"
-        create_gnustep_only_test_programs
+        create_gnustep_system_test_programs
         
-        print_success "GNUstep-only build completed successfully!"
-        print_info "GNUstep installation: $GNUSTEP_INSTALL_DIR"
-        print_info "To use: source $GNUSTEP_INSTALL_DIR/setup-gnustep-env.sh"
+        print_success "GNUstep system packages installed successfully!"
+        print_info "GNUstep system installation: /ucrt64"
+        print_info "To use: source $WORKSPACE_ROOT/gnustep-system-env.sh"
         exit 0
     fi
     
@@ -301,10 +307,11 @@ main() {
     build_lldb_server_windows
     
     if ! $SKIP_GNUSTEP; then
-        print_section "Step 8: Building GNUstep Environment"
-        build_complete_gnustep_windows
+        print_section "Step 8: Installing GNUstep System Packages"
+        install_gnustep_system_packages
+        create_gnustep_system_environment
     else
-        print_info "Skipping GNUstep build (--skip-gnustep)"
+        print_info "Skipping GNUstep installation (--skip-gnustep)"
     fi
     
     if ! $SKIP_PATH_REPLACE; then

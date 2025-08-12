@@ -1,7 +1,5 @@
 #!/bin/bash
 # LLVM download and patch operations for Windows MSYS2/UCRT64
-# Author: LLDB GNUstep Development Team
-# Date: August 2025
 
 set -euo pipefail
 
@@ -133,13 +131,6 @@ verify_gnustep_patch() {
     fi
     
     print_success "GNUstep runtime patch verified and ready"
-    
-    # Show patch info
-    print_info "Available GNUstep features:"
-    echo "  ✓ Dynamic class discovery via objc_copyClassList()"
-    echo "  ✓ Custom class introspection support"
-    echo "  ✓ Windows-compatible implementation"
-    echo "  ✓ Integrated into repository source"
 }
 
 # Function for quick developer rebuild

@@ -387,7 +387,7 @@ std::string GNUstepNSStringSummaryProvider::ExtractInlineString(ValueObject &val
   size_t object_size = std::max({
     static_cast<size_t>(count_offset + 4),  // _count is uint32_t (4 bytes)
     static_cast<size_t>(flags_offset + 4),  // _flags is uint32_t (4 bytes)
-    24UL  // Minimum fallback size
+    static_cast<size_t>(24)  // Minimum fallback size
   });
   
   // The inline data starts immediately after the object
@@ -460,12 +460,12 @@ bool lldb_private::formatters::GNUstepIdFormatterFunction(ValueObject &valobj, S
 
 GSCInlineStringSyntheticProvider::GSCInlineStringSyntheticProvider(lldb::ValueObjectSP valobj_sp)
     : GNUstepSyntheticProvider(valobj_sp), m_obj_addr(LLDB_INVALID_ADDRESS) {
-  memset(&m_string_info, 0, sizeof(m_string_info));
+  memset(static_cast<void*>(&m_string_info), 0, sizeof(m_string_info));
 }
 
 bool GSCInlineStringSyntheticProvider::UpdateImpl() {
   // Clear previous state
-  memset(&m_string_info, 0, sizeof(m_string_info));
+  memset(static_cast<void*>(&m_string_info), 0, sizeof(m_string_info));
   
   if (!m_process)
     return false;

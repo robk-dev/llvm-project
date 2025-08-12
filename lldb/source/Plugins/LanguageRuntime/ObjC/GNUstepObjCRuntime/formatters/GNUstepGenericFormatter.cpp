@@ -910,9 +910,10 @@ lldb::ValueObjectSP GNUstepGenericObjectSyntheticProvider::GetChildAtIndex(uint3
     return cache_iter->second;
   }
   
-  // CRITICAL FIX: Check if backend is valid to prevent crash when accessing execution context
-  // ValueObject doesn't have IsValid() method, check pointer validity instead
-  if (!&m_backend) {
+  // CRITICAL FIX: Check if backend has valid execution context
+  // Since m_backend is a reference, it's always valid, but we can check if it has a process
+  Process *process = GNUstepRuntimeHelper::GetProcessFromValueObject(m_backend);
+  if (!process) {
     return nullptr;
   }
     

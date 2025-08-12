@@ -37,7 +37,7 @@ using namespace lldb_private;
 using namespace lldb_private::formatters;
 
 // Forward declarations
-static std::string DecodeTaggedStringOptimized(lldb::addr_t tagged_addr);
+[[maybe_unused]] static std::string DecodeTaggedStringOptimized(lldb::addr_t tagged_addr);
 static std::string DecodeTaggedNumberOptimized(lldb::addr_t tagged_addr);
 
 //===----------------------------------------------------------------------===//
@@ -1262,7 +1262,7 @@ lldb::ValueObjectSP GNUstepNSArraySyntheticProvider::GetChildAtIndex(uint32_t id
 //===----------------------------------------------------------------------===//
 
 // PERFORMANCE OPTIMIZATION: Optimized tagged string decoder with fast paths
-static std::string DecodeTaggedStringOptimized(lldb::addr_t tagged_addr) {
+[[maybe_unused]] static std::string DecodeTaggedStringOptimized(lldb::addr_t tagged_addr) {
   // Fast validation: check tag bits and length
   if ((tagged_addr & 0x7) != 4) return "";
   
