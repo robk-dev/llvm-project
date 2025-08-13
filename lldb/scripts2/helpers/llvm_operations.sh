@@ -131,9 +131,9 @@ configure_build() {
     print_progress "Running CMake configuration..."
     cmake -G Ninja \
           -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
-          -DLLVM_ENABLE_PROJECTS="clang;lldb" \
+          -DLLVM_ENABLE_PROJECTS="lldb" \
           -DLLVM_ENABLE_ASSERTIONS=ON \
-          -DLLVM_PARALLEL_LINK_JOBS=2 \
+          -DLLVM_PARALLEL_LINK_JOBS=4 \
           -DLLDB_ENABLE_PYTHON=ON \
           -DLLDB_ENABLE_LUA=OFF \
           -DLLDB_ENABLE_LZMA=ON \

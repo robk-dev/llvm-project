@@ -161,7 +161,7 @@ build_libobjc2_with_debug() {
     # Configure with debugging symbols and DWARF-5
     print_progress "Configuring libobjc2 build with DWARF-5 debug symbols..."
     cmake "$LIBOBJC2_SOURCE_DIR" \
-        -DCMAKE_BUILD_TYPE=Debug \
+        -DCMAKE_BUILD_TYPE=RelWithDebInfo \
         -DCMAKE_C_FLAGS="$GNUSTEP_CFLAGS -ffunction-sections -fdata-sections" \
         -DCMAKE_CXX_FLAGS="$GNUSTEP_CXXFLAGS -ffunction-sections -fdata-sections" \
         -DCMAKE_SHARED_LINKER_FLAGS="-lstdc++" \

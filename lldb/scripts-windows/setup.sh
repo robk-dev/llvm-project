@@ -24,13 +24,26 @@ BUILD_TYPE="RelWithDebInfo"
 # Patch location - relative to workspace
 PATCH_DIR="$WORKSPACE_ROOT/llvm_patch/GNUstepObjCRuntime"
 
-# Windows-specific: Use fewer parallel jobs by default
+# Windows-specific: Memory-aware parallel job calculation  
 if [[ "$OSTYPE" == "msys" ]]; then
-    # Windows builds are memory intensive
-    PARALLEL_JOBS=${PARALLEL_JOBS:-$(($(nproc) / 2))}
-    if [ "$PARALLEL_JOBS" -lt 2 ]; then
-        PARALLEL_JOBS=2
+    # Get available memory in GB (approximation)
+    local total_ram_gb=8  # Your system has 8GB
+    
+    # Memory-aware parallel jobs: ~2GB RAM per job for LLVM builds
+    local memory_jobs=$((total_ram_gb / 2))
+    local cpu_jobs=$(($(nproc) / 2))
+    
+    # Use the smaller of memory-based or CPU-based limit
+    PARALLEL_JOBS=${PARALLEL_JOBS:-$((memory_jobs < cpu_jobs ? memory_jobs : cpu_jobs))}
+    
+    # Ensure minimum of 1, maximum of 4 for 8GB system
+    if [ "$PARALLEL_JOBS" -lt 1 ]; then
+        PARALLEL_JOBS=1
+    elif [ "$PARALLEL_JOBS" -gt 4 ]; then
+        PARALLEL_JOBS=4  
     fi
+    
+    print_info "Memory-optimized parallel jobs: $PARALLEL_JOBS (RAM: ${total_ram_gb}GB, CPU cores: $(nproc))"
 else
     PARALLEL_JOBS=${PARALLEL_JOBS:-$(nproc)}
 fi
@@ -42,28 +55,59 @@ GNUSTEP_INSTALL_DIR="${WORKSPACE_ROOT}/gnustep-install"
 export SCRIPT_DIR WORKSPACE_ROOT PROJECT_ROOT LLVM_BUILD_DIR LLVM_REPO LLVM_BRANCH 
 export BUILD_TYPE PATCH_DIR PARALLEL_JOBS GNUSTEP_INSTALL_DIR
 
-# Source helper modules
+# Source helper modules (skip gnustep_operations since already installed)
 source "$SCRIPT_DIR/helpers/common.sh"
 source "$SCRIPT_DIR/helpers/system_checks.sh"
 source "$SCRIPT_DIR/helpers/llvm_operations.sh"
 source "$SCRIPT_DIR/helpers/build_operations.sh"
-source "$SCRIPT_DIR/helpers/gnustep_operations.sh"
 source "$SCRIPT_DIR/helpers/path_replacer.sh"
 source "$SCRIPT_DIR/helpers/helper_scripts.sh"
 
-echo -e "${GREEN}================================================================${NC}"
-echo -e "${GREEN}  LLVM/LLDB Build with GNUstep Runtime - Windows MSYS2/UCRT64${NC}"
-echo -e "${GREEN}================================================================${NC}"
+# CRITICAL: Validate MSYS2 UCRT64 environment before proceeding
+validate_environment() {
+    print_section "🔍 Environment Validation"
+    
+    # Check MSYSTEM
+    if [[ "$MSYSTEM" != "UCRT64" ]]; then
+        print_error "❌ Wrong MSYS2 environment: $MSYSTEM"
+        print_error ""
+        print_error "You MUST run this script in UCRT64 environment, not MSYS!"
+        print_error ""
+        print_error "How to fix:"
+        print_error "  1. Close this terminal"  
+        print_error "  2. Open 'MSYS2 UCRT64' from Windows Start Menu"
+        print_error "  3. Navigate to: $SCRIPT_DIR"
+        print_error "  4. Run: ./setup.sh"
+        print_error ""
+        exit 1
+    fi
+    
+    print_success "✓ Running in UCRT64 environment"
+    
+    # Check if UCRT64 packages are available
+    if ! pacman -Sl ucrt64 >/dev/null 2>&1; then
+        print_error "❌ UCRT64 repository not available"
+        print_error "Please update MSYS2: pacman -Syu"
+        exit 1
+    fi
+    
+    print_success "✓ UCRT64 package repository available"
+    
+    # Warn about memory
+    print_warning "⚠️  System has 8GB RAM - builds will be memory-constrained"
+    print_info "Consider closing other applications during build"
+}
+
+validate_environment
 echo -e "${CYAN}This script will:${NC}"
 echo -e "${CYAN}  1. Check system requirements (50GB disk, 8GB+ RAM)${NC}"
 echo -e "${CYAN}  2. Install all build dependencies via pacman${NC}"
-echo -e "${CYAN}  3. Verify LLVM source and GNUstep integration${NC}"
-echo -e "${CYAN}  4. Configure LLDB build with GNUstep runtime support${NC}"
+echo -e "${CYAN}  3. Verify LLVM source code${NC}"
+echo -e "${CYAN}  4. Configure LLDB build${NC}"
 echo -e "${CYAN}  5. Build LLDB with integrated patches (2-3 hours on Windows)${NC}"
 echo -e "${CYAN}  6. Build lldb-server for debugging support${NC}"
-echo -e "${CYAN}  7. Build complete GNUstep environment (libobjc2, gnustep-base)${NC}"
-echo -e "${CYAN}  8. Replace hardcoded paths with current workspace paths${NC}"
-echo -e "${CYAN}  9. Verify installation and create test programs${NC}"
+echo -e "${CYAN}  7. Replace hardcoded paths with current workspace paths${NC}"
+echo -e "${CYAN}  8. Verify installation and create test programs${NC}"
 echo ""
 echo -e "${YELLOW}Build directory: ${LLVM_BUILD_DIR}${NC}"
 echo -e "${YELLOW}Parallel jobs: ${PARALLEL_JOBS} (optimized for Windows)${NC}"
@@ -119,7 +163,7 @@ main() {
     SKIP_DEPS=false
     SKIP_SOURCE_CHECK=false
     FORCE_CLEAN=false
-    SKIP_GNUSTEP=false
+    SKIP_GNUSTEP=true  # Default to skip since GNUstep already installed
     GNUSTEP_ONLY=false
     SKIP_PATH_REPLACE=false
     DEV_MODE=false

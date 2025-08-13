@@ -124,6 +124,47 @@ create_gnustep_system_test_programs() {
     
     # Create a minimal C test (no Objective-C) to verify linking
     cat > "$test_dir/minimal_c_test.c" << 'EOF'
+#include <stdio.h>
+int main() {
+    printf("GNUstep system test passed\n");
+    return 0;
+}
+EOF
+
+    print_success "GNUstep system test programs created"
+}
+
+# Function to build libobjc2 on Windows
+build_libobjc2_windows() {
+    print_section "Building libobjc2 for Windows"
+    
+    local LIBOBJC2_SOURCE_DIR="$WORKSPACE_ROOT/libobjc2"
+    
+    # Clone or update libobjc2
+    if [ ! -d "$LIBOBJC2_SOURCE_DIR" ]; then
+        print_progress "Cloning libobjc2..."
+        git clone https://github.com/gnustep/libobjc2.git "$LIBOBJC2_SOURCE_DIR"
+    else
+        print_progress "Updating libobjc2..."
+        cd "$LIBOBJC2_SOURCE_DIR"
+        git pull origin master
+    fi
+    
+    # Create build directory
+    local build_dir="$LIBOBJC2_SOURCE_DIR/build"
+    ensure_directory "$build_dir" "libobjc2 build directory"
+    cd "$build_dir"
+    
+    # Set up build environment
+    local GNUSTEP_CFLAGS="-I$GNUSTEP_INSTALL_DIR/include -O2 -g"
+    local GNUSTEP_CXXFLAGS="-I$GNUSTEP_INSTALL_DIR/include -O2 -g"
+    local GNUSTEP_LDFLAGS="-L$GNUSTEP_INSTALL_DIR/lib"
+    
+    # Determine clang path
+    local CLANG_BIN CLANGPP_BIN
+    if [ -f "$LLVM_BUILD_DIR/bin/clang.exe" ]; then
+        CLANG_BIN="$LLVM_BUILD_DIR/bin/clang.exe"
+        CLANGPP_BIN="$LLVM_BUILD_DIR/bin/clang++.exe"
         print_info "Using locally built clang: $CLANG_BIN"
     else
         CLANG_BIN="/ucrt64/bin/clang.exe"

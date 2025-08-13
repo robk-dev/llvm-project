@@ -274,25 +274,8 @@ install_windows_dependencies() {
         pacman -S --noconfirm --needed $pkg || print_warning "Failed to install $pkg"
     done
     
-    print_progress "Installing GNUstep dependencies..."
-    local gnustep_packages=(
-        mingw-w64-ucrt-x86_64-libdispatch
-        mingw-w64-ucrt-x86_64-libiconv
-        mingw-w64-ucrt-x86_64-icu
-        mingw-w64-ucrt-x86_64-libxslt
-        mingw-w64-ucrt-x86_64-gnutls
-        mingw-w64-ucrt-x86_64-libjpeg-turbo
-        mingw-w64-ucrt-x86_64-libtiff
-        mingw-w64-ucrt-x86_64-libpng
-        autoconf
-        automake
-        libtool
-    )
-    
-    for pkg in "${gnustep_packages[@]}"; do
-        print_progress "Installing $pkg..."
-        pacman -S --noconfirm --needed $pkg || print_warning "Failed to install $pkg"
-    done
+    # Skip GNUstep dependencies (already installed on system)
+    print_info "Skipping GNUstep dependencies (already available on system)"
     
     # Setup ccache
     setup_ccache_windows

@@ -126,9 +126,49 @@ deep_clean_build() {
     fi
 }
 
+# Function to permanently add UCRT64 to PATH in bash profile
+update_bash_profile_path() {
+    local profile_file="$HOME/.bashrc"
+    local path_line='export PATH="/ucrt64/bin:$PATH"'
+    
+    # Check if the path is already in the profile
+    if [ -f "$profile_file" ] && grep -q "/ucrt64/bin" "$profile_file"; then
+        print_info "UCRT64 path already in bash profile"
+        return 0
+    fi
+    
+    print_progress "Adding UCRT64 path to bash profile..."
+    
+    # Create .bashrc if it doesn't exist
+    if [ ! -f "$profile_file" ]; then
+        touch "$profile_file"
+        print_info "Created new .bashrc file"
+    fi
+    
+    # Add the path export with a comment
+    {
+        echo ""
+        echo "# Added by LLDB build script - UCRT64 tools"
+        echo "$path_line"
+        echo ""
+    } >> "$profile_file"
+    
+    print_success "UCRT64 path added to $profile_file"
+    print_info "The path will be available in new terminal sessions"
+}
+
 # Function to configure LLVM build for Windows
 configure_windows_build() {
     print_progress "Configuring LLVM build for Windows MSYS2/UCRT64..."
+    
+    # Ensure UCRT64 tools are in PATH
+    if [[ ":$PATH:" != *":/ucrt64/bin:"* ]]; then
+        export PATH="/ucrt64/bin:$PATH"
+        print_info "Added /ucrt64/bin to PATH (current session)"
+        
+        # Also add to bash profile for future sessions
+        update_bash_profile_path
+    fi
     
     ensure_directory "$LLVM_BUILD_DIR/build" "build directory"
     cd "$LLVM_BUILD_DIR/build"
@@ -139,51 +179,46 @@ configure_windows_build() {
     print_info "PKG_CONFIG_PATH: $PKG_CONFIG_PATH"
     print_info "CMAKE_PREFIX_PATH: $CMAKE_PREFIX_PATH"
     
-    # Python configuration for MSYS2 - now enabled with PYTHONHOME fix
-    print_info "Python support enabled with PYTHONHOME=/ucrt64"
+    # Find Python installation
+    local python_exe
+    if command -v python3 >/dev/null 2>&1; then
+        python_exe=$(which python3)
+        print_info "Using Python: $python_exe"
+    elif command -v python >/dev/null 2>&1; then
+        python_exe=$(which python)
+        print_info "Using Python: $python_exe"
+    else
+        print_warning "Python not found, disabling Python support"
+        python_exe=""
+    fi
     
-    # Combined Windows + Ubuntu22 CMake configuration with tested working flags
+    # Minimal CMake configuration for MSYS2/UCRT64
     local cmake_args=(
         "-G" "Ninja"
-        "-DCMAKE_BUILD_TYPE=RelWithDebInfo"  # Use RelWithDebInfo from Ubuntu22
-        "-DLLVM_ENABLE_PROJECTS=clang;lldb"  # Focus on clang;lldb as tested
-        "-DLLVM_TARGETS_TO_BUILD=X86"  # Focus on X86 as tested  
-        "-DLLVM_ENABLE_RTTI=ON"  # Ubuntu22 working flag - needed for exceptions
-        "-DLLVM_ENABLE_EH=ON"  # Ubuntu22 working flag - exception handling
-        "-DLLVM_ENABLE_THREADS=ON"  # Ubuntu22 working flag - threading support
-        "-DLLDB_ENABLE_PYTHON=ON"  # Ubuntu22 working flag - Python bindings
-        "-DLLDB_USE_SYSTEM_DEBUGSERVER=ON"  # Ubuntu22 working flag
-        "-DLLVM_BUILD_LLVM_DYLIB=OFF"  # Static linking on Windows
-        "-DLLVM_LINK_LLVM_DYLIB=OFF"
-        "-DLLVM_INCLUDE_TESTS=OFF"  # Disable tests to avoid path issues
-        "-DLLVM_INCLUDE_BENCHMARKS=OFF"  # Disable benchmarks
-        "-DLLVM_INCLUDE_EXAMPLES=OFF"  # Disable examples
-        "-DLLVM_INCLUDE_DOCS=OFF"  # Disable documentation generation
-        "-DLLVM_BUILD_TOOLS=ON"  # Keep essential tools
-        "-DLLDB_INCLUDE_TESTS=OFF"  # Disable LLDB tests
-        "-DLLDB_ENABLE_LIBEDIT=OFF"  # Disable libedit to avoid compatibility issues
-        "-DCLANG_INCLUDE_TESTS=OFF"  # Disable Clang tests
-        "-DCLANG_BUILD_TOOLS=ON"  # Keep Clang tools
-        "-DCMAKE_MSYS2_ARG_CONV=STRICT"  # Strict path conversion
-        "-DCMAKE_MSYS_RUNTIME_PATH_RESOLUTION=1"  # Help CMake resolve MSYS paths
-        "-DMSYS=1"  # Tell CMake we're in MSYS2 environment
-        "-DCMAKE_SYSTEM_NAME=Windows"  # Explicitly set system name
-        "-DCMAKE_HOST_SYSTEM_NAME=Windows"  # Set host system
-        "-DLLVM_ENABLE_ASSERTIONS=ON"
-        "-DBUILD_SHARED_LIBS=ON"
-        "-DLLVM_ENABLE_ZLIB=ON"
-        "-DLLVM_ENABLE_ZSTD=ON"
-        "-DLLVM_ENABLE_LIBXML2=ON"
+        "-DCMAKE_BUILD_TYPE=RelWithDebInfo"
+        "-DLLVM_ENABLE_PROJECTS=clang;lldb"
+        "-DLLVM_TARGETS_TO_BUILD=X86"
         "-DLLVM_PARALLEL_COMPILE_JOBS=$PARALLEL_JOBS"
-        "-DLLVM_PARALLEL_LINK_JOBS=2"  # Limit link jobs on Windows
-        "-DCMAKE_C_COMPILER=clang"  # Use system clang 20.1.8 (compatible)
-        "-DCMAKE_CXX_COMPILER=clang++"  # Use system clang++ 20.1.8 (compatible)
-        "-DCMAKE_LINKER=lld"
-        "-DLLVM_USE_LINKER=lld"
-        "-DCMAKE_RC_COMPILER=windres"
-        "-DLLVM_HOST_TRIPLE=x86_64-w64-windows-gnu"  # Explicit host triple
-        "-DLLVM_TARGET_TRIPLE=x86_64-w64-windows-gnu"  # Explicit target triple
+        "-DLLVM_PARALLEL_LINK_JOBS=3"
+        "-DBUILD_SHARED_LIBS=ON"
+        "-DLLVM_INCLUDE_TESTS=OFF"
+        "-DLLDB_INCLUDE_TESTS=OFF"
+        "-DCLANG_INCLUDE_TESTS=OFF"
+        "-DLLDB_ENABLE_LIBEDIT=OFF"
     )
+    
+    # Add Python support if available
+    if [ -n "$python_exe" ]; then
+        local python_version=$($python_exe -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+        cmake_args+=(
+            "-DLLDB_ENABLE_PYTHON=ON"
+            "-DLLDB_PYTHON_RELATIVE_PATH=python${python_version}"
+        )
+        print_info "Python support enabled: python${python_version}"
+    else
+        cmake_args+=("-DLLDB_ENABLE_PYTHON=OFF")
+        print_info "Python support disabled"
+    fi
     
     # Add ccache if available
     if command_exists ccache; then
@@ -193,13 +228,6 @@ configure_windows_build() {
         )
         print_info "ccache enabled for build"
     fi
-    
-    # Windows-specific optimizations
-    cmake_args+=(
-        "-DCMAKE_C_FLAGS=-O2 -g -fuse-ld=lld"
-        "-DCMAKE_CXX_FLAGS=-O2 -g -fuse-ld=lld -std=c++17"
-        "-DCMAKE_EXE_LINKER_FLAGS=-Wl,--large-address-aware"
-    )
     
     print_progress "Running CMake configuration..."
     print_info "This may take 5-10 minutes on first run..."
@@ -222,6 +250,12 @@ configure_windows_build() {
 # Function to build LLDB on Windows
 build_lldb_windows() {
     print_progress "Building LLDB (this will take 1-3 hours on Windows)..."
+    
+    # Ensure UCRT64 tools are in PATH
+    if [[ ":$PATH:" != *":/ucrt64/bin:"* ]]; then
+        export PATH="/ucrt64/bin:$PATH"
+        print_info "Added /ucrt64/bin to PATH"
+    fi
     
     cd "$LLVM_BUILD_DIR/build"
     
@@ -249,11 +283,32 @@ build_lldb_windows() {
         exit 1
     }
     
-    print_progress "Stage 2: Building Clang..."
-    ninja -j$PARALLEL_JOBS clang || {
-        print_error "Failed to build Clang"
-        exit 1
-    }
+    # Check if system Clang is available and skip building if so
+    local skip_clang_build=false
+    if command -v clang >/dev/null 2>&1 && command -v clang++ >/dev/null 2>&1; then
+        local system_clang_version=$(clang --version | head -1 | grep -o '[0-9]\+\.[0-9]\+' | head -1)
+        print_info "System Clang found: version $system_clang_version"
+        
+        # Check if it's a compatible version (>= 15.0)
+        if [[ $(echo "$system_clang_version" | cut -d. -f1) -ge 15 ]]; then
+            print_success "System Clang $system_clang_version is compatible, skipping Clang build"
+            skip_clang_build=true
+        else
+            print_warning "System Clang $system_clang_version is too old, building newer version"
+        fi
+    else
+        print_info "No system Clang found, will build Clang from source"
+    fi
+    
+    if [ "$skip_clang_build" = false ]; then
+        print_progress "Stage 2: Building Clang..."
+        ninja -j$PARALLEL_JOBS clang || {
+            print_error "Failed to build Clang"
+            exit 1
+        }
+    else
+        print_info "Stage 2: Skipped (using system Clang)"
+    fi
     
     print_progress "Stage 3: Building LLDB..."
     ninja -j$PARALLEL_JOBS lldb || {
@@ -377,5 +432,5 @@ generate_build_report() {
 }
 
 # Export functions
-export -f clean_cmake_cache fix_cmake_python_paths deep_clean_build configure_windows_build build_lldb_windows build_lldb_server_windows
+export -f update_bash_profile_path clean_cmake_cache fix_cmake_python_paths deep_clean_build configure_windows_build build_lldb_windows build_lldb_server_windows
 export -f build_lldb_component create_build_symlinks generate_build_report
