@@ -19,7 +19,7 @@
             "type": "shell",
             "command": "make",
             "args": [
-                "simple_test"
+                "simple_test.exe"
             ],
             "options": {
                 "cwd": "${workspaceFolder}/examples",

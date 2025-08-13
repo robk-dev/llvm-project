@@ -27,8 +27,8 @@ fi
 clean_cmake_cache() {
     print_progress "Cleaning CMake cache and build artifacts..."
     
-    if [ -d "$LLVM_BUILD_DIR/build" ]; then
-        cd "$LLVM_BUILD_DIR/build"
+    if [ -d "$LLVM_BUILD_DIR" ]; then
+        cd "$LLVM_BUILD_DIR"
         
         # Remove CMake cache files
         rm -f CMakeCache.txt
@@ -47,12 +47,12 @@ clean_cmake_cache() {
 fix_cmake_python_paths() {
     print_progress "Fixing CMake Python path configuration..."
     
-    if [ ! -d "$LLVM_BUILD_DIR/build" ]; then
+    if [ ! -d "$LLVM_BUILD_DIR" ]; then
         print_error "Build directory not found"
         return 1
     fi
     
-    cd "$LLVM_BUILD_DIR/build"
+    cd "$LLVM_BUILD_DIR"
     
     # If CMakeCache.txt exists and has path issues, clean and reconfigure
     if [ -f "CMakeCache.txt" ]; then
@@ -170,8 +170,8 @@ configure_windows_build() {
         update_bash_profile_path
     fi
     
-    ensure_directory "$LLVM_BUILD_DIR/build" "build directory"
-    cd "$LLVM_BUILD_DIR/build"
+    ensure_directory "$LLVM_BUILD_DIR" "build directory"
+    cd "$LLVM_BUILD_DIR"
     
     # Set up environment for finding MSYS2 libraries
     export PKG_CONFIG_PATH="/usr/lib/pkgconfig:/ucrt64/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
@@ -199,8 +199,11 @@ configure_windows_build() {
         "-DLLVM_ENABLE_PROJECTS=clang;lldb"
         "-DLLVM_TARGETS_TO_BUILD=X86"
         "-DLLVM_PARALLEL_COMPILE_JOBS=$PARALLEL_JOBS"
-        "-DLLVM_PARALLEL_LINK_JOBS=3"
-        "-DBUILD_SHARED_LIBS=ON"
+        "-DLLVM_PARALLEL_LINK_JOBS=1"
+        "-DBUILD_SHARED_LIBS=OFF"
+        "-DLLDB_BUILD_FRAMEWORK=OFF"
+        "-DLLVM_BUILD_LLVM_DYLIB=OFF"
+        "-DLLVM_LINK_LLVM_DYLIB=OFF"
         "-DLLVM_INCLUDE_TESTS=OFF"
         "-DLLDB_INCLUDE_TESTS=OFF"
         "-DCLANG_INCLUDE_TESTS=OFF"
@@ -210,11 +213,18 @@ configure_windows_build() {
     # Add Python support if available
     if [ -n "$python_exe" ]; then
         local python_version=$($python_exe -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+        local python_home="/c/tools/msys64/ucrt64"  # Correct Python home path
+        local python_lib_path="/c/tools/msys64/ucrt64/lib/python${python_version}"
+        
         cmake_args+=(
             "-DLLDB_ENABLE_PYTHON=ON"
             "-DLLDB_PYTHON_RELATIVE_PATH=python${python_version}"
+            "-DLLDB_PYTHON_HOME=${python_home}"
+            "-DLLDB_EMBED_PYTHON_HOME=ON"
         )
         print_info "Python support enabled: python${python_version}"
+        print_info "Python home: ${python_home}"
+        print_info "Python lib path: ${python_lib_path}"
     else
         cmake_args+=("-DLLDB_ENABLE_PYTHON=OFF")
         print_info "Python support disabled"
@@ -257,7 +267,7 @@ build_lldb_windows() {
         print_info "Added /ucrt64/bin to PATH"
     fi
     
-    cd "$LLVM_BUILD_DIR/build"
+    cd "$LLVM_BUILD_DIR"
     
     # Check if we're resuming a build
     if [ -f "CMakeCache.txt" ]; then
@@ -267,7 +277,8 @@ build_lldb_windows() {
     fi
     
     # Set memory limit for linker to prevent OOM on Windows
-    export LDFLAGS="-Wl,--no-keep-memory"
+    export LDFLAGS="-Wl,--no-keep-memory -Wl,--reduce-memory-overheads"
+    export CXXFLAGS="${CXXFLAGS:-} -DLLVM_ENABLE_DUMP=0"
     
     # Build LLDB
     print_progress "Starting LLDB build..."
@@ -311,9 +322,17 @@ build_lldb_windows() {
     fi
     
     print_progress "Stage 3: Building LLDB..."
-    ninja -j$PARALLEL_JOBS lldb || {
+    # Use single job for memory-intensive linking and target only the executable
+    ninja -j1 lldb || {
         print_error "Failed to build LLDB"
-        exit 1
+        
+        # Fallback: try building with even more conservative memory settings
+        print_info "Trying fallback build with conservative memory settings..."
+        export LDFLAGS="$LDFLAGS -Wl,--as-needed"
+        ninja -j1 lldb || {
+            print_error "LLDB build failed even with conservative settings"
+            exit 1
+        }
     }
     
     local end_time=$(date +%s)
@@ -361,7 +380,7 @@ build_lldb_component() {
     local component="$1"
     print_progress "Building $component..."
     
-    cd "$LLVM_BUILD_DIR/build"
+    cd "$LLVM_BUILD_DIR"
     
     if ninja -j$PARALLEL_JOBS "$component"; then
         print_success "$component built successfully"
@@ -409,16 +428,16 @@ generate_build_report() {
         echo ""
         echo "Built Components:"
         
-        if [ -f "$LLVM_BUILD_DIR/build/bin/lldb.exe" ]; then
-            echo "  ✓ LLDB: $(du -h "$LLVM_BUILD_DIR/build/bin/lldb.exe" | cut -f1)"
+        if [ -f "$LLVM_BUILD_DIR/bin/lldb.exe" ]; then
+            echo "  ✓ LLDB: $(du -h "$LLVM_BUILD_DIR/bin/lldb.exe" | cut -f1)"
         fi
         
-        if [ -f "$LLVM_BUILD_DIR/build/bin/lldb-server.exe" ]; then
-            echo "  ✓ lldb-server: $(du -h "$LLVM_BUILD_DIR/build/bin/lldb-server.exe" | cut -f1)"
+        if [ -f "$LLVM_BUILD_DIR/bin/lldb-server.exe" ]; then
+            echo "  ✓ lldb-server: $(du -h "$LLVM_BUILD_DIR/bin/lldb-server.exe" | cut -f1)"
         fi
         
-        if [ -f "$LLVM_BUILD_DIR/build/bin/clang.exe" ]; then
-            echo "  ✓ Clang: $(du -h "$LLVM_BUILD_DIR/build/bin/clang.exe" | cut -f1)"
+        if [ -f "$LLVM_BUILD_DIR/bin/clang.exe" ]; then
+            echo "  ✓ Clang: $(du -h "$LLVM_BUILD_DIR/bin/clang.exe" | cut -f1)"
         fi
         
         echo ""

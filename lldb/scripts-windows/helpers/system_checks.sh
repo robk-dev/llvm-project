@@ -153,8 +153,8 @@ check_disk_space() {
         if [[ ! $REPLY =~ ^[Yy]$ ]]; then
             print_error "Build cancelled by user"
         fi
-    elif [ "$available_gb" -lt 50 ]; then
-        print_error "Insufficient disk space. Need at least 50GB, have ${available_gb}GB"
+    elif [ "$available_gb" -lt 20 ]; then
+        print_error "Insufficient disk space. Need at least 20GB, have ${available_gb}GB"
     else
         print_success "Disk space: ${available_gb}GB available"
     fi

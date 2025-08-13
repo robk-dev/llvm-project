@@ -1,10 +1,10 @@
 {
-    "lldb.executable": "c:/tools/msys64/home/kardjali/code/llvm-project/build/bin/lldb.exe",
+    "lldb.executable": "/c/Users/vagrant/home/kardjali/code/llvm-project/build/bin/lldb.exe",
     "lldb.adapterEnv": {
-        "LLDB_DEBUGSERVER_PATH": "c:/tools/msys64/home/kardjali/code/llvm-project/build/bin/lldb-server.exe",
+        "LLDB_DEBUGSERVER_PATH": "/c/Users/vagrant/home/kardjali/code/llvm-project/build/bin/lldb-server.exe",
         "PYTHONHOME": "/ucrt64",
         "PYTHONPATH": "/ucrt64/lib/python3.12:/ucrt64/lib/python3.12/site-packages",
-        "PATH": "/ucrt64/lib:/ucrt64/bin:c:/tools/msys64/home/kardjali/code/llvm-project/build/bin"
+        "PATH": "/ucrt64/lib:/ucrt64/bin:/c/Users/vagrant/home/kardjali/code/llvm-project/build/bin"
     },
     "lldb.verboseLogging": true,
     "lldb.showDisassembly": "never",

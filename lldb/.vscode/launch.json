@@ -8,9 +8,8 @@
             "type": "lldb",
             "request": "launch",
             "name": "🚀 GNUstep/libobjc2 - Debug",
-            "program": "c:/tools/msys64/home/kardjali/code/llvm-project/lldb/examples/simple_test.exe",
+            "program": "${workspaceFolder}/examples/simple_test.exe",
             "args": [],
-            "cwd": "c:/tools/msys64/home/kardjali/code/llvm-project/lldb",
             "preLaunchTask": "build-one-example",
             "console": "integratedTerminal",
             "initCommands": [
@@ -22,8 +21,11 @@
                 "settings set target.prefer-dynamic-value no-dynamic-values"
             ],
             "env": {
-                "PATH": "/ucrt64/lib:/ucrt64/bin:c:/tools/msys64/home/kardjali/code/llvm-project/build/bin"
-            }
+                "PATH": "/ucrt64/lib:/ucrt64/bin:/c/Users/vagrant/code/llvm-project/build/bin:${env:PATH}",
+                "PYTHONPATH": "/c/tools/msys64/ucrt64/lib/python3.12:/c/tools/msys64/ucrt64/lib/python3.12/lib-dynload:/c/tools/msys64/ucrt64/lib/python3.12/site-packages:${env:PYTHONPATH}",
+                "PYTHONHOME": "/c/tools/msys64/ucrt64"
+            },
+            "terminal": "console"
         },
         {
             "type": "lldb",

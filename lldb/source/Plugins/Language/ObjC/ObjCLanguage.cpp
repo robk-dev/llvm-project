@@ -850,7 +850,8 @@ static void LoadObjCFormatters(TypeCategoryImplSP objc_category_sp) {
       objc_category_sp, lldb_private::formatters::CFBitVectorSummaryProvider,
       "CFBitVector summary provider", "__CFMutableBitVector", appkit_flags);
 
-  LoadGNUstepFormatters(objc_category_sp);
+  // NOTE: GNUstep formatters are now registered directly by the GNUstep runtime plugin
+  // LoadGNUstepFormatters(objc_category_sp); // REMOVED - causes infinite loop
 }
 
 static void LoadCoreMediaFormatters(TypeCategoryImplSP objc_category_sp) {

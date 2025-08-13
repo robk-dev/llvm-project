@@ -257,7 +257,7 @@ main() {
     fi
     
     # Auto-detect and fix CMake cache issues
-    if [ -d "$LLVM_BUILD_DIR/build" ]; then
+    if [ -d "$LLVM_BUILD_DIR" ] && [ -f "$LLVM_BUILD_DIR/CMakeCache.txt" ]; then
         fix_cmake_python_paths
     fi
     

@@ -39,37 +39,16 @@ void GNUstepObjCRuntime::Initialize() {
       CreateInstance, nullptr);
   
   Log *log = GetLog(LLDBLog::Process | LLDBLog::Types);
-  LLDB_LOG(log, "GNUstepObjCRuntime::Initialize() called\n");
+  LLDB_LOG(log, "GNUstepObjCRuntime::Initialize() called");
 
   // Force output to stderr to confirm initialization
   fprintf(stderr, "*** GNUstepObjCRuntime::Initialize() called - Plugin registered ***\n");
   
-  // CRITICAL FIX: Use consistent category name and ensure proper activation
-  // The category name must be consistent between registration and activation
-  ConstString category_name("gnustep");
-  TypeCategoryImplSP category_sp;
+  // CRITICAL FIX: DO NOT register formatters during static initialization!
+  // This was causing infinite recursion during module loading.
+  // Formatters will be registered lazily when the runtime is actually created.
   
-  // Always try to create/get the category with consistent name
-  if (!DataVisualization::Categories::GetCategory(category_name, category_sp) || !category_sp) {
-    // Create the category if it doesn't exist
-    DataVisualization::Categories::Add(category_name);
-    DataVisualization::Categories::GetCategory(category_name, category_sp);
-  }
-  
-  if (category_sp) {
-    // Register formatters
-    GNUstepFormattersRegistry::RegisterFormatters(*category_sp);
-    
-    // CRITICAL: Enable the category with both methods for maximum compatibility
-    DataVisualization::Categories::Enable(category_sp, TypeCategoryMap::Default);
-    DataVisualization::Categories::Enable(category_name, TypeCategoryMap::Default);
-    
-    LLDB_LOG(log, "GNUstepObjCRuntime: Formatters registered in category '%s' and enabled", 
-             category_name.GetCString());
-  } else {
-    LLDB_LOG(log, "GNUstepObjCRuntime: CRITICAL ERROR - Failed to create/get category '%s'", 
-             category_name.GetCString());
-  }
+  LLDB_LOG(log, "GNUstepObjCRuntime: Plugin registered, formatters will be registered when runtime is created");
 }
 
 void GNUstepObjCRuntime::Terminate() {
@@ -87,7 +66,11 @@ GNUstepObjCRuntime::CreateInstance(Process *process,
   // EMERGENCY DEBUG: Force output to stderr to confirm this is being called
   fprintf(stderr, "*** GNUstepObjCRuntime::CreateInstance() called for language %d ***\n", (int)language);
   
-  if (language != eLanguageTypeObjC && language != eLanguageTypeObjC_plus_plus) {
+  // CRITICAL FIX: Only handle eLanguageTypeObjC like Apple does
+  // Having multiple instances (ObjC and ObjC++) might be causing conflicts during launch
+  if (language != eLanguageTypeObjC) {
+    LLDB_LOG(log, "GNUstepObjCRuntime: Rejecting language {0}, only supporting eLanguageTypeObjC", language);
+    fprintf(stderr, "*** GNUstepObjCRuntime: Rejecting language %d ***\n", (int)language);
     return nullptr;
   }
   
@@ -95,75 +78,26 @@ GNUstepObjCRuntime::CreateInstance(Process *process,
     return nullptr;
   }
 
-  // First check if GNUstep runtime libraries are already loaded
-  // This happens when attaching to a running process
-  Target &target = process->GetTarget();
-  ModuleList &modules = target.GetImages();
+  // CRITICAL FIX: Don't do ANY heavy work during CreateInstance!
+  // Just create the runtime instance and let ModulesDidLoad handle detection.
+  // The process launch phase is too fragile for symbol scanning.
   
-  bool found_gnustep_runtime = false;
+  LLDB_LOG(log, "GNUstepObjCRuntime: Creating instance (detection deferred to ModulesDidLoad)");
+  fprintf(stderr, "*** GNUstepObjCRuntime: Creating instance (detection deferred) ***\n");
   
-  // Check for GNUstep runtime libraries
-  for (size_t i = 0; i < modules.GetSize(); ++i) {
-    ModuleSP module_sp = modules.GetModuleAtIndex(i);
-    if (module_sp) {
-      const char *module_name = module_sp->GetFileSpec().GetFilename().GetCString();
-      if (module_name && 
-          (strstr(module_name, "libobjc.so") || 
-           strstr(module_name, "libgnustep-base.so") ||
-           strstr(module_name, "libobjc2"))) {
-        found_gnustep_runtime = true;
-        LLDB_LOG(log, "GNUstepObjCRuntime: Found GNUstep runtime module: {0}", module_name);
-        break;
-      }
-    }
-  }
-  
-  if (found_gnustep_runtime) {
-    LLDB_LOG(log, "GNUstepObjCRuntime: Creating instance for GNUstep runtime (libraries already loaded)");
-    return new GNUstepObjCRuntime(process);
-  }
-  
-  // If libraries aren't loaded yet, check if the main executable has Objective-C code
-  // This is needed when launching a process (libraries haven't loaded yet)
-  ModuleSP exe_module_sp = target.GetExecutableModule();
-  if (exe_module_sp) {
-    // Check for Objective-C symbols in the executable
-    // GNUstep compiled code will have .objc_ symbols
-    SymbolFile *sym_file = exe_module_sp->GetSymbolFile();
-    if (sym_file) {
-      // Simple heuristic: check for .objc_ symbols which indicate GNUstep ObjC code
-      Symtab *symtab = exe_module_sp->GetSymtab();
-      if (symtab) {
-        const size_t num_symbols = symtab->GetNumSymbols();
-        for (size_t i = 0; i < num_symbols && i < 100; ++i) { // Check first 100 symbols for efficiency
-          Symbol *symbol = symtab->SymbolAtIndex(i);
-          if (symbol) {
-            const char *name = symbol->GetName().GetCString();
-            if (name && strstr(name, ".objc_")) {
-              LLDB_LOG(log, "GNUstepObjCRuntime: Found .objc_ symbol '{0}' in executable, assuming GNUstep", name);
-              return new GNUstepObjCRuntime(process);
-            }
-          }
-        }
-      }
-    }
-  }
-  
-  LLDB_LOG(log, "GNUstepObjCRuntime: No GNUstep runtime or Objective-C symbols found");
-  return nullptr;
+  return new GNUstepObjCRuntime(process);
 }
 
 GNUstepObjCRuntime::GNUstepObjCRuntime(Process *process)
     : ObjCLanguageRuntime(process), m_formatters_registered(false), m_gnustep_library_loaded(false) {
   Log *log = GetLog(LLDBLog::Process | LLDBLog::Types);
   LLDB_LOG(log, "GNUstepObjCRuntime constructor called");
-  if (process) {
-    m_introspector_up = std::make_unique<GNUstepObjCRuntimeIntrospector>(process);
-    // Runtime API will be initialized when libraries are loaded
-  }
+  fprintf(stderr, "*** GNUstepObjCRuntime constructor called ***\n");
   
-  // Don't register formatters here - wait until we confirm GNUstep libraries are loaded
-  // This will happen in ModulesDidLoad
+  // CRITICAL: Do absolutely NOTHING during construction that could trigger module loading
+  // Just store the process and defer all initialization to ModulesDidLoad
+  
+  LLDB_LOG(log, "GNUstepObjCRuntime: Constructor completed safely, deferring all initialization");
 }
 
 GNUstepObjCRuntime::~GNUstepObjCRuntime() {
@@ -953,58 +887,50 @@ GNUstepObjCRuntime::GetClassDescriptor(ValueObject &valobj) {
 }
 
 void GNUstepObjCRuntime::ModulesDidLoad(const ModuleList &module_list) {
-  // CRITICAL FIX: Add guards to prevent infinite recursion
-  static thread_local int recursion_depth = 0;
-  static thread_local bool in_modules_did_load = false;
-  
-  // Prevent infinite recursion
-  if (in_modules_did_load || recursion_depth > 5) {
-    Log *log = GetLog(LLDBLog::Process | LLDBLog::Types);
-    LLDB_LOG(log, "GNUstepObjCRuntime::ModulesDidLoad - recursion detected, skipping (depth={0})", recursion_depth);
-    return;
+  // CRITICAL: Completely disable processing during process launch to prevent infinite loops
+  Process *process = GetProcess();
+  if (process) {
+    lldb::StateType state = process->GetState();
+    if (state == eStateLaunching) {
+      // DO ABSOLUTELY NOTHING during process launch - not even logging
+      return;
+    }
   }
   
-  // Set guards
-  in_modules_did_load = true;
-  recursion_depth++;
-  
-  // Reduce debug spam - only log when we find GNUstep libraries
-  Log *log = GetLog(LLDBLog::Process | LLDBLog::Types);
+  Log *log = GetLog(LLDBLog::Process);
   LLDB_LOG(log, "GNUstepObjCRuntime::ModulesDidLoad called with {0} modules", 
            module_list.GetSize());
   
-  // Call parent class method first (like Apple's implementation)
-  ObjCLanguageRuntime::ModulesDidLoad(module_list);
+  // For normal operation (not during launch), do what AppleObjCRuntime does:
+  // Just implement the equivalent of ReadObjCLibraryIfNeeded directly here
+  
+  // Initialize introspector if not done yet (deferred from constructor)
+  if (!m_introspector_up && process) {
+    m_introspector_up = std::make_unique<GNUstepObjCRuntimeIntrospector>(process);
+    LLDB_LOG(log, "GNUstepObjCRuntime: Created introspector");
+  }
   
   // Check if any of the newly loaded modules are GNUstep ObjC libraries
-  bool found_gnustep = false;
   for (size_t i = 0; i < module_list.GetSize(); ++i) {
     ModuleSP module_sp = module_list.GetModuleAtIndex(i);
     if (IsModuleObjCLibrary(module_sp)) {
-      found_gnustep = true;
       m_gnustep_library_loaded = true;
       ReadObjCLibrary(module_sp);
-      LLDB_LOG(log, "GNUstepObjCRuntime: Found GNUstep library: {0}", 
+      LLDB_LOG(log, "GNUstepObjCRuntime: Found and processed GNUstep library: {0}", 
                module_sp->GetFileSpec().GetFilename().GetCString());
     }
   }
   
   // Register formatters when we confirm GNUstep libraries are loaded
-  if (found_gnustep) {
-    if (!m_formatters_registered) {
-      LLDB_LOG(log, "GNUstepObjCRuntime: GNUstep libraries detected, registering formatters");
-      RegisterFormatters();
-    }
-    
-    // Initialize the runtime API now that libraries are loaded
-    if (!m_runtime_api_up) {
-      InitializeRuntimeAPI();
-    }
+  if (m_gnustep_library_loaded && !m_formatters_registered) {
+    LLDB_LOG(log, "GNUstepObjCRuntime: GNUstep libraries detected, registering formatters");
+    RegisterFormatters();
   }
   
-  // Clear guards
-  recursion_depth--;
-  in_modules_did_load = false;
+  // Initialize the runtime API now that libraries are loaded
+  if (m_gnustep_library_loaded && !m_runtime_api_up) {
+    InitializeRuntimeAPI();
+  }
 }
 
 void GNUstepObjCRuntime::InitializeRuntimeAPI() {
