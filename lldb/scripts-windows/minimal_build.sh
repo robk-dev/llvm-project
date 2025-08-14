@@ -7,8 +7,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/helpers/common.sh"
 
-BUILD_DIR="/c/Users/vagrant/code/llvm-project/build"
-LLVM_SRC="/c/Users/vagrant/code/llvm-project"
+BUILD_DIR="/c/code/llvm-project/build"
+LLVM_SRC="/c/code/llvm-project"
 
 print_section "🚀 Minimal LLDB Build for MSYS2"
 

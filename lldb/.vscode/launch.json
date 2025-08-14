@@ -20,7 +20,7 @@
                 "b main"
             ],
             "env": {
-                "PATH": "/ucrt64/lib:/ucrt64/bin:/c/Users/vagrant/code/llvm-project/build/bin:${env:PATH}",
+                "PATH": "/ucrt64/lib:/ucrt64/bin:/c/code/llvm-project/build/bin:${env:PATH}",
                 "LD_LIBRARY_PATH": "/ucrt64/lib:${env:LD_LIBRARY_PATH}",
                 "PYTHONPATH": "/c/tools/msys64/ucrt64/lib/python3.12:/c/tools/msys64/ucrt64/lib/python3.12/lib-dynload:/c/tools/msys64/ucrt64/lib/python3.12/site-packages:${env:PYTHONPATH}",
                 "PYTHONHOME": "/c/tools/msys64/ucrt64"
@@ -45,7 +45,7 @@
                 "b main"
             ],
             "env": {
-                "PATH": "/ucrt64/lib:/ucrt64/bin:/c/Users/vagrant/code/llvm-project/build/bin:${env:PATH}",
+                "PATH": "/ucrt64/lib:/ucrt64/bin:/c/code/llvm-project/build/bin:${env:PATH}",
                 "LD_LIBRARY_PATH": "/ucrt64/lib:${env:LD_LIBRARY_PATH}",
                 "GNUSTEP_ROOT": "/ucrt64"
             },

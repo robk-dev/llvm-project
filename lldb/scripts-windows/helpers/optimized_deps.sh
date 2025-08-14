@@ -27,7 +27,7 @@ check_existing_packages() {
     
     # LLVM-specific packages (minimal set)
     local llvm_packages=(
-        "mingw-w64-ucrt-x86_64-lld"
+        "mingw-w64-ucrt-x86_64-ccache"
         "mingw-w64-ucrt-x86_64-libxml2"  
         "mingw-w64-ucrt-x86_64-libffi"
         "libedit-devel"                  # Need development headers

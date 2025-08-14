@@ -11,4 +11,4 @@ export PTHREAD_MUTEX_ROBUST=0
 export OMP_NUM_THREADS=1
 
 # Launch LLDB with proper environment and console handling
-exec winpty /c/Users/vagrant/code/llvm-project/build/bin/lldb.exe "$@"
+exec winpty /c/code/llvm-project/build/bin/lldb.exe "$@"

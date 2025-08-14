@@ -1,13 +1,13 @@
 #!/bin/bash
 
 echo "==============================================="
-echo " Ì∫Ä LLDB Build with Clang (avoiding GCC issues)"
+echo " ÔøΩÔøΩÔøΩ LLDB Build with Clang (avoiding GCC issues)"
 echo "==============================================="
 
 set -e
 
-BUILD_DIR="/c/Users/vagrant/code/llvm-project/build"
-SOURCE_DIR="/c/Users/vagrant/code/llvm-project"
+BUILD_DIR="/c/code/llvm-project/build"
+SOURCE_DIR="/c/code/llvm-project"
 
 cd "$BUILD_DIR"
 
@@ -45,5 +45,5 @@ echo "‚ÑπÔ∏è  Building main LLDB executable..."
 ninja -j1 lldb
 
 echo "‚úÖ Build completed successfully!"
-echo "Ì≥ç LLDB executable: $BUILD_DIR/bin/lldb.exe"
-echo "Ì≥ç LLDB server: $BUILD_DIR/bin/lldb-server.exe"
+echo "ÔøΩÔøΩÔøΩ LLDB executable: $BUILD_DIR/bin/lldb.exe"
+echo "ÔøΩÔøΩÔøΩ LLDB server: $BUILD_DIR/bin/lldb-server.exe"

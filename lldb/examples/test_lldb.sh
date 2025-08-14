@@ -10,7 +10,7 @@ export PYTHONPATH=/ucrt64/lib/python3.12:/ucrt64/lib/python3.12/lib-dynload:/ucr
 export PATH=/ucrt64/lib:/ucrt64/bin:$PATH
 
 echo "1. Testing LLDB version:"
-winpty /c/Users/vagrant/code/llvm-project/build/bin/lldb.exe --version 2>&1 | grep -E "(version|GNUstep)" || true
+winpty /c/code/llvm-project/build/bin/lldb.exe --version 2>&1 | grep -E "(version|GNUstep)" || true
 
 echo ""
 echo "2. LLDB is ready to use with GNUstep plugin!"
