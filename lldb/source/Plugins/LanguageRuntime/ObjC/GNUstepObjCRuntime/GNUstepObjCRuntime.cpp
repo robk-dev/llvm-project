@@ -20,6 +20,7 @@
 #include "lldb/Utility/StreamString.h"
 #include "lldb/ValueObject/ValueObjectConstResult.h"
 #include "llvm/Support/Error.h"
+#include "llvm/Support/SaveAndRestore.h"
 #include "GNUstepObjCRuntimeIntrospector.h"
 #include "lldb/Target/ExecutionContext.h"
 #include "lldb/Target/Process.h"
@@ -40,9 +41,6 @@ void GNUstepObjCRuntime::Initialize() {
   
   Log *log = GetLog(LLDBLog::Process | LLDBLog::Types);
   LLDB_LOG(log, "GNUstepObjCRuntime::Initialize() called");
-
-  // Force output to stderr to confirm initialization
-  fprintf(stderr, "*** GNUstepObjCRuntime::Initialize() called - Plugin registered ***\n");
   
   // CRITICAL FIX: DO NOT register formatters during static initialization!
   // This was causing infinite recursion during module loading.
@@ -63,14 +61,8 @@ GNUstepObjCRuntime::CreateInstance(Process *process,
   Log *log = GetLog(LLDBLog::Process | LLDBLog::Types);
   LLDB_LOG(log, "GNUstepObjCRuntime::CreateInstance() called for language {0}", language);
   
-  // EMERGENCY DEBUG: Force output to stderr to confirm this is being called
-  fprintf(stderr, "*** GNUstepObjCRuntime::CreateInstance() called for language %d ***\n", (int)language);
-  
-  // CRITICAL FIX: Only handle eLanguageTypeObjC like Apple does
-  // Having multiple instances (ObjC and ObjC++) might be causing conflicts during launch
+  // Only handle eLanguageTypeObjC like Apple does
   if (language != eLanguageTypeObjC) {
-    LLDB_LOG(log, "GNUstepObjCRuntime: Rejecting language {0}, only supporting eLanguageTypeObjC", language);
-    fprintf(stderr, "*** GNUstepObjCRuntime: Rejecting language %d ***\n", (int)language);
     return nullptr;
   }
   
@@ -78,13 +70,54 @@ GNUstepObjCRuntime::CreateInstance(Process *process,
     return nullptr;
   }
 
-  // CRITICAL FIX: Don't do ANY heavy work during CreateInstance!
-  // Just create the runtime instance and let ModulesDidLoad handle detection.
-  // The process launch phase is too fragile for symbol scanning.
+  // CRITICAL FIX: Check for GNUstep/ObjC markers before creating instance
+  // This prevents the plugin from claiming non-GNUstep programs
+  // We do a lightweight check here and defer heavy initialization to ModulesDidLoad
   
-  LLDB_LOG(log, "GNUstepObjCRuntime: Creating instance (detection deferred to ModulesDidLoad)");
-  fprintf(stderr, "*** GNUstepObjCRuntime: Creating instance (detection deferred) ***\n");
+  Target &target = process->GetTarget();
+  bool found_objc_markers = false;
   
+  // Check the executable module for ObjC sections or symbols
+  ModuleSP exe_module = target.GetExecutableModule();
+  if (exe_module) {
+    // Look for .objc_ sections which indicate Objective-C code
+    SectionList *section_list = exe_module->GetSectionList();
+    if (section_list) {
+      for (size_t idx = 0; idx < section_list->GetSize(); ++idx) {
+        SectionSP section_sp = section_list->GetSectionAtIndex(idx);
+        if (section_sp) {
+          ConstString section_name = section_sp->GetName();
+          if (section_name && strstr(section_name.GetCString(), ".objc_") != nullptr) {
+            found_objc_markers = true;
+            LLDB_LOG(log, "GNUstepObjCRuntime: Found ObjC section: {0}", section_name.GetCString());
+            break;
+          }
+        }
+      }
+    }
+    
+    // If no sections found, check for _objc_ symbols as fallback
+    if (!found_objc_markers) {
+      Symtab *symtab = exe_module->GetSymtab();
+      if (symtab) {
+        std::vector<uint32_t> symbol_indexes;
+        symtab->FindAllSymbolsWithNameAndType(ConstString("_objc_"), 
+                                               eSymbolTypeAny, symbol_indexes);
+        if (!symbol_indexes.empty()) {
+          found_objc_markers = true;
+          LLDB_LOG(log, "GNUstepObjCRuntime: Found {0} _objc_ symbols", symbol_indexes.size());
+        }
+      }
+    }
+  }
+  
+  // Only create instance if we found ObjC markers
+  if (!found_objc_markers) {
+    LLDB_LOG(log, "GNUstepObjCRuntime: No ObjC markers found, not creating instance");
+    return nullptr;
+  }
+  
+  LLDB_LOG(log, "GNUstepObjCRuntime: ObjC markers found, creating runtime instance");
   return new GNUstepObjCRuntime(process);
 }
 
@@ -92,7 +125,6 @@ GNUstepObjCRuntime::GNUstepObjCRuntime(Process *process)
     : ObjCLanguageRuntime(process), m_formatters_registered(false), m_gnustep_library_loaded(false) {
   Log *log = GetLog(LLDBLog::Process | LLDBLog::Types);
   LLDB_LOG(log, "GNUstepObjCRuntime constructor called");
-  fprintf(stderr, "*** GNUstepObjCRuntime constructor called ***\n");
   
   // CRITICAL: Do absolutely NOTHING during construction that could trigger module loading
   // Just store the process and defer all initialization to ModulesDidLoad
@@ -654,10 +686,9 @@ bool GNUstepObjCRuntime::IsModuleObjCLibrary(const lldb::ModuleSP &module_sp) {
   
   // Check for GNUstep runtime libraries - handle versioned library names
   // Examples: libobjc.so.4.6, libgnustep-base.so.1.31, libobjc2.so.4
-  return (strstr(module_name, "libobjc.so") ||         // libobjc.so.4.6
-          strstr(module_name, "libgnustep-base.so") || // libgnustep-base.so.1.31  
-          strstr(module_name, "libobjc2.so") ||        // libobjc2.so.4
-          strstr(module_name, "libobjc2") ||           // libobjc2 (unversioned)
+  return (strstr(module_name, "libobjc.") ||           // libobjc.so.4.6 (note the dot)
+          strstr(module_name, "libgnustep-base.") ||   // libgnustep-base.so.1.31  
+          strstr(module_name, "libobjc2") ||           // libobjc2.so.4 or libobjc2
           strstr(module_name, "libBlocksRuntime"));    // libBlocksRuntime for blocks support
 }
 
@@ -887,6 +918,16 @@ GNUstepObjCRuntime::GetClassDescriptor(ValueObject &valobj) {
 }
 
 void GNUstepObjCRuntime::ModulesDidLoad(const ModuleList &module_list) {
+  // Add recursion guard to prevent infinite loops
+  static thread_local bool s_in_modules_did_load = false;
+  if (s_in_modules_did_load) {
+    return;
+  }
+  llvm::SaveAndRestore<bool> guard(s_in_modules_did_load, true);
+  
+  // Call parent class method first for proper state management
+  ObjCLanguageRuntime::ModulesDidLoad(module_list);
+  
   // CRITICAL: Completely disable processing during process launch to prevent infinite loops
   Process *process = GetProcess();
   if (process) {
