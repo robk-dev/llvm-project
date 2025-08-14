@@ -61,12 +61,24 @@ GNUstepObjCRuntime::CreateInstance(Process *process,
   Log *log = GetLog(LLDBLog::Process | LLDBLog::Types);
   LLDB_LOG(log, "GNUstepObjCRuntime::CreateInstance() called for language {0}", language);
   
-  // Only handle eLanguageTypeObjC like Apple does
-  if (language != eLanguageTypeObjC) {
+  // ENHANCED DEBUG: Add more visible logging
+  if (log) {
+    log->Printf("*** GNUstepObjCRuntime::CreateInstance DEBUG: Called for language %d ***", (int)language);
+  }
+  
+  // CRITICAL DEBUG: Force output to stderr regardless of logging
+  fprintf(stderr, "!!! GNUstepObjCRuntime::CreateInstance called for language %d !!!\n", (int)language);
+  
+  // Handle both Objective-C (16) and Objective-C++ (17) like Apple does
+  if (language != eLanguageTypeObjC && language != eLanguageTypeObjC_plus_plus) {
+    fprintf(stderr, "!!! GNUstepObjCRuntime: Not ObjC/ObjC++ language (%d), returning nullptr !!!\n", (int)language);
     return nullptr;
   }
   
+  fprintf(stderr, "!!! GNUstepObjCRuntime: IS ObjC/ObjC++ language (%d), continuing... !!!\n", (int)language);
+  
   if (!process) {
+    fprintf(stderr, "!!! GNUstepObjCRuntime: No process, returning nullptr !!!\n");
     return nullptr;
   }
 
@@ -80,32 +92,70 @@ GNUstepObjCRuntime::CreateInstance(Process *process,
   // Check the executable module for ObjC sections or symbols
   ModuleSP exe_module = target.GetExecutableModule();
   if (exe_module) {
-    // Look for .objc_ sections which indicate Objective-C code
+    LLDB_LOG(log, "*** GNUstepObjCRuntime: Checking executable module: {0} ***", 
+             exe_module->GetFileSpec().GetFilename().GetCString());
+    
+    // Look for .objc_ or .objcrt sections which indicate Objective-C code
     SectionList *section_list = exe_module->GetSectionList();
     if (section_list) {
+      LLDB_LOG(log, "*** GNUstepObjCRuntime: Found {0} sections in executable ***", 
+               section_list->GetSize());
+      
       for (size_t idx = 0; idx < section_list->GetSize(); ++idx) {
         SectionSP section_sp = section_list->GetSectionAtIndex(idx);
         if (section_sp) {
           ConstString section_name = section_sp->GetName();
-          if (section_name && strstr(section_name.GetCString(), ".objc_") != nullptr) {
-            found_objc_markers = true;
-            LLDB_LOG(log, "GNUstepObjCRuntime: Found ObjC section: {0}", section_name.GetCString());
-            break;
+          if (section_name) {
+            const char *name = section_name.GetCString();
+            LLDB_LOG(log, "*** GNUstepObjCRuntime: Checking section: {0} ***", name);
+            
+            // Check for various GNUstep/libobjc2 section patterns
+            if (strstr(name, ".objc_") != nullptr ||      // Traditional .objc_class, .objc_method, etc.
+                strstr(name, ".objcrt") != nullptr ||     // GNUstep .objcrt section (Windows/PE)
+                strstr(name, "__objc_") != nullptr ||     // Some platforms use __objc_ prefix
+                strcmp(name, ".objc") == 0) {             // Simple .objc section
+              found_objc_markers = true;
+              LLDB_LOG(log, "*** GNUstepObjCRuntime: FOUND ObjC section: {0} ***", name);
+              break;
+            }
           }
         }
       }
     }
     
-    // If no sections found, check for _objc_ symbols as fallback
+    // If no sections found, check for objc symbols as fallback
     if (!found_objc_markers) {
       Symtab *symtab = exe_module->GetSymtab();
       if (symtab) {
+        // Check for various ObjC symbol patterns
         std::vector<uint32_t> symbol_indexes;
+        
+        // Check for _objc_ symbols (traditional)
         symtab->FindAllSymbolsWithNameAndType(ConstString("_objc_"), 
                                                eSymbolTypeAny, symbol_indexes);
+        
+        // Check for .objc_ symbols (PE/Windows style)
+        if (symbol_indexes.empty()) {
+          symtab->FindAllSymbolsWithNameAndType(ConstString(".objc_"), 
+                                                 eSymbolTypeAny, symbol_indexes);
+        }
+        
+        // Check for objc_msgSend and other core runtime symbols
+        if (symbol_indexes.empty()) {
+          const char* objc_symbols[] = {
+            "objc_msgSend", "objc_autoreleasePoolPush", "objc_autoreleasePoolPop",
+            "__objc_load", ".objc_init", ".objc_selector_", nullptr
+          };
+          
+          for (int i = 0; objc_symbols[i] != nullptr && symbol_indexes.empty(); i++) {
+            symtab->FindAllSymbolsWithNameAndType(ConstString(objc_symbols[i]), 
+                                                   eSymbolTypeAny, symbol_indexes);
+          }
+        }
+        
         if (!symbol_indexes.empty()) {
           found_objc_markers = true;
-          LLDB_LOG(log, "GNUstepObjCRuntime: Found {0} _objc_ symbols", symbol_indexes.size());
+          LLDB_LOG(log, "GNUstepObjCRuntime: Found {0} objc symbols", symbol_indexes.size());
         }
       }
     }
@@ -113,11 +163,11 @@ GNUstepObjCRuntime::CreateInstance(Process *process,
   
   // Only create instance if we found ObjC markers
   if (!found_objc_markers) {
-    LLDB_LOG(log, "GNUstepObjCRuntime: No ObjC markers found, not creating instance");
+    LLDB_LOG(log, "*** GNUstepObjCRuntime: NO ObjC markers found, not creating instance ***");
     return nullptr;
   }
   
-  LLDB_LOG(log, "GNUstepObjCRuntime: ObjC markers found, creating runtime instance");
+  LLDB_LOG(log, "*** GNUstepObjCRuntime: ObjC markers found, CREATING runtime instance ***");
   return new GNUstepObjCRuntime(process);
 }
 
@@ -686,10 +736,13 @@ bool GNUstepObjCRuntime::IsModuleObjCLibrary(const lldb::ModuleSP &module_sp) {
   
   // Check for GNUstep runtime libraries - handle versioned library names
   // Examples: libobjc.so.4.6, libgnustep-base.so.1.31, libobjc2.so.4
+  // Windows: gnustep-base-1_31.dll, libobjc-4.6.dll
   return (strstr(module_name, "libobjc.") ||           // libobjc.so.4.6 (note the dot)
           strstr(module_name, "libgnustep-base.") ||   // libgnustep-base.so.1.31  
           strstr(module_name, "libobjc2") ||           // libobjc2.so.4 or libobjc2
-          strstr(module_name, "libBlocksRuntime"));    // libBlocksRuntime for blocks support
+          strstr(module_name, "libBlocksRuntime") ||   // libBlocksRuntime for blocks support
+          strstr(module_name, "gnustep-base-") ||      // Windows: gnustep-base-1_31.dll
+          strstr(module_name, "libobjc-"));            // Windows: libobjc-4.6.dll
 }
 
 bool GNUstepObjCRuntime::ReadObjCLibrary(const lldb::ModuleSP &module_sp) {

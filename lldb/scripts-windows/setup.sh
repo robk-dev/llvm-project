@@ -55,13 +55,14 @@ GNUSTEP_INSTALL_DIR="${WORKSPACE_ROOT}/gnustep-install"
 export SCRIPT_DIR WORKSPACE_ROOT PROJECT_ROOT LLVM_BUILD_DIR LLVM_REPO LLVM_BRANCH 
 export BUILD_TYPE PATCH_DIR PARALLEL_JOBS GNUSTEP_INSTALL_DIR
 
-# Source helper modules (skip gnustep_operations since already installed)
+# Source helper modules
 source "$SCRIPT_DIR/helpers/common.sh"
 source "$SCRIPT_DIR/helpers/system_checks.sh"
 source "$SCRIPT_DIR/helpers/llvm_operations.sh"
 source "$SCRIPT_DIR/helpers/build_operations.sh"
 source "$SCRIPT_DIR/helpers/path_replacer.sh"
 source "$SCRIPT_DIR/helpers/helper_scripts.sh"
+source "$SCRIPT_DIR/helpers/gnustep_operations.sh"
 
 # CRITICAL: Validate MSYS2 UCRT64 environment before proceeding
 validate_environment() {
