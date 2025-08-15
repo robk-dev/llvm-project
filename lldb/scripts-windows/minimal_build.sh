@@ -14,8 +14,8 @@ print_section "🚀 Minimal LLDB Build for MSYS2"
 
 cd "$BUILD_DIR"
 
-# Configure with minimal static build using GCC (more compatible with MSYS2)
-print_info "Configuring minimal LLDB build with GCC (for MSYS2 compatibility)..."
+# Configure with minimal shared build using GCC with linker workarounds
+print_info "Configuring minimal LLDB build with GCC and linker optimizations..."
 cmake "$LLVM_SRC/llvm" \
     -G "Ninja" \
     -DCMAKE_C_COMPILER="C:/tools/msys64/ucrt64/bin/gcc.exe" \
@@ -25,16 +25,16 @@ cmake "$LLVM_SRC/llvm" \
     -DLLVM_TARGETS_TO_BUILD="X86" \
     -DLLVM_ENABLE_RTTI=ON \
     -DLLVM_ENABLE_EH=ON \
-    -DBUILD_SHARED_LIBS=OFF \
-    -DLLVM_BUILD_LLVM_DYLIB=OFF \
-    -DLLVM_LINK_LLVM_DYLIB=OFF \
+    -DBUILD_SHARED_LIBS=ON \
+    -DLLVM_BUILD_LLVM_DYLIB=ON \
+    -DLLVM_LINK_LLVM_DYLIB=ON \
     -DLLDB_BUILD_FRAMEWORK=OFF \
-    -DLLDB_ENABLE_SHARED=OFF \
+    -DLLDB_ENABLE_SHARED=ON \
     -DLLDB_ENABLE_LIBXML2=OFF \
     -DLLDB_ENABLE_CURSES=OFF \
     -DLLDB_ENABLE_LIBEDIT=OFF \
     -DLLDB_ENABLE_LZMA=OFF \
-    -DLLVM_PARALLEL_COMPILE_JOBS=8 \
+    -DLLVM_PARALLEL_COMPILE_JOBS=6 \
     -DLLVM_PARALLEL_LINK_JOBS=1 \
     -DLLVM_INCLUDE_TESTS=OFF \
     -DLLDB_INCLUDE_TESTS=OFF \
@@ -43,8 +43,8 @@ cmake "$LLVM_SRC/llvm" \
     -DLLDB_PYTHON_HOME="C:/tools/msys64/ucrt64" \
     -DLLDB_EMBED_PYTHON_HOME=ON \
     -DLLDB_PYTHON_RELATIVE_PATH="python3.12" \
-    -DCMAKE_CXX_FLAGS="-static-libgcc -static-libstdc++" \
-    -DCMAKE_EXE_LINKER_FLAGS="-static-libgcc -static-libstdc++"
+    -DCMAKE_CXX_FLAGS="-static-libgcc -static-libstdc++ -Wa,-mbig-obj" \
+    -DCMAKE_EXE_LINKER_FLAGS="-static-libgcc -static-libstdc++ -Wl,--no-keep-memory -Wl,--reduce-memory-overheads -Wl,--as-needed -Wl,-z,norelro -Wl,--hash-style=gnu"
 
 print_info "Building LLVM Support libraries..."
 ninja -j8 LLVMSupport LLVMCore LLVMTargetParser LLVMBinaryFormat LLVMObject

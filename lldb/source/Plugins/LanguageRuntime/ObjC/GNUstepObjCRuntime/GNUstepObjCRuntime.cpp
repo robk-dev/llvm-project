@@ -69,13 +69,13 @@ GNUstepObjCRuntime::CreateInstance(Process *process,
   // CRITICAL DEBUG: Force output to stderr regardless of logging
   fprintf(stderr, "!!! GNUstepObjCRuntime::CreateInstance called for language %d !!!\n", (int)language);
   
-  // Handle both Objective-C (16) and Objective-C++ (17) like Apple does
-  if (language != eLanguageTypeObjC && language != eLanguageTypeObjC_plus_plus) {
-    fprintf(stderr, "!!! GNUstepObjCRuntime: Not ObjC/ObjC++ language (%d), returning nullptr !!!\n", (int)language);
+  // Handle Objective-C (16), Objective-C++ (17), and C (2) since GNUstep runtime includes C components
+  if (language != eLanguageTypeObjC && language != eLanguageTypeObjC_plus_plus && language != eLanguageTypeC) {
+    fprintf(stderr, "!!! GNUstepObjCRuntime: Not ObjC/ObjC++/C language (%d), returning nullptr !!!\n", (int)language);
     return nullptr;
   }
   
-  fprintf(stderr, "!!! GNUstepObjCRuntime: IS ObjC/ObjC++ language (%d), continuing... !!!\n", (int)language);
+  fprintf(stderr, "!!! GNUstepObjCRuntime: IS ObjC/ObjC++/C language (%d), continuing... !!!\n", (int)language);
   
   if (!process) {
     fprintf(stderr, "!!! GNUstepObjCRuntime: No process, returning nullptr !!!\n");

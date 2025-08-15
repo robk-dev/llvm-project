@@ -1,0 +1,15 @@
+[requires]
+GNUstep/1.24.8@GNUstep/c7de1826ef6b1354659568feebd40d7097efc04b
+
+[generators]
+cmake
+cmake_find_package
+cmake_paths
+pkg_config
+virtualenv
+make
+
+[imports]
+include, * -> ./conan_includes
+lib, * -> ./conan_libs
+bin, * -> ./conan_bins

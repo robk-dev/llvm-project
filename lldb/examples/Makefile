@@ -1,29 +1,53 @@
 # Makefile for LLDB Bridge Examples - Debug Symbol Edition
 
+# Include Conan build info for GNUstep paths
+include conanbuildinfo.mak
+# # Enhanced compilation flags for better debugging experience
+# CFLAGS = -fobjc-runtime=gnustep-2.1 \
+#          -fblocks \
+#          -fno-strict-aliasing \
+#          -fexceptions \
+#          -fobjc-exceptions \
+#          -g -O0 \
+#          -fno-omit-frame-pointer \
+#          -I/ucrt64/include \
+#          -I/ucrt64/include/GNUstepBase \
+#          -I/ucrt64/include/Foundation \
+#          -fconstant-string-class=NSConstantString \
+#          -DGNUSTEP -DGNUSTEP_BASE_LIBRARY=1 -DDEBUG=1 \
+#          -Wno-typedef-redefinition \
+#          -include $(shell pwd)/gnustep_fix.h
+
+# LDFLAGS = -L/ucrt64/lib \
+#           -g
+
+# LIBS = -lgnustep-base -lobjc -lBlocksRuntime -lpthread -lm
+
+
 # Use system clang 20.1.8 (compatible with current environment)
 CC = clang
 LLDB = ../build/bin/lldb
 
-# Enhanced compilation flags for better debugging experience
-CFLAGS = -fobjc-runtime=gnustep-2.1 \
-         -fblocks \
-         -fno-strict-aliasing \
-         -fexceptions \
-         -fobjc-exceptions \
-         -g -O0 \
-         -fno-omit-frame-pointer \
-         -I/ucrt64/include \
-         -I/ucrt64/include/GNUstepBase \
-         -I/ucrt64/include/Foundation \
+# WORKING GNUstep compilation flags - CRITICAL: Use gnustep-2.0 runtime and LLD linker!
+# These flags were discovered through testing and are required for proper method dispatch
+CFLAGS = -MMD -MP \
+         -DGNUSTEP -DGNUSTEP_BASE_LIBRARY=1 -DGNU_GUI_LIBRARY=1 \
+         -DGNUSTEP_RUNTIME=1 -D_NONFRAGILE_ABI=1 -DGNUSTEP_WITH_DLL \
+         -fno-strict-aliasing -fexceptions -fobjc-exceptions \
+         -D_NATIVE_OBJC_EXCEPTIONS -fno-omit-frame-pointer \
+         -DGSWARN -DGSDIAGNOSE -Wno-import \
+         -g -O0 -fobjc-runtime=gnustep-2.0 -fblocks \
          -fconstant-string-class=NSConstantString \
-         -DGNUSTEP -DGNUSTEP_BASE_LIBRARY=1 -DDEBUG=1 \
-         -Wno-typedef-redefinition \
+         -IC:/.conan/24ea94/1/include \
+         -IC:/.conan/24ea94/1/GNUstep/System/Library/Headers \
          -include $(shell pwd)/gnustep_fix.h
 
-LDFLAGS = -L/ucrt64/lib \
-          -g
+LDFLAGS = -Wl,--enable-auto-import -fuse-ld=lld -lstdc++ -lgcc_s \
+          -LC:/.conan/24ea94/1/lib \
+          -LC:/.conan/24ea94/1/GNUstep/System/Library/Libraries
 
-LIBS = -lgnustep-base -lobjc -lBlocksRuntime -lpthread -lm
+LIBS = -lgnustep-base -lobjc -lws2_32 -ladvapi32 -lcomctl32 \
+       -luser32 -lcomdlg32 -lmpr -lnetapi32 -lm -lpthread
 
 # Source files
 SOURCES = simple_test.m custom_class_test.m foundation_test.m string_test.m \

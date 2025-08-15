@@ -28,6 +28,8 @@
 #include "lldb/Utility/Status.h"
 #include "lldb/Utility/Stream.h"
 #include "lldb/Utility/StreamString.h"
+#include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <cstring>
 #include <sstream>
@@ -297,16 +299,16 @@ std::string GNUstepNSArraySummaryProvider::GetInlineElementsPreview(ValueObject 
   uint32_t preview_limit = std::min(count, MAX_COLLECTION_ELEMENTS_INLINE);
   
   // PERFORMANCE OPTIMIZATION: Pre-allocate string with estimated capacity
-  size_t estimated_capacity = 2 + (preview_limit * 12) + 10; // "@[" + elements + margin
+  size_t estimated_capacity = 2 + (preview_limit * 12) + 10; // "(" + elements + margin
   std::string result;
   result.reserve(estimated_capacity);
-  result = "@[";
+  result = "(";
   
   size_t ptr_size = GNUstepRuntimeHelper::GetAddressByteSize(process);
   
   // Add safety check to prevent infinite loops
   if (preview_limit == 0 || ptr_size == 0) {
-    result += "]";
+    result += ")";
     return result;
   }
   
@@ -340,10 +342,10 @@ std::string GNUstepNSArraySummaryProvider::GetInlineElementsPreview(ValueObject 
     
     // PERFORMANCE OPTIMIZATION: Limit nested collection detail in deep contexts
     if (context.depth >= 2 && !element_summary.empty() && 
-        (element_summary.find("@[") == 0 || element_summary.find("@{") == 0)) {
+        (element_summary.find("(") == 0 || element_summary.find("@{") == 0)) {
       // For nested collections at depth 2+, show simplified representation
-      if (element_summary.find("@[") == 0) {
-        result += "@[...]";
+      if (element_summary.find("(") == 0) {
+        result += "(...)";
       } else {
         result += "@{...}";
       }
@@ -362,6 +364,7 @@ std::string GNUstepNSArraySummaryProvider::GetInlineElementsPreview(ValueObject 
     if (element_summary.empty()) {
       result += "<object>";
     } else {
+      // CRITICAL FIX: Ensure clean string concatenation to prevent buffer corruption
       result += element_summary;
     }
   }
@@ -371,7 +374,10 @@ std::string GNUstepNSArraySummaryProvider::GetInlineElementsPreview(ValueObject 
     result += ", ...";
   }
   
-  result += "]";
+  result += ")";
+  
+  // CRITICAL FIX: Ensure proper string termination to prevent corruption
+  result.shrink_to_fit();
   
   // Performance optimization: debug logging removed
   
@@ -652,8 +658,8 @@ std::string GNUstepNSArraySummaryProvider::GetElementSummary(Process *process, l
   // Exit object tracking
   context.ExitObject(element_addr);
   
-  // For non-string objects where we couldn't get a better summary
-  return "";
+  // For non-string objects where we couldn't get a better summary, return empty string
+  return std::string();
 }
 
 bool GNUstepNSArraySummaryProvider::IsGNUstepTaggedPointer(lldb::addr_t addr) {

@@ -152,13 +152,9 @@ fi
 print_progress "Configuring LLDB build..."
 
 # Verify editline components exist
-if [[ -f "/ucrt64/lib/libedit.a" && -f "/ucrt64/include/editline/readline.h" ]]; then
-    EDITLINE_FOUND=true
-    print_info "Editline library found at /ucrt64/lib/libedit.a"
-else
-    EDITLINE_FOUND=false
-    print_warning "Editline library not found - will disable editline support"
-fi
+# Note: MSYS2 editline is incompatible with LLDB's BSD editline expectations
+EDITLINE_FOUND=false
+print_info "Disabling editline - MSYS2 implementation incompatible with LLDB"
 
 # Build CMake arguments dynamically
 CMAKE_ARGS=(
@@ -171,6 +167,10 @@ CMAKE_ARGS=(
     -DLLVM_TARGETS_TO_BUILD="X86"
     -DBUILD_SHARED_LIBS=OFF
     -DLLDB_ENABLE_CURSES=OFF
+    # -DLLDB_DISABLE_PYTHON=OFF
+    # -DLLDB_BUILD_FRAMEWORK=OFF
+    # -DLLDB_ENABLE_LIBXML2=OFF
+    # -DLLDB_ENABLE_LZMA=OFF
     -DLLVM_PARALLEL_COMPILE_JOBS="$PARALLEL_COMPILE_JOBS"
     -DLLVM_PARALLEL_LINK_JOBS="$PARALLEL_LINK_JOBS"
     -DLLVM_INCLUDE_TESTS=OFF
@@ -218,13 +218,13 @@ ninja -j"$PARALLEL_COMPILE_JOBS" clang-tablegen-targets
 
 print_progress "Building LLDB server (memory-conservative)..."
 export LDFLAGS="-Wl,--no-keep-memory -Wl,--reduce-memory-overheads -Wl,--as-needed"
-ninja -j"$PARALLEL_LINK_JOBS" lldb-server
+ninja -j8 lldb-server
 
 if [[ -f "bin/lldb-server.exe" ]]; then
     print_success "LLDB server built successfully!"
     
     print_progress "Building main LLDB executable..."
-    ninja -j"$PARALLEL_LINK_JOBS" lldb
+    ninja -j8 lldb
     
     if [[ -f "bin/lldb.exe" ]]; then
         print_success "LLDB built successfully!"

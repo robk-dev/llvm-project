@@ -8,9 +8,10 @@
             "type": "lldb",
             "request": "launch",
             "name": "🚀 GNUstep/libobjc2 - Debug (Fixed)",
-            "program": "${workspaceFolder}/examples/simple_test_foundation_fixed.exe",
+            "program": "${workspaceFolder}/examples/custom_class_test.exe",
             "args": [],
             "console": "integratedTerminal",
+            // "preLaunchTask": "build-all-examples",
             "initCommands": [
                 "settings set target.language objc",
                 "settings set target.process.stop-on-sharedlibrary-events false",
@@ -24,30 +25,6 @@
                 "LD_LIBRARY_PATH": "/ucrt64/lib:${env:LD_LIBRARY_PATH}",
                 "PYTHONPATH": "/c/tools/msys64/ucrt64/lib/python3.12:/c/tools/msys64/ucrt64/lib/python3.12/lib-dynload:/c/tools/msys64/ucrt64/lib/python3.12/site-packages:${env:PYTHONPATH}",
                 "PYTHONHOME": "/c/tools/msys64/ucrt64"
-            },
-            "terminal": "console",
-            "stopOnEntry": false
-        },
-        {
-            "type": "lldb",
-            "request": "launch",
-            "name": "🧪 Custom Class Test - GNUstep Working",
-            "program": "${workspaceFolder}/examples/custom_class_test_foundation_fixed.exe",
-            "args": [],
-            "console": "integratedTerminal",
-            "initCommands": [
-                "settings set target.language objc",
-                "settings set target.process.stop-on-sharedlibrary-events false",
-                "settings set target.prefer-dynamic-value no-dynamic-values",
-                "settings set target.auto-import-clang-modules false",
-                "settings set target.clang-module-search-paths \"\"",
-                "settings set target.expr-prefix-file \"\"",
-                "b main"
-            ],
-            "env": {
-                "PATH": "/ucrt64/lib:/ucrt64/bin:/c/code/llvm-project/build/bin:${env:PATH}",
-                "LD_LIBRARY_PATH": "/ucrt64/lib:${env:LD_LIBRARY_PATH}",
-                "GNUSTEP_ROOT": "/ucrt64"
             },
             "terminal": "console",
             "stopOnEntry": false

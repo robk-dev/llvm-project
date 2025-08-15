@@ -79,7 +79,7 @@ void GNUstepClassDescriptor::EnsureClassInfoLoaded() const {
   } else if (m_class_name) {
     // Try to load by name
     auto class_info_or_error = 
-        m_runtime_api->GetClassInfo(m_class_name.GetCString());
+        m_runtime_api->GetObjCClassInfo(m_class_name.GetCString());
     
     if (class_info_or_error) {
       m_class_info = std::make_unique<GNUstepRuntimeV2API::ClassInfo>(

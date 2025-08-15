@@ -186,7 +186,7 @@ public:
   // === Class Information ===
   
   /// Get comprehensive class information
-  llvm::Expected<ClassInfo> GetClassInfo(const std::string &class_name);
+  llvm::Expected<ClassInfo> GetObjCClassInfo(const std::string &class_name);
   
   /// Get class information from pointer
   llvm::Expected<ClassInfo> GetClassInfoFromPointer(Class cls);

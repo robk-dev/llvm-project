@@ -33,7 +33,17 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/raw_ostream.h"
 
+#ifdef _WIN32
+#include <windows.h>
+#define RTLD_LAZY 0
+#define dlsym(handle, name) GetProcAddress((HMODULE)handle, name)
+#define dlopen(path, flags) LoadLibraryA(path)
+#define dlclose(handle) FreeLibrary((HMODULE)handle)
+#define dlerror() "Windows LoadLibrary error"
+#else
 #include <dlfcn.h>
+#endif
+
 #include <memory>
 #include <string>
 #include <vector>
@@ -586,7 +596,7 @@ GNUstepRuntimeV2API::GetAllIvarsIncludingInherited(Class cls) {
 // === Class Information Implementation ===
 
 llvm::Expected<GNUstepRuntimeV2API::ClassInfo>
-GNUstepRuntimeV2API::GetClassInfo(const std::string &class_name) {
+GNUstepRuntimeV2API::GetObjCClassInfo(const std::string &class_name) {
   std::lock_guard<std::recursive_mutex> guard(m_mutex);
   
   // Check cache first

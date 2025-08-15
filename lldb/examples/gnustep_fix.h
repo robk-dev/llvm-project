@@ -10,6 +10,15 @@
 // We prevent the second definition by defining HAVE_MODE_T
 #define HAVE_MODE_T
 
+// Fix missing GNUstep Base macros
+#ifndef GS_EXPORT_CLASS
+#define GS_EXPORT_CLASS
+#endif
+
+#ifndef GS_EXPORT
+#define GS_EXPORT extern
+#endif
+
 // Now include Foundation which will use the sys/types.h definition
 #include <Foundation/Foundation.h>
 
