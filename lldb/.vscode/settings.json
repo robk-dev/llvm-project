@@ -4,8 +4,9 @@
         "LLDB_DEBUGSERVER_PATH": "/c/code/llvm-project/build/bin/lldb-server.exe",
         "PATH": "/ucrt64/lib:/ucrt64/bin:/c/code/llvm-project/build/bin"
     },
-    "lldb.verboseLogging": true,
     "lldb.showDisassembly": "never",
+    "lldb.evaluateForHovers": true,
+    "lldb.verboseLogging": true,
     "lldb.dereferencePointers": true,
     "python.formatting.provider": "black",
     "python.linting.enabled": true,
@@ -34,7 +35,6 @@
     "C_Cpp.default.configurationProvider": "ms-vscode.makefile-tools",
     "makefile.configureOnOpen": true,
     "lldb.displayFormat": "auto",
-    "lldb.evaluateForHovers": true,
     "lldb.commandCompletions": true,
     "lldb.suppressUpdateNotifications": false,
     "lldb.evaluationTimeout": 30,
