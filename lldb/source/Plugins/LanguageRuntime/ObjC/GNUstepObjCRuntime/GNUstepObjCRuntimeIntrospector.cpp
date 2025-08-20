@@ -32,6 +32,21 @@
 using namespace lldb;
 using namespace lldb_private;
 
+// Utility function to create safe expression evaluation options
+// Especially important for Windows to avoid first-chance exception issues
+static EvaluateExpressionOptions MakeSafeExprOpts() {
+  EvaluateExpressionOptions opts;
+  opts.SetUnwindOnError(true);
+  opts.SetIgnoreBreakpoints(true);
+  opts.SetTryAllThreads(false);
+  opts.SetTimeout(std::chrono::microseconds(2500000));  // 2.5 seconds
+  opts.SetTrapExceptions(false);       // Critical on Windows
+  opts.SetOneThreadTimeout(std::chrono::milliseconds(250));
+  opts.SetStopOthers(true);
+  opts.SetIsForUtilityExpr(true);
+  return opts;
+}
+
 GNUstepObjCRuntimeIntrospector::GNUstepObjCRuntimeIntrospector(Process *process)
     : m_process(process) {
   // Cache some runtime constants
@@ -297,22 +312,20 @@ lldb::addr_t GNUstepObjCRuntimeIntrospector::CallRuntimeFunction(
   ValueList arg_values;
   for (lldb::addr_t arg : args) {
     Value arg_value;
-    
-    // Determine argument type based on function name
+
+    CompilerType type;
     if (function_name == "objc_lookup_class") {
-      // Argument is a const char* (C string)
-      CompilerType char_ptr_type = scratch_ts_sp->GetCStringType(true);
-      arg_value.SetValueType(Value::ValueType::HostAddress);
-      arg_value.SetCompilerType(char_ptr_type);
+      // const char *
+      type = scratch_ts_sp->GetCStringType(true);
     } else {
-      // Argument is a pointer (void* or id)
-      CompilerType void_ptr_type = 
-          scratch_ts_sp->GetBasicType(eBasicTypeVoid).GetPointerType();
-      arg_value.SetValueType(Value::ValueType::Scalar);
-      arg_value.SetCompilerType(void_ptr_type);
+      // void *
+      type = scratch_ts_sp->GetBasicType(eBasicTypeVoid).GetPointerType();
     }
-    
+
+    arg_value.SetCompilerType(type);
+    arg_value.SetValueType(Value::ValueType::Scalar); // ALWAYS target scalar
     arg_value.GetScalar() = arg;
+
     arg_values.PushValue(arg_value);
   }
   
@@ -335,130 +348,6 @@ lldb::addr_t GNUstepObjCRuntimeIntrospector::CallRuntimeFunction(
   
   LLDB_LOG(log, "[GNUstep] CallRuntimeFunction: Successfully called {0}, result = 0x{1:x}",
            function_name, result);
-  return result;
-}
-
-bool GNUstepObjCRuntimeIntrospector::IsTaggedPointer(lldb::addr_t obj_addr) {
-  if (!m_process || obj_addr == 0 || obj_addr == LLDB_INVALID_ADDRESS) {
-    return false;
-  }
-  
-  // GNUstep/libobjc2 tagged pointer detection:
-  // Tagged pointers have specific tag values in the lower 3 bits:
-  // - 1 = NSSmallInt
-  // - 2 = NSSmallExtendedDouble  
-  // - 3 = NSSmallRepeatingDouble
-  // - 4 = NSSmallString (GSTinyString)
-  // - 5 = NSSmallFloat
-  // - 6 = Reserved
-  // - 7 = Reserved
-  //
-  // IMPORTANT: Not all pointers with non-zero lower bits are tagged!
-  // NSConstantString and other compile-time objects may have non-aligned addresses.
-  // 
-  // A more robust check: Tagged pointers typically have high bits that don't
-  // correspond to valid memory addresses. For 64-bit systems, tagged pointers
-  // usually have data encoded in the upper bits.
-  
-  uint8_t tag = obj_addr & 0x7;
-  
-  // Tag 0 means definitely not tagged
-  if (tag == 0) {
-    return false;
-  }
-  
-  // Only tags 1-5 are currently used for tagged pointers in GNUstep
-  if (tag > 5) {
-    return false;
-  }
-  
-  // Additional heuristic: Check if this looks like a valid memory address
-  // Tagged pointers typically encode data in high bits, making them invalid addresses
-  // On 64-bit systems, user-space addresses typically don't use the highest bits
-  
-  // Check if the address is in a reasonable range for heap/stack objects
-  // Most user-space addresses are below 0x0000800000000000 on x86_64
-  if (obj_addr < 0x0000800000000000ULL) {
-    // This looks like a normal pointer that happens to be misaligned
-    // Try to read the ISA pointer to confirm it's a real object
-    Status error;
-    lldb::addr_t isa = m_process->ReadPointerFromMemory(obj_addr, error);
-    if (error.Success() && isa != 0 && isa != LLDB_INVALID_ADDRESS) {
-      // Successfully read an ISA pointer - this is a real object, not tagged
-      return false;
-    }
-  }
-  
-  // If we get here, it's likely a tagged pointer
-  return true;
-}
-
-std::string GNUstepObjCRuntimeIntrospector::DecodeTaggedString(lldb::addr_t obj_addr) {
-  // GNUstep uses "tiny strings" with tag value 4 for short compile-time constants.
-  // Based on analysis of GNUstep source code (GSString.m):
-  //
-  // Bit layout for 64-bit systems:
-  // - Bits 0-2: Tag (must be 4 for tiny strings)
-  // - Bits 3-7: Length (5 bits, can store 0-31 but max is 9 characters)
-  // - Bits 8-56: Unused/padding
-  // - Bits 57-63, 50-56, 43-49, etc: Characters stored from high bits down
-  //   Each character uses 7 bits, stored at bit position (57 - i*7)
-  //
-  // The macro from GNUstep source:
-  // #define TINY_STRING_CHAR(s, x) ((s & (0xFE00000000000000 >> (x*7))) >> (57-(x*7)))
-  // #define TINY_STRING_LENGTH_SHIFT 3
-  // #define TINY_STRING_LENGTH_MASK 0x1f
-  //
-  // Note: The runtime may set additional high bits (e.g., 0xc instead of 0x8 prefix)
-  // for metadata. We mask these off when decoding.
-  
-  // Verify this is a tagged string (tag = 4)
-  if ((obj_addr & 0x7) != 4) {
-    return "";
-  }
-  
-  // Don't mask the address - the character extraction already handles the right bits
-  // Extract length from bits 3-7 (after the tag)
-  int length = (obj_addr >> 3) & 0x1f;
-  
-  // Sanity check - tiny strings can't be longer than 9 characters
-  if (length > 9 || length == 0) {
-    return "";
-  }
-  
-  // Decode characters - each uses 7 bits, stored from bit 57 downward
-  std::string result;
-  result.reserve(length);
-  
-  
-  for (int i = 0; i < length; i++) {
-    // Extract character at position i using the GNUstep formula
-    // Characters are stored at bits (57 - i*7) for 7 bits each
-    // The mask 0xFE means 7 bits (1111110 in binary), shifted to the right position
-    uint64_t mask = 0xFE00000000000000ULL >> (i * 7);
-    char c = (obj_addr & mask) >> (57 - (i * 7));
-    
-    
-    // Validate it's a printable ASCII character
-    if (c >= 0x20 && c <= 0x7e) {
-      result += c;
-    } else if (c == 0) {
-      // Unexpected null in the middle - stop
-      break;
-    } else {
-      // Non-printable character - this shouldn't happen with valid tiny strings
-      // Return what we have so far or indicate error
-      if (result.empty()) {
-        char buffer[32];
-        snprintf(buffer, sizeof(buffer), "<tagged_%llx...>", 
-                 (unsigned long long)(obj_addr & 0xffffffffffff));
-        return buffer;
-      }
-      break;
-    }
-  }
-  
-  // Return the decoded string
   return result;
 }
 
@@ -504,6 +393,78 @@ bool GNUstepObjCRuntimeIntrospector::IsValidObjectPointer(lldb::addr_t obj_addr)
   return true;
 }
 
+bool GNUstepObjCRuntimeIntrospector::IsTaggedPointer(lldb::addr_t obj_addr) {
+  // GNUstep uses the lower 3 bits for tagging on 64-bit systems
+  // Valid tags are: 1 (NSNumber), 2 (NSDate), 4 (NSString)
+  // Tag 0 means regular object pointer (must be aligned)
+  if (obj_addr == 0 || obj_addr == LLDB_INVALID_ADDRESS) {
+    return false;
+  }
+  
+  if (m_address_size == 8) {
+    // 64-bit: Check lower 3 bits for valid tags
+    uint8_t tag = obj_addr & 0x7;
+    return (tag == 1 || tag == 2 || tag == 4);
+  } else {
+    // 32-bit: Use lower bit only
+    return (obj_addr & 0x1) != 0;
+  }
+}
+
+std::string GNUstepObjCRuntimeIntrospector::DecodeTaggedString(lldb::addr_t obj_addr) {
+  // Decode GNUstep tagged strings (tag = 4)
+  // Bit layout for 64-bit systems:
+  // - Bits 0-2: Tag (must be 4 for tiny strings)
+  // - Bits 3-7: Length (5 bits, can store 0-31 but max is 9 characters)
+  // - Bits 8-56: Unused/padding
+  // - Bits 57-63, 50-56, 43-49, etc: Characters stored from high bits down
+  //   Each character uses 7 bits, stored at bit position (57 - i*7)
+  
+  // Verify this is a tagged string (tag = 4)
+  if ((obj_addr & 0x7) != 4) {
+    return "";
+  }
+  
+  // Extract length from bits 3-7 (after the tag)
+  int length = (obj_addr >> 3) & 0x1f;
+  
+  // Sanity check - tiny strings can't be longer than 9 characters
+  if (length > 9 || length == 0) {
+    return "";
+  }
+  
+  // Decode characters - each uses 7 bits, stored from bit 57 downward
+  std::string result;
+  result.reserve(length);
+  
+  for (int i = 0; i < length; i++) {
+    // Extract character at position i using the GNUstep formula
+    // Characters are stored at bits (57 - i*7) for 7 bits each
+    uint64_t mask = 0xFE00000000000000ULL >> (i * 7);
+    char c = (obj_addr & mask) >> (57 - (i * 7));
+    
+    // Validate it's a printable ASCII character
+    if (c >= 0x20 && c <= 0x7e) {
+      result += c;
+    } else if (c == 0) {
+      // Unexpected null in the middle - stop
+      break;
+    } else {
+      // Non-printable character - this shouldn't happen with valid tiny strings
+      // Return what we have so far or indicate error
+      if (result.empty()) {
+        char buffer[32];
+        snprintf(buffer, sizeof(buffer), "<tagged_%llx...>", 
+                 (unsigned long long)(obj_addr & 0xffffffffffff));
+        return buffer;
+      }
+      break;
+    }
+  }
+  
+  return result;
+}
+
 // Implementation of CallRuntimeFunctionImpl
 lldb::addr_t GNUstepObjCRuntimeIntrospector::CallRuntimeFunctionImpl(
     const char *function_name,
@@ -544,12 +505,8 @@ lldb::addr_t GNUstepObjCRuntimeIntrospector::CallRuntimeFunctionImpl(
   }
   
   // Setup execution options
-  EvaluateExpressionOptions options;
-  options.SetUnwindOnError(true);
-  options.SetTryAllThreads(false); // Use current thread
+  EvaluateExpressionOptions options = MakeSafeExprOpts();
   options.SetStopOthers(true);
-  options.SetIgnoreBreakpoints(true);
-  options.SetTimeout(std::chrono::milliseconds(1000)); // 1 second timeout
   options.SetIsForUtilityExpr(true);
   
   // Execute the function
@@ -649,6 +606,38 @@ GNUstepObjCRuntimeIntrospector::GetOrCreateFunctionCaller(
     }
   }
   
+  // Fallback to target-wide search if not found in specific modules
+  if (!symbol) {
+    // Search all modules by name across target as final fallback
+    SymbolContextList sc_list;
+    m_process->GetTarget().GetImages().FindSymbolsWithNameAndType(
+        ConstString(function_name), eSymbolTypeCode, sc_list);
+    if (sc_list.GetSize() > 0) {
+      SymbolContext sc;
+      sc_list.GetContextAtIndex(0, sc);
+      symbol = sc.symbol;
+    }
+  }
+  
+  // Windows/libobjc2 sometimes exposes these as aliases; add minimal remaps
+  if (!symbol) {
+    const char *alias_name = nullptr;
+    if (strcmp(function_name, "sel_getUid") == 0) {
+      alias_name = "sel_registerName";
+    }
+    
+    if (alias_name) {
+      SymbolContextList sc_list;
+      m_process->GetTarget().GetImages().FindSymbolsWithNameAndType(
+          ConstString(alias_name), eSymbolTypeCode, sc_list);
+      if (sc_list.GetSize() > 0) {
+        SymbolContext sc;
+        sc_list.GetContextAtIndex(0, sc);
+        symbol = sc.symbol;
+      }
+    }
+  }
+  
   if (!symbol) {
     error = Status::FromErrorStringWithFormat(
         "Could not find symbol for function '%s'", function_name);
@@ -656,9 +645,18 @@ GNUstepObjCRuntimeIntrospector::GetOrCreateFunctionCaller(
     return empty_ptr;
   }
   
-  function_address = symbol->GetAddress();
+  // Log which module we found the symbol in for diagnostics
+  const char *module_name = "unknown";
+  if (symbol->GetAddress().GetModule()) {
+    const char *name = symbol->GetAddress().GetModule()->GetFileSpec().GetFilename().GetCString();
+    if (name) module_name = name;
+  }
   
-  // Create the function caller
+  Log *log = GetLog(LLDBLog::Language);
+  LLDB_LOG(log, "[GNUstep] GetOrCreateFunctionCaller: Found {0} in module {1} at 0x{2:x}",
+           function_name, module_name, symbol->GetAddress().GetLoadAddress(&m_process->GetTarget()));
+
+  function_address = symbol->GetAddress();  // Create the function caller
   std::string caller_name = std::string(function_name) + "_caller";
   std::unique_ptr<FunctionCaller> new_caller(
       exe_ctx.GetTargetRef().GetFunctionCallerForLanguage(
@@ -765,6 +763,13 @@ lldb::ModuleSP GNUstepObjCRuntimeIntrospector::GetObjCModule() const {
            strstr(module_name, "libobjc2"))) {
         return module_sp;
       }
+      
+      // Windows DLL variants
+      if (module_name &&
+          ((strstr(module_name, "libobjc-") && strstr(module_name, ".dll")) ||
+           (strstr(module_name, "libobjc2") && strstr(module_name, ".dll")))) {
+        return module_sp;
+      }
     }
   }
   
@@ -785,6 +790,11 @@ lldb::ModuleSP GNUstepObjCRuntimeIntrospector::GetFoundationModule() const {
     if (module_sp) {
       const char *module_name = module_sp->GetFileSpec().GetFilename().GetCString();
       if (module_name && strstr(module_name, "libgnustep-base.so")) {
+        return module_sp;
+      }
+      
+      // Windows DLL variants
+      if (module_name && strstr(module_name, "gnustep-base") && strstr(module_name, ".dll")) {
         return module_sp;
       }
     }

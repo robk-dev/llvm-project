@@ -69,6 +69,10 @@ public:
   
   // Check if an address represents a valid object
   bool IsValidObjectPointer(lldb::addr_t obj_addr);
+  
+  // Helper method to call functions in the target process (public interface for DeclVendor)
+  lldb::addr_t CallRuntimeFunction(const std::string &function_name,
+                                   const std::vector<lldb::addr_t> &args);
 
 private:
   Process *m_process;
@@ -102,10 +106,6 @@ private:
   
   // Cache for ISA to class name mapping
   mutable std::unordered_map<lldb::addr_t, lldb_private::ConstString> m_isa_to_name_cache;
-  
-  // Helper method to call functions in the target process (existing interface)
-  lldb::addr_t CallRuntimeFunction(const std::string &function_name,
-                                   const std::vector<lldb::addr_t> &args);
   
   // New implementation methods for function calling
   lldb::addr_t CallRuntimeFunctionImpl(

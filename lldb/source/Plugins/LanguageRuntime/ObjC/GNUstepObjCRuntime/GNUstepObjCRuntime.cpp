@@ -14,6 +14,7 @@
 #include "lldb/DataFormatters/DataVisualization.h"
 #include "lldb/DataFormatters/TypeCategory.h"
 #include "lldb/Expression/UtilityFunction.h"
+#include "lldb/Expression/DiagnosticManager.h"
 #include "lldb/Target/ExecutionContext.h"
 #include "lldb/Target/Process.h"
 #include "lldb/Utility/Stream.h"
@@ -29,10 +30,26 @@
 #include "lldb/Utility/StreamString.h"
 #include "lldb/Utility/LLDBLog.h"
 #include "lldb/Utility/Log.h"
+#include "Plugins/TypeSystem/Clang/TypeSystemClang.h"
+#include "clang/AST/ASTContext.h"
+#include "clang/AST/Decl.h"
+#include <atomic>
 
 using namespace lldb;
 using namespace lldb_private;
 using namespace lldb_private::formatters;
+
+// Utility function to create safe expression evaluation options
+// Especially important for Windows to avoid first-chance exception issues
+static EvaluateExpressionOptions MakeSafeExprOpts() {
+  EvaluateExpressionOptions opts;
+  opts.SetUnwindOnError(true);
+  opts.SetIgnoreBreakpoints(true);
+  opts.SetTryAllThreads(false);
+  opts.SetTimeout(std::chrono::microseconds(2500000));  // 2.5 seconds
+  opts.SetTrapExceptions(false);       // Critical on Windows
+  return opts;
+}
 
 void GNUstepObjCRuntime::Initialize() {
   PluginManager::RegisterPlugin(
@@ -166,9 +183,13 @@ GNUstepObjCRuntime::CreateInstance(Process *process,
     LLDB_LOG(log, "*** GNUstepObjCRuntime: NO ObjC markers found, not creating instance ***");
     return nullptr;
   }
-  
+
   LLDB_LOG(log, "*** GNUstepObjCRuntime: ObjC markers found, CREATING runtime instance ***");
-  return new GNUstepObjCRuntime(process);
+  std::unique_ptr<GNUstepObjCRuntime> runtime_sp(new GNUstepObjCRuntime(process));
+  if (runtime_sp) {
+    runtime_sp->ArmEarlyInstall();
+  }
+  return runtime_sp.release();
 }
 
 GNUstepObjCRuntime::GNUstepObjCRuntime(Process *process)
@@ -184,6 +205,82 @@ GNUstepObjCRuntime::GNUstepObjCRuntime(Process *process)
 
 GNUstepObjCRuntime::~GNUstepObjCRuntime() {
   // Note: We don't unregister formatters here as they may be used by other GNUstep processes
+}
+
+void GNUstepObjCRuntime::ArmEarlyInstall() {
+  Log *log = GetLog(LLDBLog::Language | LLDBLog::Types);
+  LLDB_LOG(log, "[GNUstep] ArmEarlyInstall: Attempting early expression hooks installation");
+  
+  // Try now if libobjc is already present
+  if (!m_expression_hooks_installed) {
+    // Try to resolve symbols quietly first
+    ResolveAndCacheRuntimeSymbols();
+    
+    // If we found any core symbols, try to install hooks
+    if (m_objc_msgSend_addr != LLDB_INVALID_ADDRESS ||
+        m_objc_getClass_addr != LLDB_INVALID_ADDRESS) {
+      m_gnustep_library_loaded = true;
+      LLDB_LOG(log, "[GNUstep] ArmEarlyInstall: Found runtime symbols, installing hooks now");
+      InstallExpressionEvaluationHooks();
+    } else {
+      LLDB_LOG(log, "[GNUstep] ArmEarlyInstall: No runtime symbols yet, will retry on module load");
+    }
+  }
+}
+
+void GNUstepObjCRuntime::ModulesDidLoad(const ModuleList &module_list) {
+  Log *log = GetLog(LLDBLog::Language | LLDBLog::Types);
+  LLDB_LOG(log, "[GNUstep] ModulesDidLoad: {0} modules loaded", module_list.GetSize());
+  
+  if (m_expression_hooks_installed) {
+    return;
+  }
+  
+  // Check if any of the new modules are libobjc2 or related
+  bool found_objc_module = false;
+  for (size_t i = 0; i < module_list.GetSize(); ++i) {
+    ModuleSP module_sp = module_list.GetModuleAtIndex(i);
+    if (!module_sp) continue;
+    
+    const char *module_name = module_sp->GetFileSpec().GetFilename().GetCString();
+    if (!module_name) continue;
+    
+    if (strstr(module_name, "libobjc") || strstr(module_name, "objc2") ||
+        (strstr(module_name, "objc") && strstr(module_name, ".dll"))) {
+      found_objc_module = true;
+      m_gnustep_library_loaded = true;
+      LLDB_LOG(log, "[GNUstep] ModulesDidLoad: Found ObjC runtime module: {0}", module_name);
+      break;
+    }
+  }
+  
+  if (found_objc_module) {
+    // If libobjc landed, we can finally resolve everything
+    ResolveAndCacheRuntimeSymbols();
+    if (m_objc_msgSend_addr != LLDB_INVALID_ADDRESS ||
+        m_objc_getClass_addr != LLDB_INVALID_ADDRESS) {
+      LLDB_LOG(log, "[GNUstep] ModulesDidLoad: Runtime symbols now available, installing hooks");
+      InstallExpressionEvaluationHooks();
+    }
+  }
+}
+
+void GNUstepObjCRuntime::DidLaunch() {
+  Log *log = GetLog(LLDBLog::Language | LLDBLog::Types);
+  LLDB_LOG(log, "[GNUstep] DidLaunch: Process launched, attempting to install expression hooks");
+  
+  if (!m_expression_hooks_installed && m_gnustep_library_loaded) {
+    InstallExpressionEvaluationHooks();
+  }
+}
+
+void GNUstepObjCRuntime::DidAttach(ArchSpec &arch_spec) {
+  Log *log = GetLog(LLDBLog::Language | LLDBLog::Types);
+  LLDB_LOG(log, "[GNUstep] DidAttach: Process attached, attempting to install expression hooks");
+  
+  if (!m_expression_hooks_installed && m_gnustep_library_loaded) {
+    InstallExpressionEvaluationHooks();
+  }
 }
 
 llvm::Error GNUstepObjCRuntime::GetObjectDescription(Stream &str,
@@ -308,11 +405,7 @@ llvm::Error GNUstepObjCRuntime::GetObjectDescription(
 
   // Try expression evaluation for -description method with safety measures
   if (exe_ctx.GetFramePtr()) {
-    EvaluateExpressionOptions options;
-    options.SetUnwindOnError(true);
-    options.SetIgnoreBreakpoints(true);
-    options.SetTryAllThreads(false); // Only current thread for safety
-    options.SetTimeout(std::chrono::milliseconds(1000)); // Short 1-second timeout
+    EvaluateExpressionOptions options = MakeSafeExprOpts();
     options.SetSuppressPersistentResult(true);
     options.SetKeepInMemory(false);
     options.SetUseDynamic(lldb::eDynamicCanRunTarget);
@@ -488,9 +581,20 @@ bool GNUstepObjCRuntime::GetDynamicTypeAndAddress(ValueObject &in_value,
   
   LLDB_LOG(log, "Got dynamic class name: {0}", class_name);
   
-  // Set the address first
-  address.SetRawAddress(object_addr);
-  value_type = Value::ValueType::LoadAddress;
+  // CRITICAL FIX: For tagged pointers, NEVER set LoadAddress - keep as Scalar
+  // This prevents LLDB from trying to dereference tagged pointer values as memory addresses
+  if (is_tagged) {
+    // Tagged pointers are immediate values, not memory addresses
+    value_type = Value::ValueType::Scalar;
+    // Do NOT set an address - tagged pointers don't have backing memory
+    // The object_addr itself IS the data (encoded)
+    LLDB_LOG(log, "Tagged pointer - keeping as Scalar, no address set");
+  } else {
+    // Regular objects: provide load address for memory access
+    address.SetRawAddress(object_addr);
+    value_type = Value::ValueType::LoadAddress;
+    LLDB_LOG(log, "Regular object - setting LoadAddress to 0x{0:x}", object_addr);
+  }
   
   // Set the class name in the result
   class_type_or_name.SetName(ConstString(class_name));
@@ -775,8 +879,9 @@ GNUstepObjCRuntime::CreateObjectChecker(std::string name, ExecutionContext &exe_
   // Create a full-featured object checker using GNUstep runtime functions
   int len = ::snprintf(check_function_code, sizeof(check_function_code), R"(
 extern "C" void *object_getClass(void *obj);
-extern "C" int class_respondsToSelector(void *cls, void *sel);
+extern "C" void *class_getMethodImplementation(void *cls, void *sel);
 extern "C" int printf(const char *format, ...);
+
 extern "C" void
 %s(void *$__lldb_arg_obj, void *$__lldb_arg_selector) {
   // nil object is always OK for Objective-C
@@ -790,9 +895,9 @@ extern "C" void
     // This follows Apple's pattern for LLDB integration
     *((volatile int *)0) = 'ocgc';
   } else if ($__lldb_arg_selector != (void *)0) {
-    // Check if class responds to selector using GNUstep runtime
-    int responds = class_respondsToSelector(objc_class, $__lldb_arg_selector);
-    if (responds == 0) {
+    // Check if class responds to selector using method implementation check
+    void *imp = class_getMethodImplementation(objc_class, $__lldb_arg_selector);
+    if (imp == (void *)0) {
       // Object doesn't respond to selector - cause controlled crash
       *((volatile int *)0) = 'ocgc';
     }
@@ -823,8 +928,9 @@ GNUstepObjCRuntime::CreateSubscriptUtilityFunctions(ExecutionContext &exe_ctx) {
   // Create utility functions that implement modern subscript syntax by forwarding to older methods
   // This enables po fruits[0] and po dict[@"key"] to work by translating to [fruits objectAtIndex:0]
   const char *subscript_functions = R"(
-extern "C" void *object_getClass(void *obj);
-extern "C" void *sel_getUid(const char *str);
+extern "C" void *objc_lookup_class(const char *);
+extern "C" void *class_getMethodImplementation(void *cls, void *sel);
+extern "C" void *sel_getUid(const char *);
 extern "C" void *objc_msgSend(void *self, void *sel, ...);
 
 // Implement objectAtIndexedSubscript: by calling objectAtIndex:
@@ -970,63 +1076,6 @@ GNUstepObjCRuntime::GetClassDescriptor(ValueObject &valobj) {
   return GetClassDescriptorFromISA(isa);
 }
 
-void GNUstepObjCRuntime::ModulesDidLoad(const ModuleList &module_list) {
-  // Add recursion guard to prevent infinite loops
-  static thread_local bool s_in_modules_did_load = false;
-  if (s_in_modules_did_load) {
-    return;
-  }
-  llvm::SaveAndRestore<bool> guard(s_in_modules_did_load, true);
-  
-  // Call parent class method first for proper state management
-  ObjCLanguageRuntime::ModulesDidLoad(module_list);
-  
-  // CRITICAL: Completely disable processing during process launch to prevent infinite loops
-  Process *process = GetProcess();
-  if (process) {
-    lldb::StateType state = process->GetState();
-    if (state == eStateLaunching) {
-      // DO ABSOLUTELY NOTHING during process launch - not even logging
-      return;
-    }
-  }
-  
-  Log *log = GetLog(LLDBLog::Process);
-  LLDB_LOG(log, "GNUstepObjCRuntime::ModulesDidLoad called with {0} modules", 
-           module_list.GetSize());
-  
-  // For normal operation (not during launch), do what AppleObjCRuntime does:
-  // Just implement the equivalent of ReadObjCLibraryIfNeeded directly here
-  
-  // Initialize introspector if not done yet (deferred from constructor)
-  if (!m_introspector_up && process) {
-    m_introspector_up = std::make_unique<GNUstepObjCRuntimeIntrospector>(process);
-    LLDB_LOG(log, "GNUstepObjCRuntime: Created introspector");
-  }
-  
-  // Check if any of the newly loaded modules are GNUstep ObjC libraries
-  for (size_t i = 0; i < module_list.GetSize(); ++i) {
-    ModuleSP module_sp = module_list.GetModuleAtIndex(i);
-    if (IsModuleObjCLibrary(module_sp)) {
-      m_gnustep_library_loaded = true;
-      ReadObjCLibrary(module_sp);
-      LLDB_LOG(log, "GNUstepObjCRuntime: Found and processed GNUstep library: {0}", 
-               module_sp->GetFileSpec().GetFilename().GetCString());
-    }
-  }
-  
-  // Register formatters when we confirm GNUstep libraries are loaded
-  if (m_gnustep_library_loaded && !m_formatters_registered) {
-    LLDB_LOG(log, "GNUstepObjCRuntime: GNUstep libraries detected, registering formatters");
-    RegisterFormatters();
-  }
-  
-  // Initialize the runtime API now that libraries are loaded
-  if (m_gnustep_library_loaded && !m_runtime_api_up) {
-    InitializeRuntimeAPI();
-  }
-}
-
 void GNUstepObjCRuntime::InitializeRuntimeAPI() {
   Log *log = GetLog(LLDBLog::Process | LLDBLog::Types);
   LLDB_LOG(log, "GNUstepObjCRuntime::InitializeRuntimeAPI - Initializing runtime API");
@@ -1160,10 +1209,7 @@ void GNUstepObjCRuntime::InstallSubscriptMethodMapping() {
     (BOOL)[(Class)objc_getClass("NSDictionary") respondsToSelector:@selector(objectForKey:)]
   )";
   
-  EvaluateExpressionOptions options;
-  options.SetUnwindOnError(true);
-  options.SetIgnoreBreakpoints(true);
-  options.SetTimeout(std::chrono::seconds(1));
+  EvaluateExpressionOptions options = MakeSafeExprOpts();
   
   ValueObjectSP result_sp;
   Status error;
@@ -1183,14 +1229,674 @@ void GNUstepObjCRuntime::InstallSubscriptMethodMapping() {
 }
 
 void GNUstepObjCRuntime::InstallExpressionEvaluationHooks() {
-  Log *log = GetLog(LLDBLog::Process | LLDBLog::Types);
-  LLDB_LOG(log, "Installing expression evaluation hooks for modern subscript syntax");
+  Log *log = GetLog(LLDBLog::Language | LLDBLog::Types);
+  LLDB_LOG(log, "Installing expression evaluation hooks for GNUstep ObjC runtime");
   
-  // The main hook is actually in the DeclVendor which we've already implemented
-  // This method exists for future expansion of expression evaluation hooks
+  // Prevent multiple installations
+  if (m_expression_hooks_installed) {
+    LLDB_LOG(log, "Expression evaluation hooks already installed");
+    return;
+  }
   
-  // For now, just log that the hooks are "installed" (they're actually in the DeclVendor)
-  LLDB_LOG(log, "Expression evaluation hooks installed - modern subscript syntax should now work");
+  // 1) Resolve and cache canonical ObjC runtime symbols from libobjc2
+  ResolveAndCacheRuntimeSymbols();
+  
+  // Early-out if we can't resolve core symbols yet
+  if (m_objc_msgSend_addr == LLDB_INVALID_ADDRESS &&
+      m_objc_getClass_addr == LLDB_INVALID_ADDRESS) {
+    LLDB_LOG(log, "Core runtime symbols not available yet, deferring installation");
+    return;
+  }
+  
+  // 2) Ensure CFStringCreateWithBytes is available (real or fallback) 
+  EnsureCFStringCreateWithBytes();
+  
+  // 3) Inject runtime function prototypes into scratch AST
+  Target &target = GetProcess()->GetTarget();
+  for (LanguageType lang : {eLanguageTypeObjC, eLanguageTypeObjC_plus_plus}) {
+    auto ts_or_err = target.GetScratchTypeSystemForLanguage(lang);
+    if (ts_or_err) {
+      auto ts_sp = *ts_or_err;
+      if (ts_sp) {
+        auto *ts = llvm::dyn_cast<TypeSystemClang>(ts_sp.get());
+        if (ts) {
+          LLDB_LOG(log, "Injecting runtime function prototypes into scratch AST for language: {0}", 
+                   (lang == eLanguageTypeObjC) ? "ObjC" : "ObjC++");
+          InjectRuntimeFunctionDecls(*ts);
+        }
+      }
+    }
+  }
+  
+  // 4) Install subscript shims (safe no-op if symbols missing)
+  ExecutionContext exe_ctx(GetProcess());
+  CreateAndInstallSubscriptShims(exe_ctx);
+  
+  // 5) Install diagnostic utility function
+  CreateDiagnosticUtility(exe_ctx);
+  
+  // 6) Register these symbols with IRForTarget for expression rewriting
+  RegisterSymbolsWithIRForTarget();
+  
+  m_expression_hooks_installed = true;
+  LLDB_LOG(log, "[GNUstep] Expression evaluation hooks installed successfully");
+}
+
+void GNUstepObjCRuntime::ResolveAndCacheRuntimeSymbols() {
+  Log *log = GetLog(LLDBLog::Language | LLDBLog::Types);
+  LLDB_LOG(log, "Resolving GNUstep runtime symbols for expression evaluation");
+  
+  Target &target = GetProcess()->GetTarget();
+  const ModuleList &modules = target.GetImages();
+  
+  // Define the symbols we need for expression evaluation
+  struct SymbolInfo {
+    const char *name;
+    const char *fallback_name;
+    lldb::addr_t *cache_addr;
+  };
+  
+  SymbolInfo symbols[] = {
+    {"objc_msgSend", nullptr, &m_objc_msgSend_addr},
+    {"objc_msgSend_stret", nullptr, &m_objc_msgSend_stret_addr},
+    {"objc_msgSend_fpret", nullptr, &m_objc_msgSend_fpret_addr},
+    {"objc_getClass", "objc_lookup_class", &m_objc_getClass_addr},
+    {"sel_getUid", "sel_registerName", &m_sel_getUid_addr},
+    {"object_getClass", nullptr, &m_object_getClass_addr},
+    {"class_getMethodImplementation", nullptr, &m_class_getMethodImplementation_addr},
+    {"class_addMethod", nullptr, &m_class_addMethod_addr},
+    // Optional ARC helpers (non-fatal if not found)
+    {"objc_retain", nullptr, &m_objc_retain_addr},
+    {"objc_release", nullptr, &m_objc_release_addr},
+    {"objc_autoreleaseReturnValue", nullptr, &m_objc_autoreleaseReturnValue_addr},
+    {"objc_retainAutoreleasedReturnValue", nullptr, &m_objc_retainAutoreleasedReturnValue_addr},
+    {nullptr, nullptr, nullptr}
+  };
+  
+  // Search starting with GNUstep ObjC modules (libobjc-*.dll, libobjc2*)
+  for (size_t i = 0; i < modules.GetSize(); ++i) {
+    ModuleSP module_sp = modules.GetModuleAtIndex(i);
+    if (!module_sp) continue;
+    
+    const char *module_name = module_sp->GetFileSpec().GetFilename().GetCString();
+    if (!module_name) continue;
+    
+    // Check if this is a GNUstep ObjC runtime module
+    bool is_objc_module = (strstr(module_name, "libobjc") ||
+                          strstr(module_name, "objc2") ||
+                          (strstr(module_name, "objc") && strstr(module_name, ".dll")));
+    
+    if (!is_objc_module) continue;
+    
+    LLDB_LOG(log, "Searching for runtime symbols in module: {0}", module_name);
+    
+    // Look for each symbol in this module
+    for (int j = 0; symbols[j].name; j++) {
+      if (*(symbols[j].cache_addr) != LLDB_INVALID_ADDRESS) continue; // Already found
+      
+      const Symbol *symbol = module_sp->FindFirstSymbolWithNameAndType(
+          ConstString(symbols[j].name), eSymbolTypeCode);
+      
+      // Try fallback name if primary not found
+      if (!symbol && symbols[j].fallback_name) {
+        symbol = module_sp->FindFirstSymbolWithNameAndType(
+            ConstString(symbols[j].fallback_name), eSymbolTypeCode);
+      }
+      
+      if (symbol) {
+        *(symbols[j].cache_addr) = symbol->GetLoadAddress(&target);
+        LLDB_LOG(log, "Found {0} at 0x{1:x} in {2}", 
+                symbols[j].name, *(symbols[j].cache_addr), module_name);
+      }
+    }
+  }
+  
+  // Log what we found/didn't find
+  int resolved_count = 0;
+  for (int j = 0; symbols[j].name; j++) {
+    if (*(symbols[j].cache_addr) != LLDB_INVALID_ADDRESS) {
+      resolved_count++;
+    } else {
+      LLDB_LOG(log, "Warning: Could not resolve {0}", symbols[j].name);
+    }
+  }
+  
+  LLDB_LOG(log, "Resolved {0} out of {1} runtime symbols", resolved_count, 
+           sizeof(symbols)/sizeof(symbols[0]) - 1);
+}
+
+void GNUstepObjCRuntime::EnsureCFStringCreateWithBytes() {
+  Log *log = GetLog(LLDBLog::Language | LLDBLog::Types);
+  LLDB_LOG(log, "Ensuring CFStringCreateWithBytes is available");
+  
+  if (m_cfstring_create_addr != LLDB_INVALID_ADDRESS) {
+    LLDB_LOG(log, "CFStringCreateWithBytes already available at 0x{0:x}", m_cfstring_create_addr);
+    return;
+  }
+  
+  Target &target = GetProcess()->GetTarget();
+  const ModuleList &modules = target.GetImages();
+  
+  // First try to find the real CFStringCreateWithBytes in Foundation/CoreFoundation
+  for (size_t i = 0; i < modules.GetSize(); ++i) {
+    ModuleSP module_sp = modules.GetModuleAtIndex(i);
+    if (!module_sp) continue;
+    
+    const char *module_name = module_sp->GetFileSpec().GetFilename().GetCString();
+    if (!module_name) continue;
+    
+    // Check for Foundation/CoreFoundation modules
+    bool is_foundation = (strstr(module_name, "gnustep-base") ||
+                         strstr(module_name, "Foundation") ||
+                         strstr(module_name, "CoreFoundation"));
+    
+    if (!is_foundation) continue;
+    
+    const Symbol *symbol = module_sp->FindFirstSymbolWithNameAndType(
+        ConstString("CFStringCreateWithBytes"), eSymbolTypeCode);
+    
+    if (symbol) {
+      m_cfstring_create_addr = symbol->GetLoadAddress(&target);
+      LLDB_LOG(log, "Found real CFStringCreateWithBytes at 0x{0:x} in {1}", 
+               m_cfstring_create_addr, module_name);
+      return;
+    }
+  }
+  
+  // If not found, install our own fallback implementation
+  LLDB_LOG(log, "CFStringCreateWithBytes not found, installing fallback");
+  
+  // Create fallback implementation with the correct function name for IR linking
+  const char *cfstring_fallback = R"(
+// GNUstep fallback for IR: CFStringCreateWithBytes
+extern "C" void *objc_getClass(const char*);
+extern "C" void *sel_getUid(const char*);
+extern "C" void *objc_msgSend(void*, void*, ...);
+
+extern "C" void *CFStringCreateWithBytes(void *alloc,
+                                         const unsigned char *bytes,
+                                         long numBytes,
+                                         unsigned long encoding,
+                                         unsigned char isExternalRepresentation)
+{
+  (void)alloc; (void)encoding; (void)isExternalRepresentation;
+  
+  void *nsstringClass = objc_getClass("NSString");
+  if (!nsstringClass) return (void*)0;
+  
+  void *sel = sel_getUid("stringWithUTF8String:");
+  if (!sel) return (void*)0;
+  
+  return objc_msgSend(nsstringClass, sel, (const char*)bytes);
+}
+)";
+
+  // Setup execution context for utility function creation
+  ExecutionContext exe_ctx(GetProcess());
+  if (!exe_ctx.HasProcessScope()) {
+    LLDB_LOG(log, "No valid execution context for CFString fallback installation");
+    return;
+  }
+  
+  // Create the utility function if not already created
+  if (!m_cfstring_utility_fn) {
+    auto utility_fn_or_err = target.CreateUtilityFunction(
+        cfstring_fallback, "CFStringCreateWithBytes", eLanguageTypeC, exe_ctx);
+    
+    if (!utility_fn_or_err) {
+      LLDB_LOG(log, "Failed to create CFStringCreateWithBytes fallback: {0}", 
+               llvm::toString(utility_fn_or_err.takeError()));
+      return;
+    }
+    
+    m_cfstring_utility_fn = std::move(*utility_fn_or_err);
+  }
+  
+  // << THIS WAS MISSING >> - Actually install the utility function
+  DiagnosticManager diagnostic_manager;
+  Status install_error;
+  if (!m_cfstring_utility_fn->Install(diagnostic_manager, exe_ctx)) {
+    LLDB_LOG(log, "Failed to install CFStringCreateWithBytes fallback: {0}", 
+             diagnostic_manager.GetString());
+    return;
+  }
+  
+  // Get the real address of our installed fallback function
+  // The utility function should now be compiled and loaded in the target
+  Target &tgt = exe_ctx.GetTargetRef();
+  SymbolContextList sc_list;
+  tgt.GetImages().FindSymbolsWithNameAndType(
+      ConstString("CFStringCreateWithBytes"), eSymbolTypeCode, sc_list);
+  
+  if (sc_list.GetSize() > 0) {
+    SymbolContext sc;
+    sc_list.GetContextAtIndex(0, sc);
+    if (sc.symbol) {
+      m_cfstring_create_addr = sc.symbol->GetLoadAddress(&tgt);
+      LLDB_LOG(log, "Installed CFStringCreateWithBytes fallback at 0x{0:x}", m_cfstring_create_addr);
+      return;
+    }
+  }
+  
+  LLDB_LOG(log, "Failed to get address of CFStringCreateWithBytes fallback after installation");
+}
+
+void GNUstepObjCRuntime::CreateAndInstallSubscriptShims(ExecutionContext &exe_ctx) {
+  if (m_subscripts_installed)
+    return;
+
+  Log *log = GetLog(LLDBLog::Language | LLDBLog::Types);
+  LLDB_LOG(log, "Installing subscript shims for modern Objective-C syntax");
+
+  // 0) Require the basic runtime symbols to be resolvable when the UtilityFunction compiles
+  if (m_class_addMethod_addr == LLDB_INVALID_ADDRESS ||
+      m_objc_getClass_addr    == LLDB_INVALID_ADDRESS ||
+      m_sel_getUid_addr       == LLDB_INVALID_ADDRESS) {
+    // Try to (re)locate them if not already set
+    ResolveAndCacheRuntimeSymbols(); // existing scan that sets the *_addr fields
+  }
+  if (m_class_addMethod_addr == LLDB_INVALID_ADDRESS ||
+      m_objc_getClass_addr    == LLDB_INVALID_ADDRESS ||
+      m_sel_getUid_addr       == LLDB_INVALID_ADDRESS) {
+    LLDB_LOG(log, "subscript shims: required symbols missing; skipping install");
+    return;
+  }
+
+  // 1) Build the utility function source
+  static const char *kSubscriptUtilsText = R"UTIL(
+extern "C" void *objc_getClass(const char *name);
+extern "C" void *sel_getUid(const char *name);
+typedef id (*IMP)(id, SEL, ...);
+extern "C" int class_addMethod(void *cls, void *sel, void *imp, const char *types);
+
+id __lldb_objc_objectAtIndexedSubscript(id self, SEL _cmd, unsigned long long idx) {
+    return [self objectAtIndex:idx];
+}
+id __lldb_objc_objectForKeyedSubscript(id self, SEL _cmd, id key) {
+    return [self objectForKey:key];
+}
+int __lldb_install_subscript_shims(void *imp_array, void *imp_dict) {
+    void *NSArray = objc_getClass("NSArray");
+    void *NSDictionary = objc_getClass("NSDictionary");
+    void *sel_array = sel_getUid("objectAtIndexedSubscript:");
+    void *sel_dict  = sel_getUid("objectForKeyedSubscript:");
+    int ok1 = class_addMethod(NSArray,     sel_array, (void*)imp_array, "@@:Q");
+    int ok2 = class_addMethod(NSDictionary, sel_dict,  (void*)imp_dict,  "@@:@");
+    return (ok1 || ok2) ? 1 : 1;
+}
+)UTIL";
+
+  if (!m_subscript_utils_fn) {
+    Target &target = GetProcess()->GetTarget();
+    auto uf_or_err = target.CreateUtilityFunction(
+        kSubscriptUtilsText, /* name hint */ "__lldb_subscript_utils",
+        eLanguageTypeObjC, exe_ctx);
+    if (!uf_or_err) {
+      LLDB_LOG(log, "failed to create subscript utils UF: {0}",
+               llvm::toString(uf_or_err.takeError()));
+      return;
+    }
+    m_subscript_utils_fn = std::move(*uf_or_err);
+  }
+
+  DiagnosticManager diagnostic_manager;
+  if (!m_subscript_utils_fn->Install(diagnostic_manager, exe_ctx)) {
+    LLDB_LOG(log, "failed to install subscript utils UF: {0}",
+              diagnostic_manager.GetString());
+    return;
+  }
+
+  // 2) Get addresses of the three functions we just injected
+  auto get_sym_addr = [&](const char *name) -> addr_t {
+    ConstString cs(name);
+    // UtilityFunction publishes its symbols to the target; use the runtime resolver
+    return LookupRuntimeSymbol(cs);
+  };
+
+  m_imp_array_subscript_addr = get_sym_addr("__lldb_objc_objectAtIndexedSubscript");
+  m_imp_dict_subscript_addr  = get_sym_addr("__lldb_objc_objectForKeyedSubscript");
+  m_install_subscripts_addr  = get_sym_addr("__lldb_install_subscript_shims");
+
+  if (m_imp_array_subscript_addr == LLDB_INVALID_ADDRESS ||
+      m_imp_dict_subscript_addr  == LLDB_INVALID_ADDRESS ||
+      m_install_subscripts_addr  == LLDB_INVALID_ADDRESS) {
+    LLDB_LOG(log, "could not resolve subscript utils addresses");
+    return;
+  }
+
+  // 3) Call the installer exactly once, passing the two IMPs
+  // Drive a tiny expression (now that symbol lookup works).
+  {
+    StreamString call;
+    call.Printf("(int)__lldb_install_subscript_shims((void*)0x%llx,(void*)0x%llx)",
+                (unsigned long long)m_imp_array_subscript_addr,
+                (unsigned long long)m_imp_dict_subscript_addr);
+
+    EvaluateExpressionOptions opts;
+    opts.SetIgnoreBreakpoints(true);
+    opts.SetUnwindOnError(true);
+    opts.SetTryAllThreads(false);
+    opts.SetLanguage(eLanguageTypeObjC);
+
+    ValueObjectSP result;
+    Target &target = GetProcess()->GetTarget();
+    target.EvaluateExpression(call.GetString(), exe_ctx.GetFramePtr(), result, opts);
+
+    // Best-effort: even if evaluation didn't return a VO, we proceed.
+  }
+
+  m_subscripts_installed = true;
+  LLDB_LOG(log, "subscript shims installed");
+}
+
+void GNUstepObjCRuntime::CreateDiagnosticUtility(ExecutionContext &exe_ctx) {
+  Log *log = GetLog(LLDBLog::Language | LLDBLog::Types);
+  LLDB_LOG(log, "Installing diagnostic utility for GNUstep runtime state");
+
+  if (m_diagnostic_utility_fn) {
+    return; // Already installed
+  }
+
+  // Create diagnostic function that returns bitmask of what's working
+  static const char *kDiagnosticUtilsText = R"UTIL(
+extern "C" int __lldb_gnustep_diag(void) {
+    int result = 0;
+    // bit 0: core symbols resolved (objc_msgSend, objc_getClass, sel_getUid)
+    // bit 1: decls injected (this function exists = decls were injected)  
+    // bit 2: CFString address ready
+    // bit 3: subscript shims installed
+    // bit 4: ARC helpers available
+    
+    result |= 1; // If this function runs, decls were injected
+    
+    // We can't easily check the other states from within the utility function
+    // The caller can inspect individual symbol addresses if needed
+    return result;
+}
+)UTIL";
+
+  Target &target = GetProcess()->GetTarget();
+  auto uf_or_err = target.CreateUtilityFunction(
+      kDiagnosticUtilsText, "__lldb_gnustep_diagnostic",
+      eLanguageTypeC, exe_ctx);
+  if (!uf_or_err) {
+    LLDB_LOG(log, "failed to create diagnostic utils UF: {0}",
+             llvm::toString(uf_or_err.takeError()));
+    return;
+  }
+  m_diagnostic_utility_fn = std::move(*uf_or_err);
+
+  DiagnosticManager diagnostic_manager;
+  if (!m_diagnostic_utility_fn->Install(diagnostic_manager, exe_ctx)) {
+    LLDB_LOG(log, "failed to install diagnostic utils UF: {0}",
+              diagnostic_manager.GetString());
+    return;
+  }
+
+  // Get the address by finding the function in the target's symbol table
+  SymbolContextList sc_list;
+  target.GetImages().FindSymbolsWithNameAndType(
+      ConstString("__lldb_gnustep_diag"), eSymbolTypeCode, sc_list);
+  
+  if (sc_list.GetSize() > 0) {
+    SymbolContext sc;
+    sc_list.GetContextAtIndex(0, sc);
+    if (sc.symbol) {
+      m_diagnostic_function_addr = sc.symbol->GetLoadAddress(&target);
+      LLDB_LOG(log, "Installed diagnostic utility at 0x{0:x}", m_diagnostic_function_addr);
+    }
+  }
+}
+
+// Helper function to create extern "C" function declarations
+static clang::FunctionDecl *
+CreateExternCFunction(TypeSystemClang &ts,
+                      clang::DeclContext *dc,
+                      llvm::StringRef name,
+                      clang::QualType result_qt,
+                      llvm::ArrayRef<clang::QualType> param_qts,
+                      bool is_variadic) {
+  clang::ASTContext &ast = ts.getASTContext();
+  clang::IdentifierInfo &ii = ast.Idents.get(name);
+  
+  clang::FunctionProtoType::ExtProtoInfo epi;
+  epi.Variadic = is_variadic;
+  clang::QualType fn_ty = ast.getFunctionType(result_qt, param_qts, epi);
+  
+  auto *fd = clang::FunctionDecl::Create(ast, dc,
+              clang::SourceLocation(), clang::SourceLocation(),
+              &ii, fn_ty, /*TInfo*/nullptr,
+              clang::SC_Extern);
+  fd->setImplicit(true);
+  dc->addDecl(fd);
+  return fd;
+}
+
+void GNUstepObjCRuntime::InjectRuntimeFunctionDecls(TypeSystemClang &ts) {
+  Log *log = GetLog(LLDBLog::Language | LLDBLog::Types);
+  LLDB_LOG(log, "[GNUstep] Injecting runtime function prototypes into scratch AST");
+  
+  clang::ASTContext &ast = ts.getASTContext();
+  clang::DeclContext *tu = ast.getTranslationUnitDecl();
+
+  // --- typedefs: id, Class, SEL, IMP (all as void*)
+  clang::QualType void_ty = ast.VoidTy;
+  clang::QualType void_ptr = ast.getPointerType(void_ty);
+
+  auto make_typedef = [&](llvm::StringRef name, clang::QualType qt) {
+    clang::IdentifierInfo &ii = ast.Idents.get(name);
+    auto *td = clang::TypedefDecl::Create(ast, tu,
+                  clang::SourceLocation(), clang::SourceLocation(),
+                  &ii, ast.getTrivialTypeSourceInfo(qt));
+    tu->addDecl(td);
+    return ast.getTypedefType(td);
+  };
+  
+  clang::QualType qt_id    = make_typedef("id", void_ptr);
+  clang::QualType qt_Class = make_typedef("Class", void_ptr);
+  clang::QualType qt_SEL   = make_typedef("SEL", void_ptr);
+  clang::QualType qt_IMP   = make_typedef("IMP", void_ptr);
+
+  clang::QualType qt_char   = ast.CharTy;
+  clang::QualType qt_ccharp = ast.getPointerType(ast.getConstType(qt_char));
+  clang::QualType qt_bool   = ast.BoolTy;
+
+  // id objc_msgSend(id, SEL, ...);
+  {
+    clang::QualType params[] = { qt_id, qt_SEL };
+    CreateExternCFunction(ts, tu, "objc_msgSend", qt_id, params, /*variadic=*/true);
+  }
+
+  // Optional companions:
+  // void objc_msgSend_stret(void*, id, SEL, ...);
+  {
+    clang::QualType params[] = { void_ptr, qt_id, qt_SEL };
+    CreateExternCFunction(ts, tu, "objc_msgSend_stret", void_ty, params, /*variadic=*/true);
+  }
+  // double objc_msgSend_fpret(id, SEL, ...);
+  {
+    clang::QualType params[] = { qt_id, qt_SEL };
+    CreateExternCFunction(ts, tu, "objc_msgSend_fpret", ast.DoubleTy, params, /*variadic=*/true);
+  }
+
+  // Class objc_getClass(const char *);
+  {
+    clang::QualType params[] = { qt_ccharp };
+    CreateExternCFunction(ts, tu, "objc_getClass", qt_Class, params, /*variadic=*/false);
+  }
+  // Class objc_lookup_class(const char *);
+  {
+    clang::QualType params[] = { qt_ccharp };
+    CreateExternCFunction(ts, tu, "objc_lookup_class", qt_Class, params, /*variadic=*/false);
+  }
+
+  // SEL sel_getUid(const char *);
+  {
+    clang::QualType params[] = { qt_ccharp };
+    CreateExternCFunction(ts, tu, "sel_getUid", qt_SEL, params, /*variadic=*/false);
+  }
+  // SEL sel_registerName(const char *);
+  {
+    clang::QualType params[] = { qt_ccharp };
+    CreateExternCFunction(ts, tu, "sel_registerName", qt_SEL, params, /*variadic=*/false);
+  }
+
+  // id object_getClass(id);
+  {
+    clang::QualType params[] = { qt_id };
+    CreateExternCFunction(ts, tu, "object_getClass", qt_id, params, /*variadic=*/false);
+  }
+
+  // IMP class_getMethodImplementation(Class, SEL);
+  {
+    clang::QualType params[] = { qt_Class, qt_SEL };
+    CreateExternCFunction(ts, tu, "class_getMethodImplementation", qt_IMP, params, /*variadic=*/false);
+  }
+
+  // bool class_addMethod(Class, SEL, IMP, const char *);
+  {
+    clang::QualType params[] = { qt_Class, qt_SEL, qt_IMP, qt_ccharp };
+    CreateExternCFunction(ts, tu, "class_addMethod", qt_bool, params, /*variadic=*/false);
+  }
+
+  // ARC helpers (declare even if they map to 0 at runtime)
+  {
+    clang::QualType params1[] = { qt_id };
+    CreateExternCFunction(ts, tu, "objc_retain", qt_id, params1, false);
+    CreateExternCFunction(ts, tu, "objc_release", void_ty, params1, false);
+    CreateExternCFunction(ts, tu, "objc_autoreleaseReturnValue", qt_id, params1, false);
+    CreateExternCFunction(ts, tu, "objc_retainAutoreleasedReturnValue", qt_id, params1, false);
+  }
+
+  // And declare CFStringCreateWithBytes so the IR rewriter can always see a prototype:
+  {
+    // CF types are pointers here; signature aligned with what IRForTarget expects.
+    clang::QualType params[] = { void_ptr, /*alloc*/
+                                 ast.getPointerType(ast.UnsignedCharTy), /*bytes*/
+                                 ast.LongTy, /*numBytes*/
+                                 ast.IntTy,  /*encoding*/
+                                 qt_bool     /*isExternalRep*/ };
+    CreateExternCFunction(ts, tu, "CFStringCreateWithBytes", void_ptr, params, /*variadic=*/false);
+  }
+
+  // Add diagnostic utility function for field testing
+  {
+    // int __lldb_gnustep_diag(void) - returns bitmask of what's installed
+    CreateExternCFunction(ts, tu, "__lldb_gnustep_diag", ast.IntTy, {}, /*variadic=*/false);
+  }
+  
+  LLDB_LOG(log, "[GNUstep] Runtime function prototypes injected successfully");
+}
+
+void GNUstepObjCRuntime::RegisterSymbolsWithIRForTarget() {
+  Log *log = GetLog(LLDBLog::Language | LLDBLog::Types);
+  LLDB_LOG(log, "Registering runtime symbols with IRForTarget");
+  
+  // This is where we would hook into LLDB's IRForTarget to provide
+  // symbol addresses for expression rewriting. For now, we cache the
+  // addresses so they can be accessed by the expression evaluation system.
+  
+  // The actual registration happens through LLDB's expression system
+  // when GetObjCRuntimeAddresses() is called during IR generation
+  
+  LLDB_LOG(log, "Runtime symbol registration completed");
+}
+
+std::map<std::string, lldb::addr_t> GNUstepObjCRuntime::GetObjCRuntimeAddresses() {
+  std::map<std::string, lldb::addr_t> addresses;
+  
+  // Provide the symbol addresses we resolved for IR rewriting
+  if (m_objc_msgSend_addr != LLDB_INVALID_ADDRESS)
+    addresses["objc_msgSend"] = m_objc_msgSend_addr;
+  if (m_objc_msgSend_stret_addr != LLDB_INVALID_ADDRESS)
+    addresses["objc_msgSend_stret"] = m_objc_msgSend_stret_addr;
+  if (m_objc_msgSend_fpret_addr != LLDB_INVALID_ADDRESS)
+    addresses["objc_msgSend_fpret"] = m_objc_msgSend_fpret_addr;
+  if (m_objc_getClass_addr != LLDB_INVALID_ADDRESS)
+    addresses["objc_getClass"] = m_objc_getClass_addr;
+  if (m_sel_getUid_addr != LLDB_INVALID_ADDRESS)
+    addresses["sel_getUid"] = m_sel_getUid_addr;
+  if (m_object_getClass_addr != LLDB_INVALID_ADDRESS)
+    addresses["object_getClass"] = m_object_getClass_addr;
+  if (m_class_getMethodImplementation_addr != LLDB_INVALID_ADDRESS)
+    addresses["class_getMethodImplementation"] = m_class_getMethodImplementation_addr;
+  if (m_cfstring_create_addr != LLDB_INVALID_ADDRESS)
+    addresses["CFStringCreateWithBytes"] = m_cfstring_create_addr;
+  if (m_class_addMethod_addr != LLDB_INVALID_ADDRESS)
+    addresses["class_addMethod"] = m_class_addMethod_addr;
+    
+  // Optional ARC helpers
+  if (m_objc_retain_addr != LLDB_INVALID_ADDRESS)
+    addresses["objc_retain"] = m_objc_retain_addr;
+  if (m_objc_release_addr != LLDB_INVALID_ADDRESS)
+    addresses["objc_release"] = m_objc_release_addr;
+  if (m_objc_autoreleaseReturnValue_addr != LLDB_INVALID_ADDRESS)
+    addresses["objc_autoreleaseReturnValue"] = m_objc_autoreleaseReturnValue_addr;
+  if (m_objc_retainAutoreleasedReturnValue_addr != LLDB_INVALID_ADDRESS)
+    addresses["objc_retainAutoreleasedReturnValue"] = m_objc_retainAutoreleasedReturnValue_addr;
+    
+  return addresses;
+}
+
+lldb::addr_t GNUstepObjCRuntime::LookupRuntimeSymbol(ConstString name) {
+  Log *log = GetLog(LLDBLog::Language | LLDBLog::Types);
+  LLDB_LOG(log, "GNUstepObjCRuntime::LookupRuntimeSymbol called for: {0}", name.GetCString());
+  
+  // Make sure our symbol cache is ready
+  if (!m_expression_hooks_installed)
+    InstallExpressionEvaluationHooks();
+
+  const llvm::StringRef s = name.GetStringRef();
+
+  auto ret = [&](lldb::addr_t a) { 
+    if (a != LLDB_INVALID_ADDRESS) {
+      LLDB_LOG(log, "GNUstepObjCRuntime::LookupRuntimeSymbol returning 0x{0:x} for {1}", a, name.GetCString());
+    } else {
+      LLDB_LOG(log, "GNUstepObjCRuntime::LookupRuntimeSymbol returning INVALID_ADDRESS for {0}", name.GetCString());
+    }
+    return a == LLDB_INVALID_ADDRESS ? LLDB_INVALID_ADDRESS : a; 
+  };
+
+  if (s == "objc_msgSend")                 return ret(m_objc_msgSend_addr);
+  if (s == "objc_msgSend_stret")           return ret(m_objc_msgSend_stret_addr);
+  if (s == "objc_msgSend_fpret")           return ret(m_objc_msgSend_fpret_addr);
+  if (s == "objc_getClass" || s == "objc_lookup_class")
+                                                return ret(m_objc_getClass_addr);
+  if (s == "sel_getUid" || s == "sel_registerName")
+                                                return ret(m_sel_getUid_addr);
+  if (s == "object_getClass")              return ret(m_object_getClass_addr);
+  if (s == "class_getMethodImplementation")
+                                                return ret(m_class_getMethodImplementation_addr);
+  if (s == "class_addMethod")              return ret(m_class_addMethod_addr);
+
+  // Optional ARC helpers (best effort)
+  if (s == "objc_retain")                  return ret(m_objc_retain_addr);
+  if (s == "objc_release")                 return ret(m_objc_release_addr);
+  if (s == "objc_autoreleaseReturnValue")  return ret(m_objc_autoreleaseReturnValue_addr);
+  if (s == "objc_retainAutoreleasedReturnValue") 
+                                                return ret(m_objc_retainAutoreleasedReturnValue_addr);
+
+  // NSString constant rewrite dependency:
+  if (s == "CFStringCreateWithBytes") {
+    // Ensure fallback is installed if the symbol didn't exist in Foundation/CoreFoundation
+    EnsureCFStringCreateWithBytes();
+    return ret(m_cfstring_create_addr);
+  }
+
+  // Subscript shim functions (if installed):
+  if (s == "__lldb_objc_objectAtIndexedSubscript")
+                                                return ret(m_imp_array_subscript_addr);
+  if (s == "__lldb_objc_objectForKeyedSubscript")
+                                                return ret(m_imp_dict_subscript_addr);
+  if (s == "__lldb_install_subscript_shims")
+                                                return ret(m_install_subscripts_addr);
+
+  // Diagnostic utility function:
+  if (s == "__lldb_gnustep_diag")
+                                                return ret(m_diagnostic_function_addr);
+
+  LLDB_LOG(log, "GNUstepObjCRuntime::LookupRuntimeSymbol: No match found for {0}", name.GetCString());
+  return LLDB_INVALID_ADDRESS;
 }
 
 LLDB_PLUGIN_DEFINE(GNUstepObjCRuntime)

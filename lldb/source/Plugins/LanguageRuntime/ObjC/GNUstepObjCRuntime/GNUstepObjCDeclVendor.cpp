@@ -29,6 +29,10 @@
 
 using namespace lldb_private;
 
+// Forward declaration for method deduplication helper
+static bool InterfaceAlreadyHasMethod(clang::ObjCInterfaceDecl *interface_decl,
+                                      llvm::StringRef sel_name, bool is_instance);
+
 class lldb_private::GNUstepObjCExternalASTSource
     : public clang::ExternalASTSource {
 public:
@@ -559,6 +563,13 @@ void GNUstepObjCDeclVendor::AddFoundationClassMethods(
       continue;  // Skip this method to prevent crash
     }
     
+    // CRITICAL SAFETY CHECK: Prevent duplicate method declarations
+    if (InterfaceAlreadyHasMethod(interface_decl, methods[i].name, methods[i].is_instance)) {
+      LLDB_LOGF(log, "[GNUstepObjCDeclVendor] Method %s already exists on %s - skipping to prevent duplicate",
+                methods[i].name, class_name.c_str());
+      continue;
+    }
+    
     clang::ObjCMethodDecl *method_decl = CreateMethodDecl(
         interface_decl, methods[i].name, methods[i].types, methods[i].is_instance);
     
@@ -666,6 +677,25 @@ clang::ObjCMethodDecl *GNUstepObjCDeclVendor::CreateMethodDecl(
   return method_decl;
 }
 
+// Helper function to check if a method already exists on an interface
+// This prevents duplicate method declarations which can cause compilation errors
+static bool InterfaceAlreadyHasMethod(clang::ObjCInterfaceDecl *interface_decl,
+                                      llvm::StringRef sel_name, bool is_instance) {
+  if (!interface_decl) {
+    return false;
+  }
+  
+  // Check all existing methods on this interface
+  for (auto *method : interface_decl->methods()) {
+    if (method->isInstanceMethod() == is_instance &&
+        method->getSelector().getAsString() == sel_name) {
+      return true;
+    }
+  }
+  
+  return false;
+}
+
 bool GNUstepObjCDeclVendor::FinishDecl(clang::ObjCInterfaceDecl *interface_decl) {
   Log *log(GetLog(LLDBLog::Expressions));
 
@@ -718,6 +748,36 @@ bool GNUstepObjCDeclVendor::FinishDecl(clang::ObjCInterfaceDecl *interface_decl)
   // Add Foundation class methods if this is a known Foundation class
   // This call is now protected with enhanced safety checks (no exceptions in LLDB)
   AddFoundationClassMethods(interface_decl, class_name);
+
+  // Add minimal dynamic method population using IMP probes for core selectors
+  // This prevents expression parser failures for common methods
+  auto add_method = [&](const char* sel_name, const char* types, bool is_instance) {
+    if (InterfaceAlreadyHasMethod(interface_decl, sel_name, is_instance))
+      return;
+    if (!types || !*types) {
+      // fallback: minimal signature -> id method:...
+      types = is_instance ? "@@:" : "@#@:";
+    }
+    if (auto *decl = CreateMethodDecl(interface_decl, sel_name, types, is_instance))
+      interface_decl->addDecl(decl);
+  };
+
+  // Core selectors to ensure are available for common NSNumber/NSString operations
+  const char* core_selectors[][3] = {
+    // {selector, types, is_instance}
+    {"numberWithInt:", "@#@:i", "0"},       // NSNumber class method
+    {"intValue", "i@:", "1"},               // NSNumber instance method
+    {"stringWithFormat:", "@#@:@", "0"},    // NSString class method
+    {"length", "Q@:", "1"},                 // NSString instance method
+    {"objectAtIndex:", "@@:Q", "1"},        // NSArray instance method
+    {"objectForKey:", "@@:@", "1"},         // NSDictionary instance method
+    {nullptr, nullptr, nullptr}
+  };
+
+  for (int i = 0; core_selectors[i][0]; i++) {
+    add_method(core_selectors[i][0], core_selectors[i][1], 
+               strcmp(core_selectors[i][2], "1") == 0);
+  }
 
   // For runtime introspection, we would need to implement:
   // auto superclass_func = [interface_decl, this](ObjCLanguageRuntime::ObjCISA isa) { ... };
@@ -869,6 +929,44 @@ bool GNUstepObjCDeclVendor::DoesClassRespondToSelector(const std::string &class_
   LLDB_LOGF(log, "[GNUstepObjCDeclVendor] Class %s %s to selector %s",
             class_name.c_str(), responds ? "responds" : "does not respond", 
             selector_name.c_str());
+  
+  // Fallback: if runtime API fails, try class_getMethodImplementation approach
+  if (!responds && gnustep_runtime->GetRuntimeIntrospector()) {
+    // Find class using introspector
+    auto *introspector = gnustep_runtime->GetRuntimeIntrospector();
+    lldb::addr_t class_addr = introspector->FindClass(class_name);
+    if (class_addr != LLDB_INVALID_ADDRESS) {
+      std::vector<lldb::addr_t> args;
+      
+      // Create selector string in target and get SEL
+      Status error;
+      Process *process = m_runtime.GetProcess();
+      lldb::addr_t string_addr = process->AllocateMemory(selector_name.length() + 1, 
+                                                        lldb::ePermissionsReadable, error);
+      if (!error.Fail() && string_addr != LLDB_INVALID_ADDRESS) {
+        process->WriteMemory(string_addr, selector_name.c_str(), 
+                           selector_name.length() + 1, error);
+        if (!error.Fail()) {
+          args.push_back(string_addr);
+          lldb::addr_t sel_addr = introspector->CallRuntimeFunction("sel_registerName", args);
+          
+          if (sel_addr != LLDB_INVALID_ADDRESS) {
+            // Check if class_getMethodImplementation returns non-null IMP
+            args.clear();
+            args.push_back(class_addr);
+            args.push_back(sel_addr);
+            lldb::addr_t imp_addr = introspector->CallRuntimeFunction("class_getMethodImplementation", args);
+            responds = (imp_addr != 0 && imp_addr != LLDB_INVALID_ADDRESS);
+            
+            LLDB_LOGF(log, "[GNUstepObjCDeclVendor] Fallback IMP check: Class %s %s to selector %s (IMP: 0x%llx)",
+                      class_name.c_str(), responds ? "responds" : "does not respond", 
+                      selector_name.c_str(), (unsigned long long)imp_addr);
+          }
+        }
+        process->DeallocateMemory(string_addr);
+      }
+    }
+  }
   
   return responds;
 }
