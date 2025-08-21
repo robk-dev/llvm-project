@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "GNUstepObjCRuntime.h"
+#include "GNUstepObjCDeclVendor.h"
 #include "GNUstepClassDescriptor.h"
 #include "formatters/GNUstepFormattersRegistry.h"
 #include "formatters/GNUstepIdDispatcher.h"
@@ -86,13 +87,13 @@ GNUstepObjCRuntime::CreateInstance(Process *process,
   // CRITICAL DEBUG: Force output to stderr regardless of logging
   fprintf(stderr, "!!! GNUstepObjCRuntime::CreateInstance called for language %d !!!\n", (int)language);
   
-  // Handle Objective-C (16), Objective-C++ (17), and C (2) since GNUstep runtime includes C components
-  if (language != eLanguageTypeObjC && language != eLanguageTypeObjC_plus_plus && language != eLanguageTypeC) {
-    fprintf(stderr, "!!! GNUstepObjCRuntime: Not ObjC/ObjC++/C language (%d), returning nullptr !!!\n", (int)language);
+  // Handle ONLY Objective-C (16) and Objective-C++ (17) - NOT plain C
+  if (language != eLanguageTypeObjC && language != eLanguageTypeObjC_plus_plus) {
+    fprintf(stderr, "!!! GNUstepObjCRuntime: Not ObjC/ObjC++ language (%d), returning nullptr !!!\n", (int)language);
     return nullptr;
   }
   
-  fprintf(stderr, "!!! GNUstepObjCRuntime: IS ObjC/ObjC++/C language (%d), continuing... !!!\n", (int)language);
+  fprintf(stderr, "!!! GNUstepObjCRuntime: IS ObjC/ObjC++ language (%d), continuing... !!!\n", (int)language);
   
   if (!process) {
     fprintf(stderr, "!!! GNUstepObjCRuntime: No process, returning nullptr !!!\n");
@@ -870,16 +871,39 @@ GNUstepObjCRuntime::CreateObjectChecker(std::string name, ExecutionContext &exe_
   Log *log = GetLog(LLDBLog::Process | LLDBLog::Types);
   LLDB_LOG(log, "GNUstepObjCRuntime::CreateObjectChecker called with name: {0}", name);
   
-  // Create a working object checker using GNUstep runtime functions
-  // This follows Apple's pattern but uses GNUstep-specific runtime functions
-  LLDB_LOG(log, "GNUstepObjCRuntime::CreateObjectChecker: Creating GNUstep runtime-based object checker");
+  // Create a working object checker following Apple's exact pattern
+  // Uses Objective-C syntax to avoid runtime function linkage issues
+  LLDB_LOG(log, "GNUstepObjCRuntime::CreateObjectChecker: Creating object checker using Apple's pattern with Objective-C syntax");
   
   char check_function_code[2048];
   
-  // Create a full-featured object checker using GNUstep runtime functions
-  int len = ::snprintf(check_function_code, sizeof(check_function_code), R"(
-extern "C" void *object_getClass(void *obj);
-extern "C" void *class_getMethodImplementation(void *cls, void *sel);
+  // Check if debugger-specific functions are available (Apple LLDB extensions)
+  static const ConstString g_gdb_object_getClass("gdb_object_getClass");
+  bool has_gdb_object_getClass = false;
+  
+  // Check for gdb_object_getClass symbol (LLDB-specific debugging function)
+  if (Process *process = exe_ctx.GetProcessPtr()) {
+    Target &target = process->GetTarget();
+    const ModuleList &module_list = target.GetImages();
+    for (size_t i = 0; i < module_list.GetSize(); ++i) {
+      ModuleSP module_sp = module_list.GetModuleAtIndex(i);
+      if (module_sp) {
+        if (const Symbol *symbol = module_sp->FindFirstSymbolWithNameAndType(
+                g_gdb_object_getClass, lldb::eSymbolTypeCode)) {
+          if (symbol->ValueIsAddress() || symbol->GetAddressRef().IsValid()) {
+            has_gdb_object_getClass = true;
+            break;
+          }
+        }
+      }
+    }
+  }
+  
+  int len;
+  if (has_gdb_object_getClass) {
+    // Use Apple's gdb_object_getClass approach if available
+    len = ::snprintf(check_function_code, sizeof(check_function_code), R"(
+extern "C" void *gdb_object_getClass(void *);
 extern "C" int printf(const char *format, ...);
 
 extern "C" void
@@ -888,16 +912,42 @@ extern "C" void
   if ($__lldb_arg_obj == (void *)0)
     return;
   
-  // Get the object's class using GNUstep runtime function
-  void *objc_class = object_getClass($__lldb_arg_obj);
-  if (!objc_class) {
+  // Check if object has a valid class using gdb_object_getClass (LLDB-specific function)
+  if (!gdb_object_getClass($__lldb_arg_obj)) {
     // Invalid object - cause controlled crash for conditional breakpoints
-    // This follows Apple's pattern for LLDB integration
     *((volatile int *)0) = 'ocgc';
   } else if ($__lldb_arg_selector != (void *)0) {
-    // Check if class responds to selector using method implementation check
-    void *imp = class_getMethodImplementation(objc_class, $__lldb_arg_selector);
-    if (imp == (void *)0) {
+    // Use Objective-C respondsToSelector: syntax
+    signed char $responds = (signed char)
+        [(id)$__lldb_arg_obj respondsToSelector:
+            (void *) $__lldb_arg_selector];
+    if ($responds == (signed char) 0) {
+      // Object doesn't respond to selector - cause controlled crash
+      *((volatile int *)0) = 'ocgc';
+    }
+  }
+})",
+                     name.c_str());
+  } else {
+    // Fallback for GNUstep: simpler object checker without debugger-specific functions
+    // Just validate that respondsToSelector works without class validation
+    len = ::snprintf(check_function_code, sizeof(check_function_code), R"(
+extern "C" int printf(const char *format, ...);
+
+extern "C" void
+%s(void *$__lldb_arg_obj, void *$__lldb_arg_selector) {
+  // nil object is always OK for Objective-C
+  if ($__lldb_arg_obj == (void *)0)
+    return;
+  
+  // For GNUstep, skip complex object validation and just check selector response
+  // This avoids linkage issues with debugger-specific functions
+  if ($__lldb_arg_selector != (void *)0) {
+    // Use Objective-C respondsToSelector: syntax - let runtime handle validation
+    signed char $responds = (signed char)
+        [(id)$__lldb_arg_obj respondsToSelector:
+            (void *) $__lldb_arg_selector];
+    if ($responds == (signed char) 0) {
       // Object doesn't respond to selector - cause controlled crash
       *((volatile int *)0) = 'ocgc';
     }
@@ -905,6 +955,7 @@ extern "C" void
   // If we get here, validation passed - continue normally
 })",
                      name.c_str());
+  }
 
   if (len >= (int)sizeof(check_function_code)) {
     LLDB_LOG(log, "GNUstepObjCRuntime::CreateObjectChecker: Generated code too long");
@@ -912,8 +963,8 @@ extern "C" void
                                    "Object checker code generation failed - code too long");
   }
 
-  LLDB_LOG(log, "GNUstepObjCRuntime::CreateObjectChecker: Generated GNUstep runtime-based checker code:\n{0}", 
-           check_function_code);
+  LLDB_LOG(log, "GNUstepObjCRuntime::CreateObjectChecker: Generated object checker (gdb_object_getClass available: {0}):\n{1}", 
+           has_gdb_object_getClass, check_function_code);
 
   // Create the utility function that LLDB can execute
   return GetTargetRef().CreateUtilityFunction(check_function_code, name,
@@ -957,6 +1008,12 @@ __lldb_objc_objectForKeyedSubscript(void *self, void *_cmd, void *key) {
   
   // Forward the call to the older objectForKey: method
   return objc_msgSend(self, sel_objectForKey, key);
+}
+
+// Entry point function for the utility
+void __lldb_objc_subscript_utilities() {
+  // This function exists only to satisfy the utility function loader
+  // The actual work is done by the functions above
 }
 )";
 
@@ -1251,7 +1308,7 @@ void GNUstepObjCRuntime::InstallExpressionEvaluationHooks() {
   // 2) Ensure CFStringCreateWithBytes is available (real or fallback) 
   EnsureCFStringCreateWithBytes();
   
-  // 3) Inject runtime function prototypes into scratch AST
+  // 3) Inject runtime function prototypes and minimal Foundation interfaces into scratch AST
   Target &target = GetProcess()->GetTarget();
   for (LanguageType lang : {eLanguageTypeObjC, eLanguageTypeObjC_plus_plus}) {
     auto ts_or_err = target.GetScratchTypeSystemForLanguage(lang);
@@ -1263,6 +1320,16 @@ void GNUstepObjCRuntime::InstallExpressionEvaluationHooks() {
           LLDB_LOG(log, "Injecting runtime function prototypes into scratch AST for language: {0}", 
                    (lang == eLanguageTypeObjC) ? "ObjC" : "ObjC++");
           InjectRuntimeFunctionDecls(*ts);
+          
+          // Also inject minimal Foundation interfaces so utility functions can compile
+          if (m_decl_vendor_up) {
+            LLDB_LOG(log, "Injecting minimal Foundation interfaces into scratch AST for language: {0}", 
+                     (lang == eLanguageTypeObjC) ? "ObjC" : "ObjC++");
+            auto *gnustep_vendor = static_cast<GNUstepObjCDeclVendor *>(m_decl_vendor_up.get());
+            if (gnustep_vendor) {
+              gnustep_vendor->EnsureMinimalFoundationInterfaces(*ts);
+            }
+          }
         }
       }
     }
@@ -1502,19 +1569,28 @@ void GNUstepObjCRuntime::CreateAndInstallSubscriptShims(ExecutionContext &exe_ct
     return;
   }
 
-  // 1) Build the utility function source
+  // 1) Build the utility function source - using pure C to avoid needing ObjC method declarations
   static const char *kSubscriptUtilsText = R"UTIL(
 extern "C" void *objc_getClass(const char *name);
 extern "C" void *sel_getUid(const char *name);
-typedef id (*IMP)(id, SEL, ...);
+extern "C" void *objc_msgSend(void *self, void *sel, ...);
+typedef void* (*IMP)(void*, void*, ...);
 extern "C" int class_addMethod(void *cls, void *sel, void *imp, const char *types);
 
-id __lldb_objc_objectAtIndexedSubscript(id self, SEL _cmd, unsigned long long idx) {
-    return [self objectAtIndex:idx];
+void* __lldb_objc_objectAtIndexedSubscript(void* self, void* _cmd, unsigned long long idx) {
+    if (!self) return (void*)0;
+    void* sel_objectAtIndex = sel_getUid("objectAtIndex:");
+    if (!sel_objectAtIndex) return (void*)0;
+    return objc_msgSend(self, sel_objectAtIndex, idx);
 }
-id __lldb_objc_objectForKeyedSubscript(id self, SEL _cmd, id key) {
-    return [self objectForKey:key];
+
+void* __lldb_objc_objectForKeyedSubscript(void* self, void* _cmd, void* key) {
+    if (!self) return (void*)0;
+    void* sel_objectForKey = sel_getUid("objectForKey:");
+    if (!sel_objectForKey) return (void*)0;
+    return objc_msgSend(self, sel_objectForKey, key);
 }
+
 int __lldb_install_subscript_shims(void *imp_array, void *imp_dict) {
     void *NSArray = objc_getClass("NSArray");
     void *NSDictionary = objc_getClass("NSDictionary");
@@ -1524,13 +1600,19 @@ int __lldb_install_subscript_shims(void *imp_array, void *imp_dict) {
     int ok2 = class_addMethod(NSDictionary, sel_dict,  (void*)imp_dict,  "@@:@");
     return (ok1 || ok2) ? 1 : 1;
 }
+
+// Entry point function for the utility
+void __lldb_subscript_utils() {
+    // This function exists only to satisfy the utility function loader
+    // The actual work is done by the functions above
+}
 )UTIL";
 
   if (!m_subscript_utils_fn) {
     Target &target = GetProcess()->GetTarget();
     auto uf_or_err = target.CreateUtilityFunction(
         kSubscriptUtilsText, /* name hint */ "__lldb_subscript_utils",
-        eLanguageTypeObjC, exe_ctx);
+        eLanguageTypeC, exe_ctx);
     if (!uf_or_err) {
       LLDB_LOG(log, "failed to create subscript utils UF: {0}",
                llvm::toString(uf_or_err.takeError()));
@@ -1599,7 +1681,7 @@ void GNUstepObjCRuntime::CreateDiagnosticUtility(ExecutionContext &exe_ctx) {
 
   // Create diagnostic function that returns bitmask of what's working
   static const char *kDiagnosticUtilsText = R"UTIL(
-extern "C" int __lldb_gnustep_diag(void) {
+extern "C" int __lldb_gnustep_diagnostic(void) {
     int result = 0;
     // bit 0: core symbols resolved (objc_msgSend, objc_getClass, sel_getUid)
     // bit 1: decls injected (this function exists = decls were injected)  
@@ -1636,7 +1718,7 @@ extern "C" int __lldb_gnustep_diag(void) {
   // Get the address by finding the function in the target's symbol table
   SymbolContextList sc_list;
   target.GetImages().FindSymbolsWithNameAndType(
-      ConstString("__lldb_gnustep_diag"), eSymbolTypeCode, sc_list);
+      ConstString("__lldb_gnustep_diagnostic"), eSymbolTypeCode, sc_list);
   
   if (sc_list.GetSize() > 0) {
     SymbolContext sc;
@@ -1781,8 +1863,8 @@ void GNUstepObjCRuntime::InjectRuntimeFunctionDecls(TypeSystemClang &ts) {
 
   // Add diagnostic utility function for field testing
   {
-    // int __lldb_gnustep_diag(void) - returns bitmask of what's installed
-    CreateExternCFunction(ts, tu, "__lldb_gnustep_diag", ast.IntTy, {}, /*variadic=*/false);
+    // int __lldb_gnustep_diagnostic(void) - returns bitmask of what's installed
+    CreateExternCFunction(ts, tu, "__lldb_gnustep_diagnostic", ast.IntTy, {}, /*variadic=*/false);
   }
   
   LLDB_LOG(log, "[GNUstep] Runtime function prototypes injected successfully");
@@ -1892,7 +1974,7 @@ lldb::addr_t GNUstepObjCRuntime::LookupRuntimeSymbol(ConstString name) {
                                                 return ret(m_install_subscripts_addr);
 
   // Diagnostic utility function:
-  if (s == "__lldb_gnustep_diag")
+  if (s == "__lldb_gnustep_diagnostic")
                                                 return ret(m_diagnostic_function_addr);
 
   LLDB_LOG(log, "GNUstepObjCRuntime::LookupRuntimeSymbol: No match found for {0}", name.GetCString());

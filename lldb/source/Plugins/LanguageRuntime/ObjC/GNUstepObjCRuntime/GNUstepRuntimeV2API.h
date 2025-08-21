@@ -196,8 +196,10 @@ public:
   
   // === Object Introspection ===
   
-  /// Get class of an object
-  llvm::Expected<Class> GetObjectClass(lldb::addr_t obj_addr);
+  /// Get class of an object (or metaclass of a class)
+  /// When called on a regular object, returns its class
+  /// When called on a Class object, returns its metaclass
+  llvm::Expected<Class> GetObjectClass(void *obj);
   
   /// Get class name of an object
   llvm::Expected<std::string> GetObjectClassName(lldb::addr_t obj_addr);

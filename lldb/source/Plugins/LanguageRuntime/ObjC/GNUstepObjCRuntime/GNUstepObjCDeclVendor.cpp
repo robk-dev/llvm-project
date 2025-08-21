@@ -22,12 +22,253 @@
 
 #include "clang/AST/ASTContext.h"
 #include "clang/AST/DeclObjC.h"
+#include "clang/AST/Expr.h"
+#include "clang/AST/ExprObjC.h"
+#include "clang/AST/Stmt.h"
+#include "clang/AST/StmtObjC.h"
 #include "clang/AST/ExternalASTSource.h"
 
 #include <optional>
 #include <vector>
 
 using namespace lldb_private;
+using namespace clang;
+
+// AST Helper functions for expression evaluation support
+namespace {
+
+static QualType GetIdTy(ASTContext &ctx)            { return ctx.getObjCIdType(); }
+static QualType GetClassTy(ASTContext &ctx)         { return ctx.getObjCClassType(); }
+static QualType GetSelTy(ASTContext &ctx)           { return ctx.getObjCSelType(); }
+static QualType GetIntTy(ASTContext &ctx)           { return ctx.IntTy; }
+static QualType GetLongLongTy(ASTContext &ctx)      { return ctx.LongLongTy; }
+static QualType GetULongTy(ASTContext &ctx)         { return ctx.UnsignedLongTy; } // Win64: NSUInteger
+static QualType GetConstCharPtrTy(ASTContext &ctx)  {
+  QualType c = ctx.CharTy;
+  c = c.withConst();
+  return ctx.getPointerType(c);
+}
+
+static FunctionDecl *AddCFunctionDecl(ASTContext &ctx,
+                                      DeclContext *tu,
+                                      llvm::StringRef name,
+                                      QualType retTy,
+                                      llvm::ArrayRef<QualType> paramTys,
+                                      bool isVariadic=false) {
+  IdentifierInfo &II = ctx.Idents.get(name);
+  FunctionProtoType::ExtProtoInfo epi;
+  epi.Variadic = isVariadic;
+  QualType fTy = ctx.getFunctionType(retTy, paramTys, epi);
+  auto *FD = FunctionDecl::Create(ctx, tu, SourceLocation(), SourceLocation(),
+                                  &II, fTy, ctx.getTrivialTypeSourceInfo(fTy),
+                                  SC_Extern, false /*isInline*/);
+  // Build ParmVarDecls:
+  llvm::SmallVector<ParmVarDecl*, 4> params;
+  for (size_t i = 0; i < paramTys.size(); ++i) {
+    auto *P = ParmVarDecl::Create(ctx, FD, SourceLocation(), SourceLocation(),
+                                  nullptr, paramTys[i], ctx.getTrivialTypeSourceInfo(paramTys[i]),
+                                  SC_None, nullptr);
+    params.push_back(P);
+  }
+  FD->setParams(params);
+  tu->addDecl(FD);
+  return FD;
+}
+
+static ObjCInterfaceDecl *GetOrCreateInterface(ASTContext &ctx, llvm::StringRef name) {
+  IdentifierInfo &II = ctx.Idents.get(name);
+  TranslationUnitDecl *TU = ctx.getTranslationUnitDecl();
+  
+  // First check if it already exists
+  for (auto *D : TU->decls()) {
+    if (auto *ID = dyn_cast<ObjCInterfaceDecl>(D)) {
+      if (ID->getIdentifier() == &II) {
+        return ID;
+      }
+    }
+  }
+
+  // Create interface and start its definition
+  auto *Iface = ObjCInterfaceDecl::Create(ctx, TU, SourceLocation(), &II,
+                                          nullptr, nullptr, SourceLocation());
+  TU->addDecl(Iface);
+  
+  // Start the definition so we can add methods to it
+  Iface->startDefinition();
+  
+  return Iface;
+}
+
+static ObjCMethodDecl *AddObjCMethod(ASTContext &ctx,
+                                     ObjCContainerDecl *container,
+                                     llvm::StringRef selName,
+                                     QualType retTy,
+                                     llvm::ArrayRef<QualType> argTys,
+                                     bool isInstance) {
+  // Build selector
+  llvm::SmallVector<IdentifierInfo*, 4> keywords;
+  size_t pieces = 1;
+  for (char c : selName)
+    if (c == ':') ++pieces;
+  
+  // Split by ':'
+  llvm::SmallVector<llvm::StringRef, 4> parts;
+  selName.split(parts, ':', /*MaxSplit*/ -1, /*KeepEmpty*/ false);
+  for (auto &p : parts) {
+    keywords.push_back(&ctx.Idents.get(p));
+  }
+  
+  // Handle unary selectors (no colons)
+  if (pieces == 1 && !selName.contains(':')) {
+    keywords.clear();
+    keywords.push_back(&ctx.Idents.get(selName));
+    pieces = 1;
+  }
+  
+  Selector sel = ctx.Selectors.getSelector(pieces - 1, const_cast<const IdentifierInfo**>(keywords.data()));
+
+  auto *M = ObjCMethodDecl::Create(ctx,
+                                   SourceLocation(), SourceLocation(),
+                                   sel, retTy,
+                                   /*TypeSourceInfo*/nullptr,
+                                   container,
+                                   isInstance, /*isVariadic*/false,
+                                   /*isPropertyAccessor*/false, /*isSynthesized*/false,
+                                   /*isImplicit*/true,  // Must be implicit if we don't provide selector locations
+                                   /*isDefined*/false,
+                                   ObjCImplementationControl::None,
+                                   /*RelatedResultType*/false);
+  // Params
+  llvm::SmallVector<ParmVarDecl*, 4> params;
+  for (size_t i = 0; i < argTys.size(); ++i) {
+    auto *P = ParmVarDecl::Create(ctx, M, SourceLocation(), SourceLocation(),
+                                  /*Name*/nullptr, argTys[i],
+                                  ctx.getTrivialTypeSourceInfo(argTys[i]),
+                                  SC_None, nullptr);
+    params.push_back(P);
+  }
+  M->setMethodParams(ctx, params, llvm::ArrayRef<SourceLocation>());
+  M->setObjCDeclQualifier(Decl::ObjCDeclQualifier::OBJC_TQ_None);
+  container->addDecl(M);
+  return M;
+}
+
+// Helper functions for AST body building
+static FunctionDecl *LookupFuncByName(ASTContext &ctx, llvm::StringRef name) {
+  TranslationUnitDecl *TU = ctx.getTranslationUnitDecl();
+  IdentifierInfo &II = ctx.Idents.get(name);
+  DeclContext::lookup_result R = TU->lookup(&II);
+  for (NamedDecl *ND : R)
+    if (auto *FD = dyn_cast<FunctionDecl>(ND))
+      return FD;
+  return nullptr;
+}
+
+static DeclRefExpr *MakeFuncRef(ASTContext &ctx, FunctionDecl *FD) {
+  return DeclRefExpr::Create(
+      ctx, NestedNameSpecifierLoc(), SourceLocation(), FD,
+      false /*RefersToEnclosingVariableOrCapture*/,
+      SourceLocation(), FD->getType(),
+      ExprValueKind::VK_PRValue);
+}
+
+static Expr *MakeCStringLiteral(ASTContext &ctx, llvm::StringRef s) {
+  QualType charTy = ctx.CharTy;
+  auto *SL = StringLiteral::Create(
+      ctx, s, StringLiteralKind::Ordinary, /*Pascal*/false,
+      ctx.getStringLiteralArrayType(charTy, s.size()),
+      SourceLocation());
+  // array decays to const char *
+  QualType constCharTy = charTy.withConst();
+  QualType constCharPtrTy = ctx.getPointerType(constCharTy);
+  return ImplicitCastExpr::Create(ctx, constCharPtrTy,
+                                  CastKind::CK_ArrayToPointerDecay, SL, nullptr,
+                                  ExprValueKind::VK_PRValue, FPOptionsOverride());
+}
+
+static Expr *MakeCast(ASTContext &ctx, Expr *E, QualType toTy) {
+  return CStyleCastExpr::Create(
+      ctx, toTy, VK_PRValue, CastKind::CK_BitCast,
+      E, nullptr, FPOptionsOverride(), ctx.CreateTypeSourceInfo(toTy),
+      SourceLocation(), SourceLocation());
+}
+
+static ParmVarDecl *GetParam(FunctionDecl *FD, unsigned idx) {
+  auto params = FD->parameters();
+  return (idx < params.size()) ? params[idx] : nullptr;
+}
+
+/// Builds a full AST body for CFStringCreateWithBytes
+static void DefineCFStringCreateWithBytesBody(ASTContext &ctx, FunctionDecl *CFDecl) {
+  if (!CFDecl || CFDecl->hasBody())
+    return;
+
+  // Lookup runtime functions we declared earlier.
+  FunctionDecl *objc_getClassFD = LookupFuncByName(ctx, "objc_getClass");
+  FunctionDecl *sel_getUidFD    = LookupFuncByName(ctx, "sel_getUid");
+  FunctionDecl *objc_msgSendFD  = LookupFuncByName(ctx, "objc_msgSend");
+
+  if (!objc_getClassFD || !sel_getUidFD || !objc_msgSendFD)
+    return; // prerequisites missing
+
+  // --- Build objc_getClass("NSString")
+  Expr *NSStringArg = MakeCStringLiteral(ctx, "NSString");
+  Expr *Call_getClass = CallExpr::Create(
+      ctx, MakeFuncRef(ctx, objc_getClassFD),
+      { NSStringArg }, GetIdTy(ctx), VK_PRValue, SourceLocation(), FPOptionsOverride());
+
+  // --- Build sel_getUid("stringWithUTF8String:")
+  Expr *SELArg = MakeCStringLiteral(ctx, "stringWithUTF8String:");
+  Expr *Call_sel = CallExpr::Create(
+      ctx, MakeFuncRef(ctx, sel_getUidFD),
+      { SELArg }, GetSelTy(ctx), VK_PRValue, SourceLocation(), FPOptionsOverride());
+
+  // --- Cast objc_msgSend to: id (*)(Class, SEL, const char*)
+  {
+    // Build function proto type for cast target
+    QualType retTy   = GetIdTy(ctx);
+    QualType p0      = GetClassTy(ctx);
+    QualType p1      = GetSelTy(ctx);
+    QualType p2      = GetConstCharPtrTy(ctx);
+
+    FunctionProtoType::ExtProtoInfo epi;
+    epi.ExtInfo = epi.ExtInfo.withCallingConv(CallingConv::CC_C);
+    QualType fnTy    = ctx.getFunctionType(retTy, {p0, p1, p2}, epi);
+    QualType fnPtrTy = ctx.getPointerType(fnTy);
+
+    // DeclRef to objc_msgSend
+    Expr *MsgSendRef = MakeFuncRef(ctx, objc_msgSendFD);
+    // C-style cast to the function pointer type
+    Expr *MsgSendCast = MakeCast(ctx, MsgSendRef, fnPtrTy);
+
+    // --- Build final call: msgSendCast( objc_getClass(...), sel_getUid(...), (const char*)bytes )
+    ParmVarDecl *bytesParam = GetParam(CFDecl, /*idx*/1); // the 2nd parameter is 'bytes'
+    DeclRefExpr *BytesRef = DeclRefExpr::Create(ctx, NestedNameSpecifierLoc(),
+                                         SourceLocation(), bytesParam,
+                                         false, SourceLocation(),
+                                         bytesParam->getType(), VK_LValue);
+
+    // Explicit cast (const unsigned char*) -> (const char*)
+    Expr *BytesAsConstCharPtr = MakeCast(ctx, BytesRef, GetConstCharPtrTy(ctx));
+
+    Expr *FinalCall = CallExpr::Create(
+        ctx, MsgSendCast,
+        { Call_getClass, Call_sel, BytesAsConstCharPtr },
+        retTy, VK_PRValue, SourceLocation(), FPOptionsOverride());
+
+    // return <FinalCall>;
+    Stmt *Ret = ReturnStmt::Create(ctx, SourceLocation(), FinalCall, nullptr);
+
+    // compound body { return ...; }
+    llvm::SmallVector<Stmt*, 1> stmts;
+    stmts.push_back(Ret);
+    Stmt *Body = CompoundStmt::Create(ctx, stmts, FPOptionsOverride(), SourceLocation(), SourceLocation());
+
+    CFDecl->setBody(Body);
+  }
+}
+
+} // anonymous namespace
 
 // Forward declaration for method deduplication helper
 static bool InterfaceAlreadyHasMethod(clang::ObjCInterfaceDecl *interface_decl,
@@ -45,14 +286,11 @@ public:
 
     Log *log(GetLog(LLDBLog::Expressions));
 
-    if (log) {
-      LLDB_LOGF(log,
-                "GNUstepObjCExternalASTSource::FindExternalVisibleDeclsByName"
-                " on (ASTContext*)%p Looking for %s in (%sDecl*)%p",
-                static_cast<void *>(&decl_ctx->getParentASTContext()),
-                name.getAsString().c_str(), decl_ctx->getDeclKindName(),
-                static_cast<const void *>(decl_ctx));
-    }
+    LLDB_LOGF(log,
+              "[TRACE] GNUstepObjCExternalASTSource::FindExternalVisibleDeclsByName"
+              " called - Looking for '%s' in %s context (%p)",
+              name.getAsString().c_str(), decl_ctx->getDeclKindName(),
+              static_cast<const void *>(decl_ctx));
 
     do {
       const clang::ObjCInterfaceDecl *interface_decl =
@@ -125,13 +363,25 @@ private:
 GNUstepObjCDeclVendor::GNUstepObjCDeclVendor(ObjCLanguageRuntime &runtime)
     : ClangDeclVendor(eGNUstepObjCDeclVendor), m_runtime(runtime),
       m_type_realizer_sp(m_runtime.GetEncodingToType()), m_forwarding_initialized(false) {
+  Log *log(GetLog(LLDBLog::Expressions));
+  LLDB_LOGF(log, "[TRACE] GNUstepObjCDeclVendor constructor called");
+  
   m_ast_ctx = std::make_shared<TypeSystemClang>(
       "GNUstepObjCDeclVendor AST",
       runtime.GetProcess()->GetTarget().GetArchitecture().GetTriple());
+  LLDB_LOGF(log, "[TRACE] Created TypeSystemClang for GNUstepObjCDeclVendor");
+  
   m_external_source = new GNUstepObjCExternalASTSource(*this);
   llvm::IntrusiveRefCntPtr<clang::ExternalASTSource> external_source_owning_ptr(
       m_external_source);
   m_ast_ctx->getASTContext().setExternalSource(external_source_owning_ptr);
+  LLDB_LOGF(log, "[TRACE] Set up GNUstepObjCExternalASTSource");
+  
+  // Initialize runtime API for dynamic discovery
+  auto api_or_err = GNUstepRuntimeV2API::Create(runtime.GetProcess());
+  if (api_or_err) {
+    m_runtime_api = std::move(*api_or_err);
+  }
   
   // Initialize method forwarding rules for modern subscript syntax
   InstallDefaultForwardingRules();
@@ -745,52 +995,129 @@ bool GNUstepObjCDeclVendor::FinishDecl(clang::ObjCInterfaceDecl *interface_decl)
             "[GNUstepObjCDeclVendor::FinishDecl] Finishing Objective-C "
             "interface for %s (ISA: 0x%lx)", class_name.c_str(), (unsigned long)objc_isa);
 
-  // Add Foundation class methods if this is a known Foundation class
-  // This call is now protected with enhanced safety checks (no exceptions in LLDB)
-  AddFoundationClassMethods(interface_decl, class_name);
-
-  // Add minimal dynamic method population using IMP probes for core selectors
-  // This prevents expression parser failures for common methods
-  auto add_method = [&](const char* sel_name, const char* types, bool is_instance) {
-    if (InterfaceAlreadyHasMethod(interface_decl, sel_name, is_instance))
-      return;
-    if (!types || !*types) {
-      // fallback: minimal signature -> id method:...
-      types = is_instance ? "@@:" : "@#@:";
+  // NEW: Use runtime API for dynamic method discovery instead of hardcoded methods
+  if (m_runtime_api) {
+    LLDB_LOGF(log, "[GNUstepObjCDeclVendor::FinishDecl] Using runtime API for dynamic discovery of %s", 
+              class_name.c_str());
+    
+    // Get class info from runtime
+    auto class_info_or_err = m_runtime_api->GetObjCClassInfo(class_name);
+    if (class_info_or_err) {
+      auto class_info = *class_info_or_err;
+      
+      // Get all methods for this class from runtime (including inherited)
+      auto methods_or_err = m_runtime_api->GetAllMethodsIncludingInherited(class_info.class_ptr);
+      if (methods_or_err) {
+        LLDB_LOGF(log, "[GNUstepObjCDeclVendor::FinishDecl] Found %zu methods for %s",
+                  methods_or_err->size(), class_name.c_str());
+        
+        // Add each method discovered from runtime
+        for (const auto &method : *methods_or_err) {
+          // All methods from GetAllMethodsIncludingInherited are instance methods
+          bool is_instance = true;
+          
+          // Skip if method already exists
+          if (InterfaceAlreadyHasMethod(interface_decl, method.selector_name.c_str(), is_instance))
+            continue;
+            
+          // Create method declaration from runtime type encoding
+          clang::ObjCMethodDecl *method_decl = CreateMethodDecl(
+            interface_decl, 
+            method.selector_name.c_str(),
+            method.type_encoding.c_str(),
+            is_instance
+          );
+          
+          if (method_decl) {
+            LLDB_LOGF(log, "[GNUstepObjCDeclVendor::FinishDecl]   Added method: -%s",
+                      method.selector_name.c_str());
+          }
+        }
+      } else {
+        LLDB_LOGF(log, "[GNUstepObjCDeclVendor::FinishDecl] Failed to get methods for %s: %s",
+                  class_name.c_str(), llvm::toString(methods_or_err.takeError()).c_str());
+      }
+      
+      // TODO: Add class methods by querying the metaclass
+      // For now, let's add essential class methods manually for Foundation classes
+      // This ensures expressions like [NSNumber numberWithInt:42] work
+      if (class_name == "NSNumber") {
+        const char* class_methods[][2] = {
+          {"numberWithInt:", "@#@:i"},
+          {"numberWithDouble:", "@#@:d"},
+          {"numberWithBool:", "@#@:B"},
+          {nullptr, nullptr}
+        };
+        
+        for (int i = 0; class_methods[i][0]; i++) {
+          if (!InterfaceAlreadyHasMethod(interface_decl, class_methods[i][0], false)) {
+            CreateMethodDecl(interface_decl, class_methods[i][0], class_methods[i][1], false);
+            LLDB_LOGF(log, "[GNUstepObjCDeclVendor::FinishDecl]   Added class method: +%s",
+                      class_methods[i][0]);
+          }
+        }
+      } else if (class_name == "NSString") {
+        const char* class_methods[][2] = {
+          {"stringWithFormat:", "@#@:@"},
+          {"stringWithCString:encoding:", "@#@:*Q"},
+          {nullptr, nullptr}
+        };
+        
+        for (int i = 0; class_methods[i][0]; i++) {
+          if (!InterfaceAlreadyHasMethod(interface_decl, class_methods[i][0], false)) {
+            CreateMethodDecl(interface_decl, class_methods[i][0], class_methods[i][1], false);
+            LLDB_LOGF(log, "[GNUstepObjCDeclVendor::FinishDecl]   Added class method: +%s",
+                      class_methods[i][0]);
+          }
+        }
+      } else if (class_name == "NSArray") {
+        const char* class_methods[][2] = {
+          {"arrayWithObjects:", "@#@:@@"},
+          {"array", "@#@:"},
+          {nullptr, nullptr}
+        };
+        
+        for (int i = 0; class_methods[i][0]; i++) {
+          if (!InterfaceAlreadyHasMethod(interface_decl, class_methods[i][0], false)) {
+            CreateMethodDecl(interface_decl, class_methods[i][0], class_methods[i][1], false);
+            LLDB_LOGF(log, "[GNUstepObjCDeclVendor::FinishDecl]   Added class method: +%s",
+                      class_methods[i][0]);
+          }
+        }
+      }
+      
+      // Get all properties for this class from runtime
+      auto properties_or_err = m_runtime_api->GetAllPropertiesIncludingInherited(class_info.class_ptr);
+      if (properties_or_err) {
+        LLDB_LOGF(log, "[GNUstepObjCDeclVendor::FinishDecl] Found %zu properties for %s",
+                  properties_or_err->size(), class_name);
+        
+        // Properties typically have getter/setter methods that we've already added above
+        // TODO: Add actual @property declarations if needed for better debugging experience
+      }
+    } else {
+      LLDB_LOGF(log, "[GNUstepObjCDeclVendor::FinishDecl] Failed to get class info for %s: %s",
+                class_name.c_str(), llvm::toString(class_info_or_err.takeError()).c_str());
+      
+      // Fall back to hardcoded methods for core Foundation classes
+      LLDB_LOGF(log, "[GNUstepObjCDeclVendor::FinishDecl] Falling back to hardcoded methods for %s",
+                class_name);
+      AddFoundationClassMethods(interface_decl, class_name);
     }
-    if (auto *decl = CreateMethodDecl(interface_decl, sel_name, types, is_instance))
-      interface_decl->addDecl(decl);
-  };
-
-  // Core selectors to ensure are available for common NSNumber/NSString operations
-  const char* core_selectors[][3] = {
-    // {selector, types, is_instance}
-    {"numberWithInt:", "@#@:i", "0"},       // NSNumber class method
-    {"intValue", "i@:", "1"},               // NSNumber instance method
-    {"stringWithFormat:", "@#@:@", "0"},    // NSString class method
-    {"length", "Q@:", "1"},                 // NSString instance method
-    {"objectAtIndex:", "@@:Q", "1"},        // NSArray instance method
-    {"objectForKey:", "@@:@", "1"},         // NSDictionary instance method
-    {nullptr, nullptr, nullptr}
-  };
-
-  for (int i = 0; core_selectors[i][0]; i++) {
-    add_method(core_selectors[i][0], core_selectors[i][1], 
-               strcmp(core_selectors[i][2], "1") == 0);
+  } else {
+    // Fallback if runtime API not available
+    LLDB_LOGF(log, "[GNUstepObjCDeclVendor::FinishDecl] Runtime API not available, using hardcoded methods");
+    AddFoundationClassMethods(interface_decl, class_name);
   }
 
-  // For runtime introspection, we would need to implement:
-  // auto superclass_func = [interface_decl, this](ObjCLanguageRuntime::ObjCISA isa) { ... };
-  // auto instance_method_func = [log, interface_decl, this](const char *name, const char *types) -> bool { ... };
-  // auto class_method_func = [log, interface_decl, this](const char *name, const char *types) -> bool { ... };
-  // auto ivar_func = [log, interface_decl, this](const char *name, const char *type, lldb::addr_t offset_ptr, uint64_t size) -> bool { ... };
-  // descriptor->Describe(superclass_func, instance_method_func, class_method_func, ivar_func);
+  // Note: We've replaced the hardcoded core_selectors with dynamic discovery
+  // The runtime will provide ALL methods, not just a hardcoded subset
 
   if (log) {
     LLDB_LOGF(
         log,
         "[GNUstepObjCDeclVendor::FinishDecl] Finished Objective-C interface for %s",
-        class_name.c_str());
+        class_name);
 
     LLDB_LOG(log, "  [GNUstepObjCDeclVendor::FinishDecl] {0}", ClangUtil::DumpDecl(interface_decl));
   }
@@ -896,7 +1223,7 @@ std::optional<std::string> GNUstepObjCDeclVendor::GetForwardingTarget(
     }
     
     LLDB_LOGF(log, "[GNUstepObjCDeclVendor] Found forwarding rule: %s->%s for class %s",
-              method_name.c_str(), rule.legacy_method.c_str(), class_name.c_str());
+              method_name.c_str(), rule.legacy_method.c_str(), class_name);
     return rule.legacy_method;
   }
   
@@ -1010,7 +1337,7 @@ clang::ObjCMethodDecl *GNUstepObjCDeclVendor::ResolveMethodWithForwarding(
   auto forwarding_target = GetForwardingTarget(method_name, class_name);
   if (!forwarding_target) {
     LLDB_LOGF(log, "[GNUstepObjCDeclVendor] No forwarding rule found for method %s in class %s",
-              method_name.c_str(), class_name.c_str());
+              method_name.c_str(), class_name);
     return nullptr;
   }
   
@@ -1046,9 +1373,20 @@ uint32_t GNUstepObjCDeclVendor::FindDecls(ConstString name, bool append,
 
   Log *log(GetLog(LLDBLog::Expressions));
 
-  LLDB_LOGF(log, "GNUstepObjCDeclVendor::FindDecls ('%s', %s, %u, )",
+  LLDB_LOGF(log, "[TRACE] GNUstepObjCDeclVendor::FindDecls called for '%s' (append=%s, max=%u)",
             (const char *)name.AsCString(), append ? "true" : "false",
             max_matches);
+
+  // Ensure runtime declarations and minimal foundation interfaces are available
+  if (m_ast_ctx) {
+    LLDB_LOGF(log, "[TRACE] FindDecls: Calling EnsureRuntimeDecls for %s", name.AsCString());
+    EnsureRuntimeDecls(*m_ast_ctx);
+    LLDB_LOGF(log, "[TRACE] FindDecls: Calling EnsureMinimalFoundationInterfaces for %s", name.AsCString());
+    EnsureMinimalFoundationInterfaces(*m_ast_ctx);
+    LLDB_LOGF(log, "[TRACE] FindDecls: Finished ensuring interfaces for %s", name.AsCString());
+  } else {
+    LLDB_LOGF(log, "[TRACE] FindDecls: No m_ast_ctx available for %s", name.AsCString());
+  }
 
   if (!append)
     decls.clear();
@@ -1129,4 +1467,216 @@ uint32_t GNUstepObjCDeclVendor::FindDecls(ConstString name, bool append,
   } while (false);
 
   return ret;
+}
+
+void GNUstepObjCDeclVendor::EnsureRuntimeDecls(TypeSystemClang &ts) {
+  Log *log(GetLog(LLDBLog::Expressions));
+  LLDB_LOGF(log, "[TRACE] EnsureRuntimeDecls called (already_injected=%d)", m_runtime_decls_injected);
+  if (m_runtime_decls_injected)
+    return;
+
+  ASTContext &ctx = ts.getASTContext();
+  TranslationUnitDecl *TU = ctx.getTranslationUnitDecl();
+
+  // 1) Declare core runtime functions
+  AddCFunctionDecl(ctx, TU, "objc_msgSend", GetIdTy(ctx),
+                   { GetIdTy(ctx), GetSelTy(ctx) }, /*isVariadic*/true);
+  AddCFunctionDecl(ctx, TU, "objc_getClass", GetIdTy(ctx),
+                   { GetConstCharPtrTy(ctx) });
+  AddCFunctionDecl(ctx, TU, "sel_getUid", GetSelTy(ctx),
+                   { GetConstCharPtrTy(ctx) });
+  AddCFunctionDecl(ctx, TU, "object_getClass", GetClassTy(ctx),
+                   { GetIdTy(ctx) });
+  AddCFunctionDecl(ctx, TU, "class_getMethodImplementation", ctx.VoidPtrTy,
+                   { GetClassTy(ctx), GetSelTy(ctx) });
+
+  // 2) Declare CFStringCreateWithBytes
+  FunctionDecl *CFDecl = AddCFunctionDecl(
+      ctx, TU, "CFStringCreateWithBytes", GetIdTy(ctx),
+      { ctx.VoidPtrTy,                      // allocator (ignored)
+        ctx.getPointerType(ctx.UnsignedCharTy), // bytes
+        ctx.LongTy,                         // length
+        ctx.UnsignedIntTy,                  // encoding (ignored)
+        GetIntTy(ctx)                       // isExternal (ignored)
+      });
+
+  // 3) Define its body (AST)
+  DefineCFStringCreateWithBytesBody(ctx, CFDecl);
+
+  m_runtime_decls_injected = true;
+
+  LLDB_LOG(log, "[TRACE] EnsureRuntimeDecls: Completed injection of runtime declarations and CFString shim");
+}
+
+bool GNUstepObjCDeclVendor::PopulateInterfaceFromRuntime(TypeSystemClang &ts, 
+                                                         const std::string &class_name) {
+  if (!m_runtime_api)
+    return false;
+    
+  Log *log(GetLog(LLDBLog::Expressions));
+  ASTContext &ctx = ts.getASTContext();
+  
+  LLDB_LOG(log, "GNUstepObjCDeclVendor: Populating interface for {0} from runtime", 
+           class_name);
+  
+  // Get or create the interface
+  ObjCInterfaceDecl *interface_decl = GetOrCreateInterface(ctx, class_name);
+  if (!interface_decl)
+    return false;
+    
+  // Get class info from runtime
+  auto class_info_or_err = m_runtime_api->GetObjCClassInfo(class_name);
+  if (!class_info_or_err) {
+    LLDB_LOG(log, "Failed to get class info for {0}", class_name);
+    return false;
+  }
+  
+  auto class_info = *class_info_or_err;
+  
+  // Set superclass if not already set
+  if (!interface_decl->getSuperClass() && class_info.superclass_ptr) {
+    // Try to get superclass interface
+    ObjCInterfaceDecl *super_interface = nullptr;
+    if (!class_info.superclass_name.empty()) {
+      super_interface = GetOrCreateInterface(ctx, class_info.superclass_name);
+    }
+    if (super_interface) {
+      QualType superType = ctx.getObjCInterfaceType(super_interface);
+      TypeSourceInfo *TSI = ctx.getTrivialTypeSourceInfo(superType);
+      interface_decl->setSuperClass(TSI);
+    }
+  }
+  
+  // Get all instance methods from runtime
+  auto methods_or_err = m_runtime_api->GetAllMethodsIncludingInherited(class_info.class_ptr);
+  if (methods_or_err) {
+    for (const auto &method : *methods_or_err) {
+      // Only add if not already present
+      if (!InterfaceAlreadyHasMethod(interface_decl, method.selector_name.c_str(), true)) {
+        clang::ObjCMethodDecl *method_decl = CreateMethodDecl(
+          interface_decl, 
+          method.selector_name.c_str(),
+          method.type_encoding.c_str(),
+          true  // is_instance
+        );
+        if (method_decl) {
+          LLDB_LOG(log, "Added instance method {0} to {1}", 
+                   method.selector_name, class_name);
+        }
+      }
+    }
+  }
+  
+  // Get class methods from metaclass using proper runtime introspection
+  // In Objective-C, class methods are instance methods of the metaclass
+  if (class_info.class_ptr) {
+    // Get metaclass using object_getClass on the class itself
+    auto metaclass_or_err = m_runtime_api->GetObjectClass(class_info.class_ptr);
+    if (metaclass_or_err) {
+      void *metaclass = *metaclass_or_err;
+      
+      LLDB_LOG(log, "Got metaclass for {0}, discovering class methods", class_name);
+      
+      // Get methods from metaclass (these are class methods)
+      auto class_methods_or_err = m_runtime_api->GetAllMethodsIncludingInherited(metaclass);
+      if (class_methods_or_err) {
+        LLDB_LOG(log, "Found {0} potential class methods for {1}", 
+                 class_methods_or_err->size(), class_name);
+        
+        for (const auto &method : *class_methods_or_err) {
+          // Skip methods that are clearly metaclass infrastructure
+          if (method.selector_name.find(".cxx_") != std::string::npos ||
+              method.selector_name == "load" ||
+              method.selector_name == "initialize" ||
+              method.selector_name == "class" ||
+              method.selector_name == "superclass" ||
+              method.selector_name == "isSubclassOfClass:" ||
+              method.selector_name == "instancesRespondToSelector:" ||
+              method.selector_name == "conformsToProtocol:" ||
+              method.selector_name == "new") {
+            continue;
+          }
+          
+          // Only add if not already present
+          if (!InterfaceAlreadyHasMethod(interface_decl, method.selector_name.c_str(), false)) {
+            clang::ObjCMethodDecl *method_decl = CreateMethodDecl(
+              interface_decl, 
+              method.selector_name.c_str(),
+              method.type_encoding.c_str(),
+              false  // is_instance = false for class methods
+            );
+            if (method_decl) {
+              LLDB_LOG(log, "Added class method +{0} to {1}", 
+                       method.selector_name, class_name);
+            }
+          }
+        }
+      } else {
+        LLDB_LOG(log, "Failed to get methods from metaclass for {0}", class_name);
+      }
+    } else {
+      LLDB_LOG(log, "Failed to get metaclass for {0}: {1}", class_name, 
+               llvm::toString(metaclass_or_err.takeError()));
+    }
+  }
+  
+  // The interface is already started via GetOrCreateInterface which calls startDefinition()
+  // Just ensure external storage flags are cleared so LLDB knows it's complete
+  interface_decl->setHasExternalVisibleStorage(false);
+  interface_decl->setHasExternalLexicalStorage(false);
+  
+  LLDB_LOG(log, "Successfully populated {0} from runtime", class_name);
+  return true;
+}
+
+void GNUstepObjCDeclVendor::EnsureMinimalFoundationInterfaces(TypeSystemClang &ts) {
+  Log *log(GetLog(LLDBLog::Expressions));
+  LLDB_LOGF(log, "[TRACE] EnsureMinimalFoundationInterfaces called (already_injected=%d)", m_foundation_minimals_injected);
+  if (m_foundation_minimals_injected)
+    return;
+
+  ASTContext &ctx = ts.getASTContext();
+  
+  LLDB_LOG(log, "[TRACE] Starting EnsureMinimalFoundationInterfaces with runtime discovery");
+
+  // Critical Foundation classes that need early population for expression evaluation
+  const std::vector<std::string> foundation_classes = {
+    "NSObject",    // Root class
+    "NSNumber",    // Literal support: @123
+    "NSString",    // Literal support: @"string"
+    "NSArray",     // Literal support: @[]
+    "NSDictionary" // Literal support: @{}
+  };
+  
+  // Use runtime discovery to populate each Foundation class
+  for (const auto &class_name : foundation_classes) {
+    if (m_runtime_api) {
+      // Try runtime discovery first
+      if (PopulateInterfaceFromRuntime(ts, class_name)) {
+        LLDB_LOG(log, "Successfully populated {0} from runtime", class_name);
+      } else {
+        LLDB_LOG(log, "Runtime discovery failed for {0}", class_name);
+      }
+    }
+    
+    // CRITICAL: Always ensure comprehensive Foundation methods are present for literal support
+    // This supplements runtime discovery and handles cases where runtime 
+    // introspection is disabled or incomplete
+    LLDB_LOG(log, "Ensuring comprehensive Foundation methods for {0} (needed for literals)", class_name);
+    
+    ObjCInterfaceDecl *interface_decl = GetOrCreateInterface(ctx, class_name);
+    if (!interface_decl)
+      continue;
+    
+    // Use the existing AddFoundationClassMethods function which has proper
+    // type encodings and comprehensive method sets
+    AddFoundationClassMethods(interface_decl, class_name);
+    
+    // Ensure external storage flags are cleared
+    interface_decl->setHasExternalVisibleStorage(false);
+    interface_decl->setHasExternalLexicalStorage(false);
+  }
+
+  m_foundation_minimals_injected = true;
+  LLDB_LOG(log, "[TRACE] Completed EnsureMinimalFoundationInterfaces - all Foundation interfaces populated");
 }

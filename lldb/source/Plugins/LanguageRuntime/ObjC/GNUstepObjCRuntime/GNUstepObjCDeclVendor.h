@@ -12,6 +12,7 @@
 #include "Plugins/ExpressionParser/Clang/ClangDeclVendor.h"
 #include "Plugins/TypeSystem/Clang/TypeSystemClang.h"
 #include "GNUstepObjCRuntimeIntrospector.h"
+#include "GNUstepRuntimeV2API.h"
 #include "../ObjCLanguageRuntime.h"
 #include <unordered_map>
 
@@ -80,10 +81,25 @@ private:
   bool DoesClassRespondToSelector(const std::string &class_name,
                                   const std::string &selector_name);
 
+public:
+  // Expression evaluation support
+  void EnsureRuntimeDecls(TypeSystemClang &ts);
+  void EnsureMinimalFoundationInterfaces(TypeSystemClang &ts);
+  
+  // Runtime-based interface population
+  bool PopulateInterfaceFromRuntime(TypeSystemClang &ts, const std::string &class_name);
+
 private:
   // Method forwarding table
   std::vector<MethodForwardingInfo> m_method_forwarding_rules;
   bool m_forwarding_initialized;
+  
+  // Track if we've injected runtime decls and foundation interfaces
+  bool m_runtime_decls_injected = false;
+  bool m_foundation_minimals_injected = false;
+  
+  // Runtime API for dynamic class/method discovery
+  std::unique_ptr<GNUstepRuntimeV2API> m_runtime_api;
 };
 
 } // namespace lldb_private
