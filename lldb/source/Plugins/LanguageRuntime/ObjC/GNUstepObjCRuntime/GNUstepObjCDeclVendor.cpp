@@ -1090,7 +1090,7 @@ bool GNUstepObjCDeclVendor::FinishDecl(clang::ObjCInterfaceDecl *interface_decl)
       auto properties_or_err = m_runtime_api->GetAllPropertiesIncludingInherited(class_info.class_ptr);
       if (properties_or_err) {
         LLDB_LOGF(log, "[GNUstepObjCDeclVendor::FinishDecl] Found %zu properties for %s",
-                  properties_or_err->size(), class_name);
+                  properties_or_err->size(), class_name.c_str());
         
         // Properties typically have getter/setter methods that we've already added above
         // TODO: Add actual @property declarations if needed for better debugging experience
@@ -1101,7 +1101,7 @@ bool GNUstepObjCDeclVendor::FinishDecl(clang::ObjCInterfaceDecl *interface_decl)
       
       // Fall back to hardcoded methods for core Foundation classes
       LLDB_LOGF(log, "[GNUstepObjCDeclVendor::FinishDecl] Falling back to hardcoded methods for %s",
-                class_name);
+                class_name.c_str());
       AddFoundationClassMethods(interface_decl, class_name);
     }
   } else {
@@ -1117,7 +1117,7 @@ bool GNUstepObjCDeclVendor::FinishDecl(clang::ObjCInterfaceDecl *interface_decl)
     LLDB_LOGF(
         log,
         "[GNUstepObjCDeclVendor::FinishDecl] Finished Objective-C interface for %s",
-        class_name);
+        class_name.c_str());
 
     LLDB_LOG(log, "  [GNUstepObjCDeclVendor::FinishDecl] {0}", ClangUtil::DumpDecl(interface_decl));
   }
@@ -1223,7 +1223,7 @@ std::optional<std::string> GNUstepObjCDeclVendor::GetForwardingTarget(
     }
     
     LLDB_LOGF(log, "[GNUstepObjCDeclVendor] Found forwarding rule: %s->%s for class %s",
-              method_name.c_str(), rule.legacy_method.c_str(), class_name);
+              method_name.c_str(), rule.legacy_method.c_str(), class_name.c_str());
     return rule.legacy_method;
   }
   
@@ -1337,7 +1337,7 @@ clang::ObjCMethodDecl *GNUstepObjCDeclVendor::ResolveMethodWithForwarding(
   auto forwarding_target = GetForwardingTarget(method_name, class_name);
   if (!forwarding_target) {
     LLDB_LOGF(log, "[GNUstepObjCDeclVendor] No forwarding rule found for method %s in class %s",
-              method_name.c_str(), class_name);
+              method_name.c_str(), class_name.c_str());
     return nullptr;
   }
   
