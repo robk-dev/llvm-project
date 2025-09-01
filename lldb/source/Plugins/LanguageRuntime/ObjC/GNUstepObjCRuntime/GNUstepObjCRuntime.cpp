@@ -87,9 +87,12 @@ GNUstepObjCRuntime::CreateInstance(Process *process,
   // CRITICAL DEBUG: Force output to stderr regardless of logging
   fprintf(stderr, "!!! GNUstepObjCRuntime::CreateInstance called for language %d !!!\n", (int)language);
   
-  // Handle ONLY Objective-C (16) and Objective-C++ (17) - NOT plain C
-  if (language != eLanguageTypeObjC && language != eLanguageTypeObjC_plus_plus) {
-    fprintf(stderr, "!!! GNUstepObjCRuntime: Not ObjC/ObjC++ language (%d), returning nullptr !!!\n", (int)language);
+  // Handle Objective-C (16), Objective-C++ (17), and C (1) for IR rewriting support
+  // Research Agent Plan: Accept eLanguageTypeC for comprehensive expression evaluation
+  if (language != eLanguageTypeObjC && 
+      language != eLanguageTypeObjC_plus_plus && 
+      language != eLanguageTypeC) {
+    fprintf(stderr, "!!! GNUstepObjCRuntime: Not ObjC/ObjC++/C language (%d), returning nullptr !!!\n", (int)language);
     return nullptr;
   }
   
@@ -189,6 +192,10 @@ GNUstepObjCRuntime::CreateInstance(Process *process,
   std::unique_ptr<GNUstepObjCRuntime> runtime_sp(new GNUstepObjCRuntime(process));
   if (runtime_sp) {
     runtime_sp->ArmEarlyInstall();
+    
+    // Research Agent Plan: Install expression evaluation hooks immediately after creation
+    // This ensures comprehensive IR rewriting support for all language types
+    runtime_sp->InstallExpressionEvaluationHooks();
   }
   return runtime_sp.release();
 }
@@ -1298,10 +1305,12 @@ void GNUstepObjCRuntime::InstallExpressionEvaluationHooks() {
   // 1) Resolve and cache canonical ObjC runtime symbols from libobjc2
   ResolveAndCacheRuntimeSymbols();
   
-  // Early-out if we can't resolve core symbols yet
+  // Early-out if we can't resolve ANY runtime symbols yet - be more conservative
+  // Research Agent Plan: Only require minimal symbol availability for activation
   if (m_objc_msgSend_addr == LLDB_INVALID_ADDRESS &&
-      m_objc_getClass_addr == LLDB_INVALID_ADDRESS) {
-    LLDB_LOG(log, "Core runtime symbols not available yet, deferring installation");
+      m_objc_getClass_addr == LLDB_INVALID_ADDRESS &&
+      m_sel_getUid_addr == LLDB_INVALID_ADDRESS) {
+    LLDB_LOG(log, "No core runtime symbols available yet, deferring installation");
     return;
   }
   
@@ -1309,8 +1318,9 @@ void GNUstepObjCRuntime::InstallExpressionEvaluationHooks() {
   EnsureCFStringCreateWithBytes();
   
   // 3) Inject runtime function prototypes and minimal Foundation interfaces into scratch AST
+  // Research Agent Plan: Include eLanguageTypeC and make declarations unconditional
   Target &target = GetProcess()->GetTarget();
-  for (LanguageType lang : {eLanguageTypeObjC, eLanguageTypeObjC_plus_plus}) {
+  for (LanguageType lang : {eLanguageTypeC, eLanguageTypeObjC, eLanguageTypeObjC_plus_plus}) {
     auto ts_or_err = target.GetScratchTypeSystemForLanguage(lang);
     if (ts_or_err) {
       auto ts_sp = *ts_or_err;
@@ -1318,12 +1328,16 @@ void GNUstepObjCRuntime::InstallExpressionEvaluationHooks() {
         auto *ts = llvm::dyn_cast<TypeSystemClang>(ts_sp.get());
         if (ts) {
           LLDB_LOG(log, "Injecting runtime function prototypes into scratch AST for language: {0}", 
+                   (lang == eLanguageTypeC) ? "C" : 
                    (lang == eLanguageTypeObjC) ? "ObjC" : "ObjC++");
+          
+          // Research Agent Plan: Unconditionally declare prototypes for comprehensive IR support
           InjectRuntimeFunctionDecls(*ts);
           
           // Also inject minimal Foundation interfaces so utility functions can compile
           if (m_decl_vendor_up) {
             LLDB_LOG(log, "Injecting minimal Foundation interfaces into scratch AST for language: {0}", 
+                     (lang == eLanguageTypeC) ? "C" : 
                      (lang == eLanguageTypeObjC) ? "ObjC" : "ObjC++");
             auto *gnustep_vendor = static_cast<GNUstepObjCDeclVendor *>(m_decl_vendor_up.get());
             if (gnustep_vendor) {
@@ -1444,6 +1458,9 @@ void GNUstepObjCRuntime::EnsureCFStringCreateWithBytes() {
   Target &target = GetProcess()->GetTarget();
   const ModuleList &modules = target.GetImages();
   
+  // Research Agent Plan: Always try to find real function first, but always install fallback
+  bool found_real_function = false;
+  
   // First try to find the real CFStringCreateWithBytes in Foundation/CoreFoundation
   for (size_t i = 0; i < modules.GetSize(); ++i) {
     ModuleSP module_sp = modules.GetModuleAtIndex(i);
@@ -1466,12 +1483,14 @@ void GNUstepObjCRuntime::EnsureCFStringCreateWithBytes() {
       m_cfstring_create_addr = symbol->GetLoadAddress(&target);
       LLDB_LOG(log, "Found real CFStringCreateWithBytes at 0x{0:x} in {1}", 
                m_cfstring_create_addr, module_name);
-      return;
+      found_real_function = true;
+      break;
     }
   }
   
-  // If not found, install our own fallback implementation
-  LLDB_LOG(log, "CFStringCreateWithBytes not found, installing fallback");
+  // Research Agent Plan: Always install fallback for robust IR rewriting support
+  // Install fallback even when real function exists to ensure IR compatibility
+  LLDB_LOG(log, "Installing CFStringCreateWithBytes fallback for comprehensive IR support");
   
   // Create fallback implementation with the correct function name for IR linking
   const char *cfstring_fallback = R"(
@@ -1539,8 +1558,14 @@ extern "C" void *CFStringCreateWithBytes(void *alloc,
     SymbolContext sc;
     sc_list.GetContextAtIndex(0, sc);
     if (sc.symbol) {
-      m_cfstring_create_addr = sc.symbol->GetLoadAddress(&tgt);
-      LLDB_LOG(log, "Installed CFStringCreateWithBytes fallback at 0x{0:x}", m_cfstring_create_addr);
+      // Research Agent Plan: Use fallback address if real function wasn't found
+      if (!found_real_function) {
+        m_cfstring_create_addr = sc.symbol->GetLoadAddress(&tgt);
+        LLDB_LOG(log, "Installed CFStringCreateWithBytes fallback at 0x{0:x}", m_cfstring_create_addr);
+      } else {
+        LLDB_LOG(log, "CFStringCreateWithBytes fallback installed for IR robustness, using real function at 0x{0:x}", 
+                 m_cfstring_create_addr);
+      }
       return;
     }
   }
