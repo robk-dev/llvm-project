@@ -952,6 +952,8 @@ lldb::TypeCategoryImplSP ObjCLanguage::GetFormatters() {
     if (g_category) {
       LoadCoreMediaFormatters(g_category);
       LoadObjCFormatters(g_category);
+      // Enable GNUstep formatters (no longer causes infinite loop with proper runtime integration)
+      LoadGNUstepFormatters(g_category);
     }
   });
   return g_category;

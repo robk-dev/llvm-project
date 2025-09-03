@@ -2,7 +2,8 @@
     "lldb.executable": "/c/code/llvm-project/build/bin/lldb.exe",
     "lldb.adapterEnv": {
         "LLDB_DEBUGSERVER_PATH": "/c/code/llvm-project/build/bin/lldb-server.exe",
-        "PATH": "/ucrt64/lib:/ucrt64/bin:/c/code/llvm-project/build/bin"
+        // "PATH": "C:\\tools\\msys64\\ucrt64\\lib\\lib;C:\\tools\\msys64\\ucrt64\\lib\\bin;C:\\code\\llvm-project\\build\\bin"
+        "PATH": "/c/tools/msys64/ucrt64/lib/lib:/c/tools/msys64/ucrt64/lib/bin:/c/code/llvm-project/build/bin",
     },
     "lldb.showDisassembly": "never",
     "lldb.evaluateForHovers": true,

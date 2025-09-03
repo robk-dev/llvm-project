@@ -79,27 +79,30 @@ GNUstepObjCRuntime::CreateInstance(Process *process,
   Log *log = GetLog(LLDBLog::Process | LLDBLog::Types);
   LLDB_LOG(log, "GNUstepObjCRuntime::CreateInstance() called for language {0}", language);
   
-  // ENHANCED DEBUG: Add more visible logging
-  if (log) {
-    log->Printf("*** GNUstepObjCRuntime::CreateInstance DEBUG: Called for language %d ***", (int)language);
-  }
-  
-  // CRITICAL DEBUG: Force output to stderr regardless of logging
-  fprintf(stderr, "!!! GNUstepObjCRuntime::CreateInstance called for language %d !!!\n", (int)language);
-  
-  // Handle Objective-C (16), Objective-C++ (17), and C (1) for IR rewriting support
-  // Research Agent Plan: Accept eLanguageTypeC for comprehensive expression evaluation
-  if (language != eLanguageTypeObjC && 
-      language != eLanguageTypeObjC_plus_plus && 
-      language != eLanguageTypeC) {
-    fprintf(stderr, "!!! GNUstepObjCRuntime: Not ObjC/ObjC++/C language (%d), returning nullptr !!!\n", (int)language);
+  if (!process) {
+    LLDB_LOG(log, "GNUstepObjCRuntime: No process provided, returning nullptr");
     return nullptr;
   }
   
-  fprintf(stderr, "!!! GNUstepObjCRuntime: IS ObjC/ObjC++ language (%d), continuing... !!!\n", (int)language);
-  
-  if (!process) {
-    fprintf(stderr, "!!! GNUstepObjCRuntime: No process, returning nullptr !!!\n");
+  // Handle direct Objective-C languages first
+  if (language == eLanguageTypeObjC || language == eLanguageTypeObjC_plus_plus) {
+    LLDB_LOG(log, "GNUstepObjCRuntime: Direct ObjC language ({0}), proceeding with marker check", (int)language);
+  }
+  // Handle C language only if ObjC context already exists
+  else if (language == eLanguageTypeC) {
+    // Check if an ObjC runtime already exists for this process
+    bool has_objc_context = (process->GetLanguageRuntime(eLanguageTypeObjC) != nullptr ||
+                            process->GetLanguageRuntime(eLanguageTypeObjC_plus_plus) != nullptr);
+    
+    if (!has_objc_context) {
+      LLDB_LOG(log, "GNUstepObjCRuntime: C language without ObjC context, returning nullptr");
+      return nullptr;
+    }
+    
+    LLDB_LOG(log, "GNUstepObjCRuntime: C language with existing ObjC context, proceeding");
+  }
+  else {
+    LLDB_LOG(log, "GNUstepObjCRuntime: Unsupported language ({0}), returning nullptr", (int)language);
     return nullptr;
   }
 
@@ -113,13 +116,13 @@ GNUstepObjCRuntime::CreateInstance(Process *process,
   // Check the executable module for ObjC sections or symbols
   ModuleSP exe_module = target.GetExecutableModule();
   if (exe_module) {
-    LLDB_LOG(log, "*** GNUstepObjCRuntime: Checking executable module: {0} ***", 
+    LLDB_LOG(log, "GNUstepObjCRuntime: Checking executable module: {0}", 
              exe_module->GetFileSpec().GetFilename().GetCString());
     
     // Look for .objc_ or .objcrt sections which indicate Objective-C code
     SectionList *section_list = exe_module->GetSectionList();
     if (section_list) {
-      LLDB_LOG(log, "*** GNUstepObjCRuntime: Found {0} sections in executable ***", 
+      LLDB_LOG(log, "GNUstepObjCRuntime: Found {0} sections in executable", 
                section_list->GetSize());
       
       for (size_t idx = 0; idx < section_list->GetSize(); ++idx) {
@@ -128,7 +131,6 @@ GNUstepObjCRuntime::CreateInstance(Process *process,
           ConstString section_name = section_sp->GetName();
           if (section_name) {
             const char *name = section_name.GetCString();
-            LLDB_LOG(log, "*** GNUstepObjCRuntime: Checking section: {0} ***", name);
             
             // Check for various GNUstep/libobjc2 section patterns
             if (strstr(name, ".objc_") != nullptr ||      // Traditional .objc_class, .objc_method, etc.
@@ -136,7 +138,7 @@ GNUstepObjCRuntime::CreateInstance(Process *process,
                 strstr(name, "__objc_") != nullptr ||     // Some platforms use __objc_ prefix
                 strcmp(name, ".objc") == 0) {             // Simple .objc section
               found_objc_markers = true;
-              LLDB_LOG(log, "*** GNUstepObjCRuntime: FOUND ObjC section: {0} ***", name);
+              LLDB_LOG(log, "GNUstepObjCRuntime: Found ObjC section: {0}", name);
               break;
             }
           }
@@ -184,17 +186,16 @@ GNUstepObjCRuntime::CreateInstance(Process *process,
   
   // Only create instance if we found ObjC markers
   if (!found_objc_markers) {
-    LLDB_LOG(log, "*** GNUstepObjCRuntime: NO ObjC markers found, not creating instance ***");
+    LLDB_LOG(log, "GNUstepObjCRuntime: No ObjC markers found, not creating instance");
     return nullptr;
   }
 
-  LLDB_LOG(log, "*** GNUstepObjCRuntime: ObjC markers found, CREATING runtime instance ***");
+  LLDB_LOG(log, "GNUstepObjCRuntime: ObjC markers found, creating runtime instance");
   std::unique_ptr<GNUstepObjCRuntime> runtime_sp(new GNUstepObjCRuntime(process));
   if (runtime_sp) {
     runtime_sp->ArmEarlyInstall();
     
-    // Research Agent Plan: Install expression evaluation hooks immediately after creation
-    // This ensures comprehensive IR rewriting support for all language types
+    // Install expression evaluation hooks for IR rewriting support
     runtime_sp->InstallExpressionEvaluationHooks();
   }
   return runtime_sp.release();
@@ -801,6 +802,7 @@ lldb::ThreadPlanSP GNUstepObjCRuntime::GetStepThroughTrampolinePlan(Thread &thre
     if (module_name) {
       bool is_objc_runtime = (strstr(module_name, "libobjc") != nullptr ||
                              strstr(module_name, "libgnustep-base") != nullptr ||
+                             strstr(module_name, "libs-base") != nullptr ||
                              strstr(module_name, "libobjc2") != nullptr);
       if (!is_objc_runtime) {
         LLDB_LOG(log, "Symbol {0} is not from objc runtime library (module: {1})", 
@@ -871,6 +873,65 @@ bool GNUstepObjCRuntime::ReadObjCLibrary(const lldb::ModuleSP &module_sp) {
 
 bool GNUstepObjCRuntime::HasReadObjCLibrary() {
   return m_has_read_objc_library;
+}
+
+bool GNUstepObjCRuntime::CalculateHasNewLiteralsAndIndexing() {
+  if (!m_process) 
+    return false;
+    
+  Log *log = GetLog(LLDBLog::Language);
+  Target &target = m_process->GetTarget();
+  
+  // Check for subscripting method presence - this is the most reliable indicator
+  SymbolContextList sc_list;
+  
+  // Primary check: NSDictionary subscripting (most reliable indicator)
+  target.GetImages().FindSymbolsWithNameAndType(
+      ConstString("-[NSDictionary objectForKeyedSubscript:]"),
+      eSymbolTypeCode, sc_list);
+  
+  if (!sc_list.IsEmpty()) {
+    LLDB_LOG(log, "GNUstep: Found NSDictionary subscripting support");
+    return true;
+  }
+  
+  // Fallback: NSArray subscripting
+  sc_list.Clear();
+  target.GetImages().FindSymbolsWithNameAndType(
+      ConstString("-[NSArray objectAtIndexedSubscript:]"),
+      eSymbolTypeCode, sc_list);
+      
+  if (!sc_list.IsEmpty()) {
+    LLDB_LOG(log, "GNUstep: Found NSArray subscripting support");
+    return true;
+  }
+  
+  // Check for GNUstep Base version symbols as indicator
+  sc_list.Clear();
+  target.GetImages().FindSymbolsWithNameAndType(
+      ConstString("gnustep_base_version"), 
+      eSymbolTypeData, sc_list);
+      
+  if (!sc_list.IsEmpty()) {
+    // Assume modern GNUstep Base has subscripting (Base 1.24+)
+    LLDB_LOG(log, "GNUstep: Found gnustep_base_version, assuming subscripting support");
+    return true;
+  }
+  
+  // Check for NSConstantString class as fallback indicator
+  sc_list.Clear(); 
+  target.GetImages().FindSymbolsWithNameAndType(
+      ConstString("NSConstantString"),
+      eSymbolTypeObjCClass, sc_list);
+      
+  if (!sc_list.IsEmpty()) {
+    // If we have NSConstantString, we likely have modern GNUstep Base
+    LLDB_LOG(log, "GNUstep: Found NSConstantString class, likely modern GNUstep Base");
+    return true;
+  }
+  
+  LLDB_LOG(log, "GNUstep: No subscripting support detected");
+  return false;
 }
 
 llvm::Expected<std::unique_ptr<UtilityFunction>>
@@ -1317,6 +1378,9 @@ void GNUstepObjCRuntime::InstallExpressionEvaluationHooks() {
   // 2) Ensure CFStringCreateWithBytes is available (real or fallback) 
   EnsureCFStringCreateWithBytes();
   
+  // 3) Ensure array/dictionary literal support is available
+  EnsureArrayDictionaryLiteralSupport();
+  
   // 3) Inject runtime function prototypes and minimal Foundation interfaces into scratch AST
   // Research Agent Plan: Include eLanguageTypeC and make declarations unconditional
   Target &target = GetProcess()->GetTarget();
@@ -1455,6 +1519,12 @@ void GNUstepObjCRuntime::EnsureCFStringCreateWithBytes() {
     return;
   }
   
+  // CRITICAL FIX: Ensure we have execution context before trying to install utility function
+  if (!m_process || !m_process->IsAlive()) {
+    LLDB_LOG(log, "Process not available for CFStringCreateWithBytes installation");
+    return;
+  }
+  
   Target &target = GetProcess()->GetTarget();
   const ModuleList &modules = target.GetImages();
   
@@ -1469,10 +1539,12 @@ void GNUstepObjCRuntime::EnsureCFStringCreateWithBytes() {
     const char *module_name = module_sp->GetFileSpec().GetFilename().GetCString();
     if (!module_name) continue;
     
-    // Check for Foundation/CoreFoundation modules
+    // Check for Foundation/CoreFoundation modules with more comprehensive patterns
     bool is_foundation = (strstr(module_name, "gnustep-base") ||
                          strstr(module_name, "Foundation") ||
-                         strstr(module_name, "CoreFoundation"));
+                         strstr(module_name, "CoreFoundation") ||
+                         strstr(module_name, "libobjc") ||  // GNUstep libobjc might have it
+                         strstr(module_name, "base"));      // Any base library
     
     if (!is_foundation) continue;
     
@@ -1495,18 +1567,17 @@ void GNUstepObjCRuntime::EnsureCFStringCreateWithBytes() {
   // Create fallback implementation with the correct function name for IR linking
   const char *cfstring_fallback = R"(
 // GNUstep fallback for IR: CFStringCreateWithBytes
-extern "C" void *objc_getClass(const char*);
-extern "C" void *sel_getUid(const char*);
-extern "C" void *objc_msgSend(void*, void*, ...);
+void *objc_getClass(const char*);
+void *sel_getUid(const char*);
+void *objc_msgSend(void*, void*, ...);
 
-extern "C" void *CFStringCreateWithBytes(void *alloc,
-                                         const unsigned char *bytes,
-                                         long numBytes,
-                                         unsigned long encoding,
-                                         unsigned char isExternalRepresentation)
+void *CFStringCreateWithBytes(void *alloc,
+                             const unsigned char *bytes,
+                             long numBytes,
+                             unsigned long encoding,
+                             unsigned char isExternalRepresentation)
 {
-  (void)alloc; (void)encoding; (void)isExternalRepresentation;
-  
+  // Ignore allocator, encoding, isExternalRepresentation for simplicity
   void *nsstringClass = objc_getClass("NSString");
   if (!nsstringClass) return (void*)0;
   
@@ -1524,6 +1595,8 @@ extern "C" void *CFStringCreateWithBytes(void *alloc,
     return;
   }
   
+  LLDB_LOG(log, "Creating CFStringCreateWithBytes utility function...");
+  
   // Create the utility function if not already created
   if (!m_cfstring_utility_fn) {
     auto utility_fn_or_err = target.CreateUtilityFunction(
@@ -1536,24 +1609,53 @@ extern "C" void *CFStringCreateWithBytes(void *alloc,
     }
     
     m_cfstring_utility_fn = std::move(*utility_fn_or_err);
+    LLDB_LOG(log, "CFStringCreateWithBytes utility function created successfully");
   }
   
-  // << THIS WAS MISSING >> - Actually install the utility function
+  // Install the utility function
+  LLDB_LOG(log, "Installing CFStringCreateWithBytes utility function...");
   DiagnosticManager diagnostic_manager;
   Status install_error;
-  if (!m_cfstring_utility_fn->Install(diagnostic_manager, exe_ctx)) {
-    LLDB_LOG(log, "Failed to install CFStringCreateWithBytes fallback: {0}", 
-             diagnostic_manager.GetString());
-    return;
+  bool installation_succeeded = m_cfstring_utility_fn->Install(diagnostic_manager, exe_ctx);
+  
+  if (!installation_succeeded) {
+    std::string diag_msg = diagnostic_manager.GetString();
+    // "already installed" is actually a success case
+    if (diag_msg.find("already installed") != std::string::npos) {
+      LLDB_LOG(log, "CFStringCreateWithBytes utility function was already installed (this is OK)");
+      installation_succeeded = true;
+    } else {
+      LLDB_LOG(log, "Failed to install CFStringCreateWithBytes fallback: {0}", diag_msg);
+      return;
+    }
+  } else {
+    LLDB_LOG(log, "CFStringCreateWithBytes utility function installed successfully");
   }
   
   // Get the real address of our installed fallback function
-  // The utility function should now be compiled and loaded in the target
+  // Try multiple approaches to find the installed function
   Target &tgt = exe_ctx.GetTargetRef();
+  
+  // Approach 1: Look for the symbol in all modules
   SymbolContextList sc_list;
   tgt.GetImages().FindSymbolsWithNameAndType(
       ConstString("CFStringCreateWithBytes"), eSymbolTypeCode, sc_list);
   
+  LLDB_LOG(log, "Found {0} CFStringCreateWithBytes symbols after installation", sc_list.GetSize());
+  
+  // Approach 2: If not found, try to get address directly from utility function
+  if (sc_list.GetSize() == 0 && m_cfstring_utility_fn) {
+    lldb::addr_t utility_addr = m_cfstring_utility_fn->StartAddress();
+    if (utility_addr != LLDB_INVALID_ADDRESS) {
+      if (!found_real_function) {
+        m_cfstring_create_addr = utility_addr;
+        LLDB_LOG(log, "Got CFStringCreateWithBytes fallback address directly from utility function: 0x{0:x}", m_cfstring_create_addr);
+      }
+      return;
+    }
+  }
+  
+  // Approach 3: Standard symbol lookup
   if (sc_list.GetSize() > 0) {
     SymbolContext sc;
     sc_list.GetContextAtIndex(0, sc);
@@ -1571,6 +1673,129 @@ extern "C" void *CFStringCreateWithBytes(void *alloc,
   }
   
   LLDB_LOG(log, "Failed to get address of CFStringCreateWithBytes fallback after installation");
+}
+
+void GNUstepObjCRuntime::EnsureArrayDictionaryLiteralSupport() {
+  Log *log = GetLog(LLDBLog::Language | LLDBLog::Types);
+  LLDB_LOG(log, "Ensuring array and dictionary literal support is available");
+  
+  // Skip if already set up
+  if (m_array_literal_addr != LLDB_INVALID_ADDRESS && 
+      m_dict_literal_addr != LLDB_INVALID_ADDRESS) {
+    LLDB_LOG(log, "Array/Dictionary literal support already available");
+    return;
+  }
+  
+  Target &target = GetProcess()->GetTarget();
+  ExecutionContext exe_ctx(GetProcess());
+  if (!exe_ctx.HasProcessScope()) {
+    LLDB_LOG(log, "No valid execution context for array/dictionary literal installation");
+    return;
+  }
+  
+  // Install NSArray arrayWithObjects:count: fallback
+  if (m_array_literal_addr == LLDB_INVALID_ADDRESS) {
+    LLDB_LOG(log, "Installing NSArray arrayWithObjects:count: fallback...");
+    
+    const char *array_literal_fallback = R"(
+// GNUstep fallback for array literals: +[NSArray arrayWithObjects:count:]
+void *objc_getClass(const char*);
+void *sel_getUid(const char*);
+void *objc_msgSend(void*, void*, ...);
+
+void *NSArray_arrayWithObjects_count(void **objects, unsigned long count)
+{
+  void *nsarrayClass = objc_getClass("NSArray");
+  if (!nsarrayClass) return (void*)0;
+  
+  void *sel = sel_getUid("arrayWithObjects:count:");
+  if (!sel) return (void*)0;
+  
+  return objc_msgSend(nsarrayClass, sel, objects, count);
+}
+)";
+    
+    if (!m_array_literal_utility_fn) {
+      auto utility_fn_or_err = target.CreateUtilityFunction(
+          array_literal_fallback, "NSArray_arrayWithObjects_count", eLanguageTypeC, exe_ctx);
+      
+      if (!utility_fn_or_err) {
+        LLDB_LOG(log, "Failed to create NSArray literal fallback: {0}", 
+                 llvm::toString(utility_fn_or_err.takeError()));
+      } else {
+        m_array_literal_utility_fn = std::move(*utility_fn_or_err);
+        LLDB_LOG(log, "NSArray literal utility function created successfully");
+        
+        // Install it
+        DiagnosticManager diagnostic_manager;
+        bool installation_succeeded = m_array_literal_utility_fn->Install(diagnostic_manager, exe_ctx);
+        
+        if (!installation_succeeded) {
+          std::string diag_msg = diagnostic_manager.GetString();
+          if (diag_msg.find("already installed") != std::string::npos) {
+            installation_succeeded = true;
+          }
+        }
+        
+        if (installation_succeeded) {
+          m_array_literal_addr = m_array_literal_utility_fn->StartAddress();
+          LLDB_LOG(log, "NSArray literal fallback installed at 0x{0:x}", m_array_literal_addr);
+        }
+      }
+    }
+  }
+  
+  // Install NSDictionary dictionaryWithObjects:forKeys:count: fallback
+  if (m_dict_literal_addr == LLDB_INVALID_ADDRESS) {
+    LLDB_LOG(log, "Installing NSDictionary dictionaryWithObjects:forKeys:count: fallback...");
+    
+    const char *dict_literal_fallback = R"(
+// GNUstep fallback for dictionary literals: +[NSDictionary dictionaryWithObjects:forKeys:count:]
+void *objc_getClass(const char*);
+void *sel_getUid(const char*);
+void *objc_msgSend(void*, void*, ...);
+
+void *NSDictionary_dictionaryWithObjects_forKeys_count(void **objects, void **keys, unsigned long count)
+{
+  void *nsdictClass = objc_getClass("NSDictionary");
+  if (!nsdictClass) return (void*)0;
+  
+  void *sel = sel_getUid("dictionaryWithObjects:forKeys:count:");
+  if (!sel) return (void*)0;
+  
+  return objc_msgSend(nsdictClass, sel, objects, keys, count);
+}
+)";
+    
+    if (!m_dict_literal_utility_fn) {
+      auto utility_fn_or_err = target.CreateUtilityFunction(
+          dict_literal_fallback, "NSDictionary_dictionaryWithObjects_forKeys_count", eLanguageTypeC, exe_ctx);
+      
+      if (!utility_fn_or_err) {
+        LLDB_LOG(log, "Failed to create NSDictionary literal fallback: {0}", 
+                 llvm::toString(utility_fn_or_err.takeError()));
+      } else {
+        m_dict_literal_utility_fn = std::move(*utility_fn_or_err);
+        LLDB_LOG(log, "NSDictionary literal utility function created successfully");
+        
+        // Install it
+        DiagnosticManager diagnostic_manager;
+        bool installation_succeeded = m_dict_literal_utility_fn->Install(diagnostic_manager, exe_ctx);
+        
+        if (!installation_succeeded) {
+          std::string diag_msg = diagnostic_manager.GetString();
+          if (diag_msg.find("already installed") != std::string::npos) {
+            installation_succeeded = true;
+          }
+        }
+        
+        if (installation_succeeded) {
+          m_dict_literal_addr = m_dict_literal_utility_fn->StartAddress();
+          LLDB_LOG(log, "NSDictionary literal fallback installed at 0x{0:x}", m_dict_literal_addr);
+        }
+      }
+    }
+  }
 }
 
 void GNUstepObjCRuntime::CreateAndInstallSubscriptShims(ExecutionContext &exe_ctx) {
@@ -1985,9 +2210,28 @@ lldb::addr_t GNUstepObjCRuntime::LookupRuntimeSymbol(ConstString name) {
 
   // NSString constant rewrite dependency:
   if (s == "CFStringCreateWithBytes") {
-    // Ensure fallback is installed if the symbol didn't exist in Foundation/CoreFoundation
+    // CRITICAL FIX: Ensure fallback is installed if the symbol didn't exist in Foundation/CoreFoundation
+    LLDB_LOG(log, "[LookupRuntimeSymbol] CFStringCreateWithBytes requested, ensuring installation");
     EnsureCFStringCreateWithBytes();
+    LLDB_LOG(log, "[LookupRuntimeSymbol] CFStringCreateWithBytes address: 0x{0:x}", m_cfstring_create_addr);
     return ret(m_cfstring_create_addr);
+  }
+
+  // Handle C++ mangled names for basic runtime functions
+  // LLDB's expression evaluator sometimes requests C++ mangled names instead of C names
+  if (s == "_Z10sel_getUidPKc") {
+    // This is the C++ mangled name for sel_getUid(const char*)
+    return ret(m_sel_getUid_addr);
+  }
+  
+  if (s == "_Z12objc_msgSendPvS_z") {
+    // This is the C++ mangled name for objc_msgSend(void*, void*, ...)
+    return ret(m_objc_msgSend_addr);
+  }
+  
+  if (s == "_Z13objc_getClassPKc") {
+    // This is the C++ mangled name for objc_getClass(const char*)
+    return ret(m_objc_getClass_addr);
   }
 
   // Subscript shim functions (if installed):

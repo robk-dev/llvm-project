@@ -41,8 +41,9 @@ static QualType GetIdTy(ASTContext &ctx)            { return ctx.getObjCIdType()
 static QualType GetClassTy(ASTContext &ctx)         { return ctx.getObjCClassType(); }
 static QualType GetSelTy(ASTContext &ctx)           { return ctx.getObjCSelType(); }
 static QualType GetIntTy(ASTContext &ctx)           { return ctx.IntTy; }
-static QualType GetLongLongTy(ASTContext &ctx)      { return ctx.LongLongTy; }
-static QualType GetULongTy(ASTContext &ctx)         { return ctx.UnsignedLongTy; } // Win64: NSUInteger
+// TODO: Enable when needed for CFString implementation
+// static QualType GetLongLongTy(ASTContext &ctx)      { return ctx.LongLongTy; }
+// static QualType GetULongTy(ASTContext &ctx)         { return ctx.UnsignedLongTy; } // Win64: NSUInteger
 static QualType GetConstCharPtrTy(ASTContext &ctx)  {
   QualType c = ctx.CharTy;
   c = c.withConst();
@@ -99,6 +100,8 @@ static ObjCInterfaceDecl *GetOrCreateInterface(ASTContext &ctx, llvm::StringRef 
   return Iface;
 }
 
+// TODO: Enable when needed for dynamic method creation
+#if 0
 static ObjCMethodDecl *AddObjCMethod(ASTContext &ctx,
                                      ObjCContainerDecl *container,
                                      llvm::StringRef selName,
@@ -152,6 +155,7 @@ static ObjCMethodDecl *AddObjCMethod(ASTContext &ctx,
   container->addDecl(M);
   return M;
 }
+#endif
 
 // Helper functions for AST body building
 static FunctionDecl *LookupFuncByName(ASTContext &ctx, llvm::StringRef name) {
@@ -377,11 +381,20 @@ GNUstepObjCDeclVendor::GNUstepObjCDeclVendor(ObjCLanguageRuntime &runtime)
   m_ast_ctx->getASTContext().setExternalSource(external_source_owning_ptr);
   LLDB_LOGF(log, "[TRACE] Set up GNUstepObjCExternalASTSource");
   
+  // CRITICAL: Add runtime function declarations immediately to ensure they're available
+  // before any expression compilation that might need them
+  EnsureRuntimeDecls(*m_ast_ctx);
+  LLDB_LOGF(log, "[TRACE] Added runtime function declarations in constructor");
+  
   // Initialize runtime API for dynamic discovery
   auto api_or_err = GNUstepRuntimeV2API::Create(runtime.GetProcess());
   if (api_or_err) {
     m_runtime_api = std::move(*api_or_err);
   }
+  
+  // CRITICAL: Initialize direct memory introspector to avoid expression evaluation recursion
+  m_introspector = std::make_unique<GNUstepObjCRuntimeIntrospector>(runtime.GetProcess());
+  LLDB_LOGF(log, "[TRACE] Created GNUstepObjCRuntimeIntrospector for direct method discovery");
   
   // Initialize method forwarding rules for modern subscript syntax
   InstallDefaultForwardingRules();
@@ -434,16 +447,16 @@ struct FoundationMethodSignature {
 
 // Method signatures for NSString
 static const FoundationMethodSignature NSString_methods[] = {
-  {"length", "Q@:", true},
-  {"characterAtIndex:", "S@:Q", true},
+  {"length", "L@:", true},
+  {"characterAtIndex:", "S@:L", true},
   {"UTF8String", "*@:", true},
   {"stringWithFormat:", "@#@:@", false},
-  {"stringWithCString:encoding:", "@#@:*Q", false},
+  {"stringWithCString:encoding:", "@#@:*L", false},
   {"description", "@@:", true},
-  {"isEqualToString:", "B@:@", true},
-  {"substringFromIndex:", "@@:Q", true},
-  {"substringToIndex:", "@@:Q", true},
-  {"substringWithRange:", "@@:{_NSRange=QQ}", true},
+  {"isEqualToString:", "c@:@", true},
+  {"substringFromIndex:", "@@:L", true},
+  {"substringToIndex:", "@@:L", true},
+  {"substringWithRange:", "@@:{_NSRange=LL}", true},
   {nullptr, nullptr, false}
 };
 
@@ -451,10 +464,10 @@ static const FoundationMethodSignature NSString_methods[] = {
 static const FoundationMethodSignature NSNumber_methods[] = {
   {"numberWithInt:", "@#@:i", false},
   {"numberWithDouble:", "@#@:d", false},
-  {"numberWithBool:", "@#@:B", false},
+  {"numberWithBool:", "@#@:c", false},
   {"intValue", "i@:", true},
   {"doubleValue", "d@:", true},
-  {"boolValue", "B@:", true},
+  {"boolValue", "c@:", true},
   {"stringValue", "@@:", true},
   {"description", "@@:", true},
   {nullptr, nullptr, false}
@@ -462,35 +475,37 @@ static const FoundationMethodSignature NSNumber_methods[] = {
 
 // Method signatures for NSArray
 static const FoundationMethodSignature NSArray_methods[] = {
-  {"count", "Q@:", true},
-  {"objectAtIndex:", "@@:Q", true},
-  {"objectAtIndexedSubscript:", "@@:Q", true},  // Modern subscript syntax support (array[index])
+  {"count", "L@:", true},
+  {"objectAtIndex:", "@@:L", true},
+  {"objectAtIndexedSubscript:", "@@:L", true},  // Modern subscript syntax support (array[index])
   {"firstObject", "@@:", true},
   {"lastObject", "@@:", true},
   {"arrayWithObjects:", "@#@:@@", false},
+  {"arrayWithObjects:count:", "@32@0:8r^@16Q24", false},  // CRITICAL: Array literal support - FIXED Windows/Linux encoding
   {"description", "@@:", true},
-  {"containsObject:", "B@:@", true},
+  {"containsObject:", "c@:@", true},
   {nullptr, nullptr, false}
 };
 
 // Method signatures for NSDictionary
 static const FoundationMethodSignature NSDictionary_methods[] = {
-  {"count", "Q@:", true},
+  {"count", "L@:", true},
   {"objectForKey:", "@@:@", true},
   {"objectForKeyedSubscript:", "@@:@", true},  // Modern subscript syntax support (dict[@"key"])
   {"allKeys", "@@:", true},
   {"allValues", "@@:", true},
   {"dictionaryWithObject:forKey:", "@#@:@@", false},
+  {"dictionaryWithObjects:forKeys:count:", "@40@0:8r^@16r^@24Q32", false},  // CRITICAL: Dictionary literal support - FIXED Windows/Linux encoding
   {"description", "@@:", true},
   {nullptr, nullptr, false}
 };
 
 // Method signatures for NSSet
 static const FoundationMethodSignature NSSet_methods[] = {
-  {"count", "Q@:", true},
+  {"count", "L@:", true},
   {"anyObject", "@@:", true},
   {"allObjects", "@@:", true},
-  {"containsObject:", "B@:@", true},
+  {"containsObject:", "c@:@", true},
   {"setWithObjects:", "@#@:@@", false},
   {"description", "@@:", true},
   {nullptr, nullptr, false}
@@ -655,6 +670,11 @@ public:
     }
     
     if (!m_is_valid || m_type_vector.size() < 3) {
+      return nullptr;
+    }
+    
+    // CRITICAL: Check type_realizer_sp is valid before use
+    if (!type_realizer_sp) {
       return nullptr;
     }
 
@@ -972,8 +992,10 @@ bool GNUstepObjCDeclVendor::FinishDecl(clang::ObjCInterfaceDecl *interface_decl)
 
   interface_decl->startDefinition();
 
-  interface_decl->setHasExternalVisibleStorage(false);
-  interface_decl->setHasExternalLexicalStorage(false);
+  // CRITICAL: For GNUstep, we KEEP external storage enabled because we use lazy loading
+  // via FindExternalVisibleDeclsByName, unlike Apple which populates everything upfront
+  // interface_decl->setHasExternalVisibleStorage(false); // DISABLED - keep lazy loading
+  // interface_decl->setHasExternalLexicalStorage(false); // DISABLED - keep lazy loading
 
   ObjCLanguageRuntime::ClassDescriptorSP descriptor =
       m_runtime.GetClassDescriptorFromISA(objc_isa);
@@ -995,7 +1017,88 @@ bool GNUstepObjCDeclVendor::FinishDecl(clang::ObjCInterfaceDecl *interface_decl)
             "[GNUstepObjCDeclVendor::FinishDecl] Finishing Objective-C "
             "interface for %s (ISA: 0x%lx)", class_name.c_str(), (unsigned long)objc_isa);
 
-  // NEW: Use runtime API for dynamic method discovery instead of hardcoded methods
+  // CRITICAL: Use direct memory introspection instead of runtime API to avoid recursion
+  // The runtime API was using expression evaluation which creates a circular dependency
+  if (m_introspector) {
+    LLDB_LOGF(log, "[GNUstepObjCDeclVendor::FinishDecl] Using direct memory introspector for %s", 
+              class_name.c_str());
+    
+    // Get class pointer using direct introspector call (no expression evaluation)
+    lldb::addr_t class_ptr = m_introspector->GetClassPointer(class_name);
+    if (class_ptr != LLDB_INVALID_ADDRESS) {
+      LLDB_LOGF(log, "[GNUstepObjCDeclVendor::FinishDecl] Found class pointer 0x%lx for %s", 
+                (unsigned long)class_ptr, class_name.c_str());
+      
+      // Get instance methods using direct memory access
+      auto instance_methods = m_introspector->GetInstanceMethods(class_ptr);
+      LLDB_LOGF(log, "[GNUstepObjCDeclVendor::FinishDecl] Found %zu instance methods for %s",
+                instance_methods.size(), class_name.c_str());
+      
+      // Add each instance method discovered from runtime
+      for (const auto &method : instance_methods) {
+        bool is_instance = true;
+        
+        // Skip if method already exists
+        if (InterfaceAlreadyHasMethod(interface_decl, method.selector_name.c_str(), is_instance))
+          continue;
+          
+        // Create method declaration from runtime type encoding
+        clang::ObjCMethodDecl *method_decl = CreateMethodDecl(
+          interface_decl, 
+          method.selector_name.c_str(),
+          method.type_encoding.c_str(),
+          is_instance
+        );
+        
+        if (method_decl) {
+          LLDB_LOGF(log, "[GNUstepObjCDeclVendor::FinishDecl]   Added instance method: -%s (%s)",
+                    method.selector_name.c_str(), method.type_encoding.c_str());
+        }
+      }
+      
+      // Get class methods using direct memory access via metaclass
+      auto class_methods = m_introspector->GetClassMethods(class_ptr);
+      LLDB_LOGF(log, "[GNUstepObjCDeclVendor::FinishDecl] Found %zu class methods for %s via direct introspection",
+                class_methods.size(), class_name.c_str());
+      
+      // Add each class method discovered from runtime
+      for (const auto &method : class_methods) {
+        bool is_instance = false;
+        
+        // Skip if method already exists
+        if (InterfaceAlreadyHasMethod(interface_decl, method.selector_name.c_str(), is_instance))
+          continue;
+          
+        // Create method declaration from runtime type encoding
+        clang::ObjCMethodDecl *method_decl = CreateMethodDecl(
+          interface_decl, 
+          method.selector_name.c_str(),
+          method.type_encoding.c_str(),
+          is_instance
+        );
+        
+        if (method_decl) {
+          LLDB_LOGF(log, "[GNUstepObjCDeclVendor::FinishDecl]   Added class method: +%s (%s)",
+                    method.selector_name.c_str(), method.type_encoding.c_str());
+        }
+      }
+      
+      // If we successfully used the introspector, skip the old runtime API approach
+      if (!instance_methods.empty() || !class_methods.empty()) {
+        LLDB_LOGF(log, "[GNUstepObjCDeclVendor::FinishDecl] Direct introspection successful for %s, skipping fallback", 
+                  class_name.c_str());
+        goto success_return;
+      }
+    } else {
+      LLDB_LOGF(log, "[GNUstepObjCDeclVendor::FinishDecl] Failed to get class pointer for %s via introspector", 
+                class_name.c_str());
+    }
+  } else {
+    LLDB_LOGF(log, "[GNUstepObjCDeclVendor::FinishDecl] No introspector available for %s", class_name.c_str());
+  }
+  
+  // FALLBACK: Use original runtime API approach if introspector fails
+  LLDB_LOGF(log, "[GNUstepObjCDeclVendor::FinishDecl] Using fallback runtime API for %s", class_name.c_str());
   if (m_runtime_api) {
     LLDB_LOGF(log, "[GNUstepObjCDeclVendor::FinishDecl] Using runtime API for dynamic discovery of %s", 
               class_name.c_str());
@@ -1038,50 +1141,129 @@ bool GNUstepObjCDeclVendor::FinishDecl(clang::ObjCInterfaceDecl *interface_decl)
                   class_name.c_str(), llvm::toString(methods_or_err.takeError()).c_str());
       }
       
-      // TODO: Add class methods by querying the metaclass
-      // For now, let's add essential class methods manually for Foundation classes
-      // This ensures expressions like [NSNumber numberWithInt:42] work
-      if (class_name == "NSNumber") {
-        const char* class_methods[][2] = {
-          {"numberWithInt:", "@#@:i"},
-          {"numberWithDouble:", "@#@:d"},
-          {"numberWithBool:", "@#@:B"},
-          {nullptr, nullptr}
-        };
+      // RUNTIME INTROSPECTION: Add class methods by querying the metaclass
+      // This replaces hardcoded method tables with dynamic discovery
+      LLDB_LOGF(log, "[GNUstepObjCDeclVendor::FinishDecl] Attempting to discover class methods for %s", class_name.c_str());
+      auto class_methods_or_err = m_runtime_api->GetAllClassMethods(class_name);
+      if (class_methods_or_err) {
+        LLDB_LOGF(log, "[GNUstepObjCDeclVendor::FinishDecl] Found %zu class methods for %s via metaclass introspection",
+                  class_methods_or_err->size(), class_name.c_str());
         
-        for (int i = 0; class_methods[i][0]; i++) {
-          if (!InterfaceAlreadyHasMethod(interface_decl, class_methods[i][0], false)) {
-            CreateMethodDecl(interface_decl, class_methods[i][0], class_methods[i][1], false);
-            LLDB_LOGF(log, "[GNUstepObjCDeclVendor::FinishDecl]   Added class method: +%s",
-                      class_methods[i][0]);
+        // Add each class method discovered from runtime
+        for (const auto &method : *class_methods_or_err) {
+          // All methods from GetAllClassMethods are class methods
+          bool is_instance = false;
+          
+          // Skip if method already exists
+          if (InterfaceAlreadyHasMethod(interface_decl, method.selector_name.c_str(), is_instance))
+            continue;
+            
+          // Create method declaration from runtime type encoding
+          clang::ObjCMethodDecl *method_decl = CreateMethodDecl(
+            interface_decl, 
+            method.selector_name.c_str(),
+            method.type_encoding.c_str(),
+            is_instance
+          );
+          
+          if (method_decl) {
+            LLDB_LOGF(log, "[GNUstepObjCDeclVendor::FinishDecl]   Added class method: +%s (%s)",
+                      method.selector_name.c_str(), method.type_encoding.c_str());
+          } else {
+            LLDB_LOGF(log, "[GNUstepObjCDeclVendor::FinishDecl]   Failed to create class method: +%s",
+                      method.selector_name.c_str());
           }
         }
-      } else if (class_name == "NSString") {
-        const char* class_methods[][2] = {
-          {"stringWithFormat:", "@#@:@"},
-          {"stringWithCString:encoding:", "@#@:*Q"},
-          {nullptr, nullptr}
-        };
+      } else {
+        std::string error_msg = llvm::toString(class_methods_or_err.takeError());
+        LLDB_LOGF(log, "[GNUstepObjCDeclVendor::FinishDecl] Failed to get class methods for %s: %s",
+                  class_name.c_str(), error_msg.c_str());
         
-        for (int i = 0; class_methods[i][0]; i++) {
-          if (!InterfaceAlreadyHasMethod(interface_decl, class_methods[i][0], false)) {
-            CreateMethodDecl(interface_decl, class_methods[i][0], class_methods[i][1], false);
-            LLDB_LOGF(log, "[GNUstepObjCDeclVendor::FinishDecl]   Added class method: +%s",
-                      class_methods[i][0]);
+        // FALLBACK: Essential class methods for Foundation classes when runtime introspection fails
+        // This ensures expressions like [NSArray arrayWithObjects:...] work even if runtime fails
+        if (class_name == "NSArray") {
+          LLDB_LOGF(log, "[GNUstepObjCDeclVendor::FinishDecl] Adding essential NSArray class methods as fallback");
+          const char* class_methods[][2] = {
+            {"arrayWithObjects:count:", "@#@:^@Q"},
+            {"arrayWithObjects:", "@#@:^@"},
+            {"array", "@#@:"},
+            {nullptr, nullptr}
+          };
+          
+          for (int i = 0; class_methods[i][0]; i++) {
+            if (!InterfaceAlreadyHasMethod(interface_decl, class_methods[i][0], false)) {
+              clang::ObjCMethodDecl *method_decl = CreateMethodDecl(
+                interface_decl, class_methods[i][0], class_methods[i][1], false);
+              if (method_decl) {
+                LLDB_LOGF(log, "[GNUstepObjCDeclVendor::FinishDecl]   Added fallback NSArray class method: +%s",
+                          class_methods[i][0]);
+              }
+            }
           }
         }
-      } else if (class_name == "NSArray") {
-        const char* class_methods[][2] = {
-          {"arrayWithObjects:", "@#@:@@"},
-          {"array", "@#@:"},
-          {nullptr, nullptr}
-        };
         
-        for (int i = 0; class_methods[i][0]; i++) {
-          if (!InterfaceAlreadyHasMethod(interface_decl, class_methods[i][0], false)) {
-            CreateMethodDecl(interface_decl, class_methods[i][0], class_methods[i][1], false);
-            LLDB_LOGF(log, "[GNUstepObjCDeclVendor::FinishDecl]   Added class method: +%s",
-                      class_methods[i][0]);
+        if (class_name == "NSDictionary") {
+          LLDB_LOGF(log, "[GNUstepObjCDeclVendor::FinishDecl] Adding essential NSDictionary class methods as fallback");
+          const char* class_methods[][2] = {
+            {"dictionaryWithObjects:forKeys:count:", "@#@:^@^@Q"},
+            {"dictionaryWithObjects:forKeys:", "@#@:@@"},
+            {"dictionary", "@#@:"},
+            {nullptr, nullptr}
+          };
+          
+          for (int i = 0; class_methods[i][0]; i++) {
+            if (!InterfaceAlreadyHasMethod(interface_decl, class_methods[i][0], false)) {
+              clang::ObjCMethodDecl *method_decl = CreateMethodDecl(
+                interface_decl, class_methods[i][0], class_methods[i][1], false);
+              if (method_decl) {
+                LLDB_LOGF(log, "[GNUstepObjCDeclVendor::FinishDecl]   Added fallback NSDictionary class method: +%s",
+                          class_methods[i][0]);
+              }
+            }
+          }
+        } else if (class_name == "NSString") {
+          const char* class_methods[][2] = {
+            {"stringWithFormat:", "@#@:@"},
+            {"stringWithCString:encoding:", "@#@:*Q"},
+            {nullptr, nullptr}
+          };
+          
+          for (int i = 0; class_methods[i][0]; i++) {
+            if (!InterfaceAlreadyHasMethod(interface_decl, class_methods[i][0], false)) {
+              CreateMethodDecl(interface_decl, class_methods[i][0], class_methods[i][1], false);
+              LLDB_LOGF(log, "[GNUstepObjCDeclVendor::FinishDecl]   Added fallback class method: +%s",
+                        class_methods[i][0]);
+            }
+          }
+        } else if (class_name == "NSArray") {
+          const char* class_methods[][2] = {
+            {"arrayWithObjects:", "@#@:@@"},
+            {"arrayWithObjects:count:", "@32@0:8r^@16Q24"},  // CRITICAL: Array literal support
+            {"array", "@#@:"},
+            {nullptr, nullptr}
+          };
+          
+          for (int i = 0; class_methods[i][0]; i++) {
+            if (!InterfaceAlreadyHasMethod(interface_decl, class_methods[i][0], false)) {
+              CreateMethodDecl(interface_decl, class_methods[i][0], class_methods[i][1], false);
+              LLDB_LOGF(log, "[GNUstepObjCDeclVendor::FinishDecl]   Added fallback class method: +%s",
+                        class_methods[i][0]);
+            }
+          }
+        } else if (class_name == "NSDictionary") {
+          const char* class_methods[][2] = {
+            {"dictionaryWithObject:forKey:", "@#@:@@"},
+            {"dictionaryWithObjects:forKeys:count:", "@40@0:8r^@16r^@24Q32"},  // CRITICAL: Dictionary literal support
+            {"dictionary", "@#@:"},
+            {nullptr, nullptr}
+          };
+          
+          for (int i = 0; class_methods[i][0]; i++) {
+            if (!InterfaceAlreadyHasMethod(interface_decl, class_methods[i][0], false)) {
+              CreateMethodDecl(interface_decl, class_methods[i][0], class_methods[i][1], false);
+              LLDB_LOGF(log, "[GNUstepObjCDeclVendor::FinishDecl]   Added fallback class method: +%s",
+                        class_methods[i][0]);
+            }
           }
         }
       }
@@ -1099,20 +1281,19 @@ bool GNUstepObjCDeclVendor::FinishDecl(clang::ObjCInterfaceDecl *interface_decl)
       LLDB_LOGF(log, "[GNUstepObjCDeclVendor::FinishDecl] Failed to get class info for %s: %s",
                 class_name.c_str(), llvm::toString(class_info_or_err.takeError()).c_str());
       
-      // Fall back to hardcoded methods for core Foundation classes
-      LLDB_LOGF(log, "[GNUstepObjCDeclVendor::FinishDecl] Falling back to hardcoded methods for %s",
+      // Skip hardcoded fallback - rely on introspector which should have worked above
+      LLDB_LOGF(log, "[GNUstepObjCDeclVendor::FinishDecl] Skipping hardcoded fallback for %s - relying on introspector",
                 class_name.c_str());
-      AddFoundationClassMethods(interface_decl, class_name);
     }
   } else {
     // Fallback if runtime API not available
-    LLDB_LOGF(log, "[GNUstepObjCDeclVendor::FinishDecl] Runtime API not available, using hardcoded methods");
-    AddFoundationClassMethods(interface_decl, class_name);
+    LLDB_LOGF(log, "[GNUstepObjCDeclVendor::FinishDecl] Runtime API not available, but introspector should have worked above");
   }
 
   // Note: We've replaced the hardcoded core_selectors with dynamic discovery
   // The runtime will provide ALL methods, not just a hardcoded subset
 
+success_return:
   if (log) {
     LLDB_LOGF(
         log,
@@ -1425,6 +1606,15 @@ uint32_t GNUstepObjCDeclVendor::FindDecls(ConstString name, bool append,
         decls.push_back(m_ast_ctx->GetCompilerDecl(result_iface_decl));
         ret++;
         break;
+      } else if (clang::FunctionDecl *result_func_decl =
+                   llvm::dyn_cast<clang::FunctionDecl>(*lookup_result.begin())) {
+        // Handle runtime function declarations (sel_getUid, objc_getClass, etc.)
+        LLDB_LOGF(log, "GNUstepObjCDeclVendor::FindDecls Found function %s in the ASTContext",
+                  result_func_decl->getName().str().c_str());
+
+        decls.push_back(m_ast_ctx->GetCompilerDecl(result_func_decl));
+        ret++;
+        break;
       } else {
         LLDB_LOGF(log, "GNUstepObjCDeclVendor::FindDecls There's something in the ASTContext, but "
                        "it's not something we know about");
@@ -1489,6 +1679,16 @@ void GNUstepObjCDeclVendor::EnsureRuntimeDecls(TypeSystemClang &ts) {
                    { GetIdTy(ctx) });
   AddCFunctionDecl(ctx, TU, "class_getMethodImplementation", ctx.VoidPtrTy,
                    { GetClassTy(ctx), GetSelTy(ctx) });
+
+  // 1.1) Add method introspection functions for dynamic type encoding discovery
+  AddCFunctionDecl(ctx, TU, "class_getInstanceMethod", ctx.VoidPtrTy,
+                   { GetClassTy(ctx), GetSelTy(ctx) });
+  AddCFunctionDecl(ctx, TU, "class_getClassMethod", ctx.VoidPtrTy,
+                   { GetClassTy(ctx), GetSelTy(ctx) });
+  AddCFunctionDecl(ctx, TU, "method_getTypeEncoding", GetConstCharPtrTy(ctx),
+                   { ctx.VoidPtrTy });
+  AddCFunctionDecl(ctx, TU, "sel_registerName", GetSelTy(ctx),
+                   { GetConstCharPtrTy(ctx) });
 
   // 2) Declare CFStringCreateWithBytes
   FunctionDecl *CFDecl = AddCFunctionDecl(
@@ -1668,9 +1868,10 @@ void GNUstepObjCDeclVendor::EnsureMinimalFoundationInterfaces(TypeSystemClang &t
     if (!interface_decl)
       continue;
     
-    // Use the existing AddFoundationClassMethods function which has proper
-    // type encodings and comprehensive method sets
-    AddFoundationClassMethods(interface_decl, class_name);
+    // DISABLED: Use runtime introspection instead of hardcoded methods
+    // The hardcoded methods have invalid type encodings that cause failures
+    // Runtime introspection via FinishDecl provides correct method signatures
+    LLDB_LOG(log, "Skipping hardcoded methods for {0}, relying on runtime introspection", class_name);
     
     // Ensure external storage flags are cleared
     interface_decl->setHasExternalVisibleStorage(false);

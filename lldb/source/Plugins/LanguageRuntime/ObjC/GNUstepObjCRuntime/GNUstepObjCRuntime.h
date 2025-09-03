@@ -68,6 +68,9 @@ public:
   bool IsModuleObjCLibrary(const lldb::ModuleSP &module_sp) override;
   bool ReadObjCLibrary(const lldb::ModuleSP &module_sp) override;
   bool HasReadObjCLibrary() override;
+  
+  // Support for modern ObjC literals and subscripting
+  bool CalculateHasNewLiteralsAndIndexing() override;
 
   DeclVendor *GetDeclVendor() override;
 
@@ -138,6 +141,12 @@ private:
   // CFString fallback utility function if needed
   std::unique_ptr<UtilityFunction> m_cfstring_utility_fn;
   
+  // Array/Dictionary literal support utility functions
+  std::unique_ptr<UtilityFunction> m_array_literal_utility_fn;
+  std::unique_ptr<UtilityFunction> m_dict_literal_utility_fn;
+  lldb::addr_t m_array_literal_addr = LLDB_INVALID_ADDRESS;
+  lldb::addr_t m_dict_literal_addr = LLDB_INVALID_ADDRESS;
+  
   // Subscript shim support
   std::unique_ptr<UtilityFunction> m_subscript_utils_fn;
   lldb::addr_t m_imp_array_subscript_addr = LLDB_INVALID_ADDRESS;
@@ -164,6 +173,7 @@ private:
   // Helper methods for expression evaluation setup
   void ResolveAndCacheRuntimeSymbols();
   void EnsureCFStringCreateWithBytes();
+  void EnsureArrayDictionaryLiteralSupport();
   void CreateAndInstallSubscriptShims(ExecutionContext &exe_ctx);
   void RegisterSymbolsWithIRForTarget();
   void ArmEarlyInstall();

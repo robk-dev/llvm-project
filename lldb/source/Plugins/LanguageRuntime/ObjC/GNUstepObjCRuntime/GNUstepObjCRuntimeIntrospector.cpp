@@ -314,8 +314,10 @@ lldb::addr_t GNUstepObjCRuntimeIntrospector::CallRuntimeFunction(
     Value arg_value;
 
     CompilerType type;
-    if (function_name == "objc_lookup_class") {
-      // const char *
+    if (function_name == "objc_lookup_class" || 
+        function_name == "objc_getClass" || 
+        function_name == "objc_getMetaClass") {
+      // const char * - these functions expect string arguments
       type = scratch_ts_sp->GetCStringType(true);
     } else {
       // void *
@@ -829,6 +831,14 @@ bool GNUstepObjCRuntimeIntrospector::LoadRuntimeSymbols() {
   m_objc_copyClassList_addr = GetRuntimeFunctionAddress("objc_copyClassList");
   m_class_getName_addr = GetRuntimeFunctionAddress("class_getName");
   m_free_addr = GetRuntimeFunctionAddress("free");
+  
+  // CRITICAL: Load method introspection functions from runtime.h for dynamic method discovery
+  m_objc_getMetaClass_addr = GetRuntimeFunctionAddress("objc_getMetaClass");
+  m_objc_getClass_addr = GetRuntimeFunctionAddress("objc_getClass");
+  m_class_copyMethodList_addr = GetRuntimeFunctionAddress("class_copyMethodList");
+  m_method_getName_addr = GetRuntimeFunctionAddress("method_getName");
+  m_method_getTypeEncoding_addr = GetRuntimeFunctionAddress("method_getTypeEncoding");
+  m_sel_getName_addr = GetRuntimeFunctionAddress("sel_getName");
 
   // Count successful resolutions
   int resolved_count = 0;
@@ -840,8 +850,16 @@ bool GNUstepObjCRuntimeIntrospector::LoadRuntimeSymbols() {
   if (m_objc_copyClassList_addr != LLDB_INVALID_ADDRESS) resolved_count++;
   if (m_class_getName_addr != LLDB_INVALID_ADDRESS) resolved_count++;
   if (m_free_addr != LLDB_INVALID_ADDRESS) resolved_count++;
+  
+  // Count method introspection functions
+  if (m_objc_getMetaClass_addr != LLDB_INVALID_ADDRESS) resolved_count++;
+  if (m_objc_getClass_addr != LLDB_INVALID_ADDRESS) resolved_count++;
+  if (m_class_copyMethodList_addr != LLDB_INVALID_ADDRESS) resolved_count++;
+  if (m_method_getName_addr != LLDB_INVALID_ADDRESS) resolved_count++;
+  if (m_method_getTypeEncoding_addr != LLDB_INVALID_ADDRESS) resolved_count++;
+  if (m_sel_getName_addr != LLDB_INVALID_ADDRESS) resolved_count++;
 
-  LLDB_LOG(log, "[GNUstepIntrospector] Resolved {0}/8 runtime function symbols", resolved_count);
+  LLDB_LOG(log, "[GNUstepIntrospector] Resolved {0}/14 runtime function symbols", resolved_count);
 
   // Log individual resolutions for debugging
   if (log) {
@@ -853,12 +871,24 @@ bool GNUstepObjCRuntimeIntrospector::LoadRuntimeSymbols() {
     LLDB_LOG(log, "[GNUstepIntrospector]   objc_copyClassList: 0x{0:x}", m_objc_copyClassList_addr);
     LLDB_LOG(log, "[GNUstepIntrospector]   class_getName: 0x{0:x}", m_class_getName_addr);
     LLDB_LOG(log, "[GNUstepIntrospector]   free: 0x{0:x}", m_free_addr);
+    
+    // Log method introspection functions
+    LLDB_LOG(log, "[GNUstepIntrospector]   objc_getMetaClass: 0x{0:x}", m_objc_getMetaClass_addr);
+    LLDB_LOG(log, "[GNUstepIntrospector]   objc_getClass: 0x{0:x}", m_objc_getClass_addr);
+    LLDB_LOG(log, "[GNUstepIntrospector]   class_copyMethodList: 0x{0:x}", m_class_copyMethodList_addr);
+    LLDB_LOG(log, "[GNUstepIntrospector]   method_getName: 0x{0:x}", m_method_getName_addr);
+    LLDB_LOG(log, "[GNUstepIntrospector]   method_getTypeEncoding: 0x{0:x}", m_method_getTypeEncoding_addr);
+    LLDB_LOG(log, "[GNUstepIntrospector]   sel_getName: 0x{0:x}", m_sel_getName_addr);
   }
 
-  // We consider it successful if we got at least the core functions
+  // We consider it successful if we got at least the core functions and the method introspection functions
   bool success = (m_object_getClass_addr != LLDB_INVALID_ADDRESS &&
                   m_class_getSuperclass_addr != LLDB_INVALID_ADDRESS &&
-                  m_class_getName_addr != LLDB_INVALID_ADDRESS);
+                  m_class_getName_addr != LLDB_INVALID_ADDRESS &&
+                  m_objc_getMetaClass_addr != LLDB_INVALID_ADDRESS &&
+                  m_class_copyMethodList_addr != LLDB_INVALID_ADDRESS &&
+                  m_method_getName_addr != LLDB_INVALID_ADDRESS &&
+                  m_method_getTypeEncoding_addr != LLDB_INVALID_ADDRESS);
 
   if (success) {
     LLDB_LOG(log, "[GNUstepIntrospector] Runtime symbol loading successful - core functions available");
@@ -877,6 +907,8 @@ lldb::addr_t GNUstepObjCRuntimeIntrospector::GetRuntimeFunctionAddress(const cha
   Target &target = m_process->GetTarget();
   const ModuleList &modules = target.GetImages();
 
+  // libobjc-4.6.dll
+  // gnustep-base-1_24.dll
   // First try to find in libobjc2/libobjc.so (primary runtime)
   for (uint32_t idx = 0; idx < modules.GetSize(); idx++) {
     ModuleSP module_sp = modules.GetModuleAtIndex(idx);
@@ -984,4 +1016,246 @@ std::string GNUstepObjCRuntimeIntrospector::GetTaggedPointerClassName(lldb::addr
   // Get the class name using standard ISA resolution
   ConstString class_name = GetClassNameFromISA(class_addr);
   return class_name.GetCString() ? class_name.GetCString() : "";
+}
+
+// ================================================================================================
+// CRITICAL: Direct Method Introspection Implementation
+// Apple's approach: Use direct runtime function calls to avoid expression evaluation recursion
+// ================================================================================================
+
+lldb::addr_t GNUstepObjCRuntimeIntrospector::GetClassPointer(const std::string &class_name) {
+  if (!m_process || class_name.empty()) {
+    return LLDB_INVALID_ADDRESS;
+  }
+  
+  EnsureRuntimeSymbolsLoaded();
+  
+  if (m_objc_getClass_addr == LLDB_INVALID_ADDRESS) {
+    return LLDB_INVALID_ADDRESS;
+  }
+  
+  Log *log = GetLog(LLDBLog::Language);
+  LLDB_LOG(log, "[GNUstepIntrospector] GetClassPointer: Looking for class '{0}'", class_name);
+  
+  // CRITICAL FIX: Allocate class name string in target process memory
+  Status error;
+  lldb::addr_t string_addr = m_process->AllocateMemory(
+      class_name.length() + 1, 
+      lldb::ePermissionsReadable, 
+      error);
+  
+  if (string_addr == LLDB_INVALID_ADDRESS || error.Fail()) {
+    LLDB_LOG(log, "[GNUstepIntrospector] GetClassPointer: Failed to allocate memory for class name '{0}': {1}", 
+             class_name, error.AsCString());
+    return LLDB_INVALID_ADDRESS;
+  }
+  
+  // Write the class name to target memory
+  size_t bytes_written = m_process->WriteMemory(string_addr, class_name.c_str(), 
+                                               class_name.length() + 1, error);
+  if (bytes_written != class_name.length() + 1 || error.Fail()) {
+    LLDB_LOG(log, "[GNUstepIntrospector] GetClassPointer: Failed to write class name to target memory: {0}", 
+             error.AsCString());
+    m_process->DeallocateMemory(string_addr);
+    return LLDB_INVALID_ADDRESS;
+  }
+  
+  // Call objc_getClass(class_name) with properly allocated string
+  std::vector<lldb::addr_t> args = { string_addr };
+  lldb::addr_t result = CallRuntimeFunction("objc_getClass", args);
+  
+  // Clean up allocated memory
+  m_process->DeallocateMemory(string_addr);
+  
+  LLDB_LOG(log, "[GNUstepIntrospector] GetClassPointer: objc_getClass('{0}') = 0x{1:x}", 
+           class_name, result);
+  return result;
+}
+
+lldb::addr_t GNUstepObjCRuntimeIntrospector::GetMetaClassPointer(const std::string &class_name) {
+  if (!m_process || class_name.empty()) {
+    return LLDB_INVALID_ADDRESS;
+  }
+  
+  EnsureRuntimeSymbolsLoaded();
+  
+  if (m_objc_getMetaClass_addr == LLDB_INVALID_ADDRESS) {
+    return LLDB_INVALID_ADDRESS;
+  }
+  
+  Log *log = GetLog(LLDBLog::Language);
+  LLDB_LOG(log, "[GNUstepIntrospector] GetMetaClassPointer: Looking for metaclass '{0}'", class_name);
+  
+  // CRITICAL FIX: Allocate class name string in target process memory
+  Status error;
+  lldb::addr_t string_addr = m_process->AllocateMemory(
+      class_name.length() + 1, 
+      lldb::ePermissionsReadable, 
+      error);
+  
+  if (string_addr == LLDB_INVALID_ADDRESS || error.Fail()) {
+    LLDB_LOG(log, "[GNUstepIntrospector] GetMetaClassPointer: Failed to allocate memory for class name '{0}': {1}", 
+             class_name, error.AsCString());
+    return LLDB_INVALID_ADDRESS;
+  }
+  
+  // Write the class name to target memory
+  size_t bytes_written = m_process->WriteMemory(string_addr, class_name.c_str(), 
+                                               class_name.length() + 1, error);
+  if (bytes_written != class_name.length() + 1 || error.Fail()) {
+    LLDB_LOG(log, "[GNUstepIntrospector] GetMetaClassPointer: Failed to write class name to target memory: {0}", 
+             error.AsCString());
+    m_process->DeallocateMemory(string_addr);
+    return LLDB_INVALID_ADDRESS;
+  }
+  
+  // Call objc_getMetaClass(class_name) with properly allocated string
+  std::vector<lldb::addr_t> args = { string_addr };
+  lldb::addr_t result = CallRuntimeFunction("objc_getMetaClass", args);
+  
+  // Clean up allocated memory
+  m_process->DeallocateMemory(string_addr);
+  
+  LLDB_LOG(log, "[GNUstepIntrospector] GetMetaClassPointer: objc_getMetaClass('{0}') = 0x{1:x}", 
+           class_name, result);
+  return result;
+}
+
+std::vector<GNUstepObjCRuntimeIntrospector::MethodInfo> 
+GNUstepObjCRuntimeIntrospector::GetInstanceMethods(lldb::addr_t class_ptr) {
+  std::vector<MethodInfo> methods;
+  
+  if (!m_process || class_ptr == LLDB_INVALID_ADDRESS) {
+    return methods;
+  }
+  
+  EnsureRuntimeSymbolsLoaded();
+  
+  if (m_class_copyMethodList_addr == LLDB_INVALID_ADDRESS ||
+      m_method_getName_addr == LLDB_INVALID_ADDRESS ||
+      m_method_getTypeEncoding_addr == LLDB_INVALID_ADDRESS ||
+      m_sel_getName_addr == LLDB_INVALID_ADDRESS ||
+      m_free_addr == LLDB_INVALID_ADDRESS) {
+    return methods;
+  }
+  
+  Log *log = GetLog(LLDBLog::Language);
+  LLDB_LOG(log, "[GNUstepIntrospector] GetInstanceMethods: Getting methods for class 0x{0:x}", class_ptr);
+  
+  // Call class_copyMethodList(class_ptr, &count) directly
+  uint32_t count = 0;
+  std::vector<lldb::addr_t> args = { class_ptr, (lldb::addr_t)&count };
+  lldb::addr_t method_list = CallRuntimeFunction("class_copyMethodList", args);
+  
+  if (method_list == LLDB_INVALID_ADDRESS || count == 0) {
+    LLDB_LOG(log, "[GNUstepIntrospector] GetInstanceMethods: No methods found or call failed");
+    return methods;
+  }
+  
+  LLDB_LOG(log, "[GNUstepIntrospector] GetInstanceMethods: Found {0} methods", count);
+  
+  // Read the method array from memory
+  Status error;
+  const size_t method_ptr_size = m_address_size;
+  
+  for (uint32_t i = 0; i < count; i++) {
+    lldb::addr_t method_ptr_addr = method_list + (i * method_ptr_size);
+    lldb::addr_t method_ptr = m_process->ReadPointerFromMemory(method_ptr_addr, error);
+    
+    if (error.Fail() || method_ptr == LLDB_INVALID_ADDRESS) {
+      continue;
+    }
+    
+    // Get method name: SEL method_getName(Method method)
+    std::vector<lldb::addr_t> method_args = { method_ptr };
+    lldb::addr_t sel_ptr = CallRuntimeFunction("method_getName", method_args);
+    
+    if (sel_ptr == LLDB_INVALID_ADDRESS) {
+      continue;
+    }
+    
+    // Get selector name: const char *sel_getName(SEL sel)
+    std::vector<lldb::addr_t> sel_args = { sel_ptr };
+    lldb::addr_t name_ptr = CallRuntimeFunction("sel_getName", sel_args);
+    
+    if (name_ptr == LLDB_INVALID_ADDRESS) {
+      continue;
+    }
+    
+    // Read selector name string
+    std::string selector_name;
+    m_process->ReadCStringFromMemory(name_ptr, selector_name, error);
+    
+    if (error.Fail() || selector_name.empty()) {
+      continue;
+    }
+    
+    // Get type encoding: const char *method_getTypeEncoding(Method method)
+    lldb::addr_t encoding_ptr = CallRuntimeFunction("method_getTypeEncoding", method_args);
+    
+    std::string type_encoding;
+    if (encoding_ptr != LLDB_INVALID_ADDRESS) {
+      m_process->ReadCStringFromMemory(encoding_ptr, type_encoding, error);
+      if (error.Fail()) {
+        type_encoding = "@:"; // Default ObjC method signature
+      }
+    } else {
+      type_encoding = "@:"; // Default ObjC method signature
+    }
+    
+    // Create method info
+    MethodInfo method_info;
+    method_info.selector_name = selector_name;
+    method_info.type_encoding = type_encoding;
+    method_info.implementation = 0; // Not needed for declaration purposes
+    
+    methods.push_back(method_info);
+    
+    LLDB_LOG(log, "[GNUstepIntrospector] GetInstanceMethods:   -{0} ({1})", 
+             selector_name, type_encoding);
+  }
+  
+  // Free the method list
+  std::vector<lldb::addr_t> free_args = { method_list };
+  CallRuntimeFunction("free", free_args);
+  
+  LLDB_LOG(log, "[GNUstepIntrospector] GetInstanceMethods: Returning {0} methods", methods.size());
+  return methods;
+}
+
+std::vector<GNUstepObjCRuntimeIntrospector::MethodInfo> 
+GNUstepObjCRuntimeIntrospector::GetClassMethods(lldb::addr_t class_ptr) {
+  std::vector<MethodInfo> methods;
+  
+  if (!m_process || class_ptr == LLDB_INVALID_ADDRESS) {
+    return methods;
+  }
+  
+  Log *log = GetLog(LLDBLog::Language);
+  LLDB_LOG(log, "[GNUstepIntrospector] GetClassMethods: Getting class methods for class 0x{0:x}", class_ptr);
+  
+  // KEY INSIGHT: Class methods are stored in the metaclass as instance methods
+  // So we need to get the metaclass ISA from the class pointer and call GetInstanceMethods on it
+  
+  Status error;
+  lldb::addr_t metaclass_ptr = m_process->ReadPointerFromMemory(class_ptr, error);
+  
+  if (error.Fail() || metaclass_ptr == LLDB_INVALID_ADDRESS) {
+    LLDB_LOG(log, "[GNUstepIntrospector] GetClassMethods: Failed to read metaclass pointer");
+    return methods;
+  }
+  
+  LLDB_LOG(log, "[GNUstepIntrospector] GetClassMethods: Metaclass pointer: 0x{0:x}", metaclass_ptr);
+  
+  // Get instance methods from the metaclass (which are the class methods of the original class)
+  methods = GetInstanceMethods(metaclass_ptr);
+  
+  // Log them as class methods
+  for (const auto &method : methods) {
+    LLDB_LOG(log, "[GNUstepIntrospector] GetClassMethods:   +{0} ({1})", 
+             method.selector_name, method.type_encoding);
+  }
+  
+  LLDB_LOG(log, "[GNUstepIntrospector] GetClassMethods: Returning {0} class methods", methods.size());
+  return methods;
 }

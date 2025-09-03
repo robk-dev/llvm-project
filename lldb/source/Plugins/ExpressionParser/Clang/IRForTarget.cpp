@@ -1127,13 +1127,38 @@ bool IRForTarget::HandleObjCClass(Value *classlist_reference) {
   if (!initializer)
     return false;
 
-  if (!initializer->hasName())
-    return false;
+  StringRef name(global_variable->getName());
+  lldb::addr_t class_ptr = LLDB_INVALID_ADDRESS;
 
-  StringRef name(initializer->getName());
-  lldb_private::ConstString name_cstr(name.str().c_str());
-  lldb::addr_t class_ptr =
-      m_decl_map->GetSymbolAddress(name_cstr, lldb::eSymbolTypeObjCClass);
+  // Check for GNUstep-style first: the initializer might be a string constant
+  // containing the actual class name (e.g., OBJC_CLASS_REFERENCES_ -> OBJC_CLASS_NAME_ -> "NSArray")
+  if (ConstantDataArray *string_array = dyn_cast<ConstantDataArray>(initializer)) {
+    if (string_array->isString()) {
+      StringRef class_name = string_array->getAsString();
+      // Remove null terminator if present
+      if (!class_name.empty() && class_name.back() == '\0') {
+        class_name = class_name.drop_back();
+      }
+      
+      LLDB_LOG(log, "GNUstep-style class reference: extracting class name '{0}' from string constant", class_name);
+      
+      lldb_private::ConstString class_name_cstr(class_name.str().c_str());
+      class_ptr = m_decl_map->GetSymbolAddress(class_name_cstr, lldb::eSymbolTypeObjCClass);
+      
+      LLDB_LOG(log, "GNUstep class '{0}' resolved to address {1}", class_name,
+               (unsigned long long)class_ptr);
+    }
+  }
+
+  // If GNUstep-style failed and initializer has a name, try Apple-style direct class resolution
+  if (class_ptr == LLDB_INVALID_ADDRESS && initializer->hasName()) {
+    StringRef symbol_name(initializer->getName());
+    lldb_private::ConstString symbol_name_cstr(symbol_name.str().c_str());
+    class_ptr = m_decl_map->GetSymbolAddress(symbol_name_cstr, lldb::eSymbolTypeObjCClass);
+
+    LLDB_LOG(log, "Apple-style class reference: symbol '{0}' resolved to address {1}", symbol_name,
+             (unsigned long long)class_ptr);
+  }
 
   LLDB_LOG(log, "Found reference to Objective-C class {0} ({1})", name,
            (unsigned long long)class_ptr);
@@ -1242,6 +1267,14 @@ bool IRForTarget::ResolveExternals(Function &llvm_function) {
       if (!HandleObjCClass(&global_var)) {
         m_error_stream.Printf("Error [IRForTarget]: Couldn't resolve the class "
                               "for an Objective-C static method call\n");
+
+        return false;
+      }
+    } else if (global_name.contains("OBJC_CLASS_REFERENCES_")) {
+      // Handle GNUstep-style class references (OBJC_CLASS_REFERENCES_)
+      if (!HandleObjCClass(&global_var)) {
+        m_error_stream.Printf("Error [IRForTarget]: Couldn't resolve the class "
+                              "for a GNUstep Objective-C class reference\n");
 
         return false;
       }

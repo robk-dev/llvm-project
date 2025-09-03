@@ -108,6 +108,7 @@ public:
     // Core class functions
     Class (*objc_getClass)(const char *name);
     Class (*objc_lookUpClass)(const char *name);
+    Class (*objc_getMetaClass)(const char *name);  // For class method discovery
     Class *(*objc_copyClassList)(unsigned int *outCount);
     
     // Class introspection
@@ -178,6 +179,10 @@ public:
   /// Get all methods including inherited ones
   llvm::Expected<std::vector<MethodInfo>>
   GetAllMethodsIncludingInherited(Class cls);
+  
+  /// Get all class methods from metaclass (for class method discovery)
+  llvm::Expected<std::vector<MethodInfo>>
+  GetAllClassMethods(const std::string &class_name);
   
   /// Get all properties including inherited ones
   llvm::Expected<std::vector<PropertyInfo>>
@@ -259,6 +264,27 @@ private:
   /// Direct memory reading approach for class enumeration
   llvm::Expected<std::vector<Class>> GetAllClassesDirect();
   
+  // === Memory-Based Introspection (Phase 2) ===
+  
+  /// GNUstep class structure for memory reading
+  struct GNUstepClass {
+    lldb::addr_t isa;           // offset 0: Metaclass pointer
+    lldb::addr_t superclass;    // offset 8: Superclass pointer  
+    lldb::addr_t name_ptr;      // offset 16: Class name pointer
+    std::string name;           // Resolved class name
+    // Additional fields can be added as needed
+  };
+  
+  /// Find class pointer using runtime functions (safe during interface declaration)
+  llvm::Expected<lldb::addr_t> FindClassPointerViaRuntime(const std::string &class_name);
+  
+  /// Read GNUstep class structure directly from memory
+  llvm::Expected<GNUstepClass> ReadGNUstepClassStructure(lldb::addr_t class_addr);
+  
+  /// Get methods from class using runtime functions (not expression evaluation)
+  llvm::Expected<std::vector<MethodInfo>> GetMethodsFromClassViaRuntime(
+    lldb::addr_t class_addr, const std::string &class_name, bool include_superclass);
+
 private:
   Process *m_process;
   RuntimeFunctions m_runtime;

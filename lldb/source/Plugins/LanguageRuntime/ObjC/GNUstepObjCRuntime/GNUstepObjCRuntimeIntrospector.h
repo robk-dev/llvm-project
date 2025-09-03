@@ -49,6 +49,26 @@ public:
   // Load runtime function symbols for direct calling
   bool LoadRuntimeSymbols();
   
+  // CRITICAL: Direct method introspection using runtime.h functions
+  // These avoid expression evaluation during interface declaration to break recursion
+  struct MethodInfo {
+    std::string selector_name;
+    std::string type_encoding;
+    lldb::addr_t implementation;
+  };
+  
+  // Get all instance methods from a class pointer (direct memory access)
+  std::vector<MethodInfo> GetInstanceMethods(lldb::addr_t class_ptr);
+  
+  // Get all class methods from a class pointer via metaclass (direct memory access)  
+  std::vector<MethodInfo> GetClassMethods(lldb::addr_t class_ptr);
+  
+  // Get class pointer by name using objc_getClass (direct runtime call)
+  lldb::addr_t GetClassPointer(const std::string &class_name);
+  
+  // Get metaclass pointer by name using objc_getMetaClass (direct runtime call)
+  lldb::addr_t GetMetaClassPointer(const std::string &class_name);
+  
   // Ensure runtime symbols are loaded (call this before using symbol addresses)
   void EnsureRuntimeSymbolsLoaded();
   
@@ -88,6 +108,14 @@ private:
   lldb::addr_t m_objc_copyClassList_addr = LLDB_INVALID_ADDRESS;
   lldb::addr_t m_class_getName_addr = LLDB_INVALID_ADDRESS;
   lldb::addr_t m_free_addr = LLDB_INVALID_ADDRESS;
+  
+  // Method introspection function addresses from runtime.h for dynamic method discovery
+  lldb::addr_t m_objc_getMetaClass_addr = LLDB_INVALID_ADDRESS;
+  lldb::addr_t m_objc_getClass_addr = LLDB_INVALID_ADDRESS;
+  lldb::addr_t m_class_copyMethodList_addr = LLDB_INVALID_ADDRESS;
+  lldb::addr_t m_method_getName_addr = LLDB_INVALID_ADDRESS;
+  lldb::addr_t m_method_getTypeEncoding_addr = LLDB_INVALID_ADDRESS;
+  lldb::addr_t m_sel_getName_addr = LLDB_INVALID_ADDRESS;
   
   // Flag to track if we've attempted to load runtime symbols
   bool m_runtime_symbols_loaded = false;

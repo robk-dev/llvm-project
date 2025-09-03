@@ -100,6 +100,9 @@ private:
   
   // Runtime API for dynamic class/method discovery
   std::unique_ptr<GNUstepRuntimeV2API> m_runtime_api;
+  
+  // CRITICAL: Direct memory introspector for breaking expression evaluation recursion
+  std::unique_ptr<GNUstepObjCRuntimeIntrospector> m_introspector;
 };
 
 } // namespace lldb_private
