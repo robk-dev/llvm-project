@@ -28,9 +28,15 @@
 #include "lldb/Target/Process.h"
 #include "lldb/Target/Target.h"
 #include "lldb/Target/ThreadPlanStepOut.h"
+#include "lldb/Target/ThreadPlanCallFunction.h"
+#include "lldb/Target/Thread.h"
+#include "lldb/Core/Address.h"
+#include "lldb/Core/Value.h"
+#include "lldb/ValueObject/ValueObjectList.h"
 #include "lldb/Utility/StreamString.h"
 #include "lldb/Utility/LLDBLog.h"
 #include "lldb/Utility/Log.h"
+#include "lldb/Expression/DiagnosticManager.h"
 #include "Plugins/TypeSystem/Clang/TypeSystemClang.h"
 #include "clang/AST/ASTContext.h"
 #include "clang/AST/Decl.h"
@@ -1201,6 +1207,41 @@ GNUstepObjCRuntime::GetClassDescriptor(ValueObject &valobj) {
   return GetClassDescriptorFromISA(isa);
 }
 
+ObjCLanguageRuntime::ClassDescriptorSP
+GNUstepObjCRuntime::GetClassDescriptorFromClassName(ConstString class_name) {
+  Log *log = GetLog(LLDBLog::Process | LLDBLog::Types);
+  LLDB_LOG(log, "GNUstepObjCRuntime::GetClassDescriptorFromClassName called for class: {0}", class_name.GetCString());
+  
+  if (!class_name)
+    return ClassDescriptorSP();
+  
+  // First check if it's already in the cache using base class method
+  ClassDescriptorSP cached_descriptor = ObjCLanguageRuntime::GetClassDescriptorFromClassName(class_name);
+  if (cached_descriptor) {
+    LLDB_LOG(log, "Class '{0}' found in cache", class_name.GetCString());
+    return cached_descriptor;
+  }
+  
+  // Use our runtime function to get the class address
+  lldb::addr_t class_addr = CallRuntimeFunction("objc_getClass", class_name.GetCString());
+  if (class_addr == LLDB_INVALID_ADDRESS || class_addr == 0) {
+    LLDB_LOG(log, "objc_getClass returned invalid address for class: {0}", class_name.GetCString());
+    return ClassDescriptorSP();
+  }
+  
+  LLDB_LOG(log, "objc_getClass resolved class '{0}' to address 0x{1:x}", class_name.GetCString(), class_addr);
+  
+  // Create a class descriptor from the ISA (class address)
+  ClassDescriptorSP descriptor_sp = GetClassDescriptorFromISA(class_addr);
+  if (descriptor_sp && descriptor_sp->IsValid()) {
+    LLDB_LOG(log, "Successfully created class descriptor for '{0}'", class_name.GetCString());
+    return descriptor_sp;
+  }
+  
+  LLDB_LOG(log, "Failed to create valid class descriptor for '{0}'", class_name.GetCString());
+  return ClassDescriptorSP();
+}
+
 void GNUstepObjCRuntime::InitializeRuntimeAPI() {
   Log *log = GetLog(LLDBLog::Process | LLDBLog::Types);
   LLDB_LOG(log, "GNUstepObjCRuntime::InitializeRuntimeAPI - Initializing runtime API");
@@ -2170,6 +2211,133 @@ std::map<std::string, lldb::addr_t> GNUstepObjCRuntime::GetObjCRuntimeAddresses(
   return addresses;
 }
 
+lldb::addr_t GNUstepObjCRuntime::CallRuntimeFunction(const char *function_name, const char *string_arg) {
+  Log *log = GetLog(LLDBLog::Language | LLDBLog::Types);
+  LLDB_LOG(log, "CallRuntimeFunction: {0}(\"{1}\")", function_name, string_arg);
+  
+  if (!m_process || !m_process->IsAlive()) {
+    LLDB_LOG(log, "CallRuntimeFunction: Process not available");
+    return LLDB_INVALID_ADDRESS;
+  }
+  
+  // Get the function address
+  lldb::addr_t func_addr = LLDB_INVALID_ADDRESS;
+  if (strcmp(function_name, "objc_getClass") == 0) {
+    func_addr = m_objc_getClass_addr;
+  } else {
+    LLDB_LOG(log, "CallRuntimeFunction: Unknown function {0}", function_name);
+    return LLDB_INVALID_ADDRESS;
+  }
+  
+  if (func_addr == LLDB_INVALID_ADDRESS) {
+    LLDB_LOG(log, "CallRuntimeFunction: Function {0} not resolved", function_name);
+    return LLDB_INVALID_ADDRESS;
+  }
+  
+  // Make sure we have execution context with a valid thread
+  ExecutionContext exe_ctx(m_process);
+  if (!exe_ctx.HasThreadScope()) {
+    LLDB_LOG(log, "CallRuntimeFunction: No valid thread context");
+    return LLDB_INVALID_ADDRESS;
+  }
+  
+  Thread *thread = exe_ctx.GetThreadPtr();
+  if (!thread) {
+    LLDB_LOG(log, "CallRuntimeFunction: No thread available");
+    return LLDB_INVALID_ADDRESS;
+  }
+  
+  // Allocate memory for the string argument in the target process
+  Status error;
+  size_t string_len = strlen(string_arg) + 1;
+  lldb::addr_t string_addr = m_process->AllocateMemory(string_len, lldb::ePermissionsReadable, error);
+  if (string_addr == LLDB_INVALID_ADDRESS || error.Fail()) {
+    LLDB_LOG(log, "CallRuntimeFunction: Failed to allocate memory for string: {0}", error.AsCString());
+    return LLDB_INVALID_ADDRESS;
+  }
+  
+  // Write the string to target memory
+  size_t bytes_written = m_process->WriteMemory(string_addr, string_arg, string_len, error);
+  if (bytes_written != string_len || error.Fail()) {
+    LLDB_LOG(log, "CallRuntimeFunction: Failed to write string to memory: {0}", error.AsCString());
+    m_process->DeallocateMemory(string_addr);
+    return LLDB_INVALID_ADDRESS;
+  }
+  
+  // Set up the function address
+  Address function_address;
+  function_address.SetLoadAddress(func_addr, &m_process->GetTarget());
+  
+  // Set up arguments for objc_getClass(const char*)
+  ValueList arg_values;
+  Value string_value;
+  string_value.SetValueType(Value::ValueType::LoadAddress);
+  string_value.GetScalar() = string_addr;
+  arg_values.PushValue(string_value);
+  
+  // Get the ABI for function calling conventions
+  ABISP abi_sp = m_process->GetABI();
+  if (!abi_sp) {
+    LLDB_LOG(log, "CallRuntimeFunction: No ABI available");
+    m_process->DeallocateMemory(string_addr);
+    return LLDB_INVALID_ADDRESS;
+  }
+  
+  // Create a simple return type (void* / Class)
+  TypeSystemClangSP ts = ScratchTypeSystemClang::GetForTarget(m_process->GetTarget());
+  if (!ts) {
+    LLDB_LOG(log, "CallRuntimeFunction: No type system available");
+    m_process->DeallocateMemory(string_addr);
+    return LLDB_INVALID_ADDRESS;
+  }
+  
+  CompilerType return_type = ts->GetBasicType(eBasicTypeVoid).GetPointerType();
+  
+  // Convert ValueList to ArrayRef<addr_t>
+  std::vector<addr_t> args;
+  for (size_t i = 0; i < arg_values.GetSize(); ++i) {
+    Value *val = arg_values.GetValueAtIndex(i);
+    if (val) {
+      args.push_back(val->GetScalar().ULongLong());
+    }
+  }
+  
+  // Create the call plan
+  ThreadPlanSP call_plan_sp(new ThreadPlanCallFunction(
+      *thread, function_address, return_type, llvm::ArrayRef<addr_t>(args), EvaluateExpressionOptions()));
+  
+  if (!call_plan_sp || !call_plan_sp->ValidatePlan(nullptr)) {
+    LLDB_LOG(log, "CallRuntimeFunction: Failed to create valid call plan");
+    m_process->DeallocateMemory(string_addr);
+    return LLDB_INVALID_ADDRESS;
+  }
+  
+  // Execute the function call
+  DiagnosticManager diagnostics;
+  ExpressionResults result = m_process->RunThreadPlan(exe_ctx, call_plan_sp, EvaluateExpressionOptions(), diagnostics);
+  
+  // Clean up the allocated string memory
+  m_process->DeallocateMemory(string_addr);
+  
+  if (result != eExpressionCompleted) {
+    LLDB_LOG(log, "CallRuntimeFunction: Function call failed with result {0}: {1}", 
+             (int)result, diagnostics.GetString().c_str());
+    return LLDB_INVALID_ADDRESS;
+  }
+  
+  // Get the return value
+  ValueObjectSP return_value_sp = call_plan_sp->GetReturnValueObject();
+  if (!return_value_sp) {
+    LLDB_LOG(log, "CallRuntimeFunction: No return value available");
+    return LLDB_INVALID_ADDRESS;
+  }
+  
+  lldb::addr_t return_addr = return_value_sp->GetValueAsUnsigned(LLDB_INVALID_ADDRESS);
+  
+  LLDB_LOG(log, "CallRuntimeFunction: {0}(\"{1}\") returned 0x{2:x}", function_name, string_arg, return_addr);
+  return return_addr;
+}
+
 lldb::addr_t GNUstepObjCRuntime::LookupRuntimeSymbol(ConstString name) {
   Log *log = GetLog(LLDBLog::Language | LLDBLog::Types);
   LLDB_LOG(log, "GNUstepObjCRuntime::LookupRuntimeSymbol called for: {0}", name.GetCString());
@@ -2189,6 +2357,23 @@ lldb::addr_t GNUstepObjCRuntime::LookupRuntimeSymbol(ConstString name) {
     return a == LLDB_INVALID_ADDRESS ? LLDB_INVALID_ADDRESS : a; 
   };
 
+  // Handle class name resolution - this is called when IRForTarget needs to resolve
+  // a class name like "NSArray" to the actual class object address
+  if (m_objc_getClass_addr != LLDB_INVALID_ADDRESS) {
+    // Check if this looks like a class name (starts with uppercase, contains typical class patterns)
+    if (!s.empty() && (std::isupper(s[0]) || s.starts_with("NS") || s.starts_with("CF"))) {
+      LLDB_LOG(log, "Attempting to resolve '{0}' as a class name using objc_getClass", s.str().c_str());
+      
+      // Call objc_getClass(class_name) to get the class object
+      lldb::addr_t class_addr = CallRuntimeFunction("objc_getClass", s.str().c_str());
+      if (class_addr != LLDB_INVALID_ADDRESS && class_addr != 0) {
+        LLDB_LOG(log, "Successfully resolved class '{0}' to address 0x{1:x}", s.str().c_str(), class_addr);
+        return ret(class_addr);
+      }
+    }
+  }
+
+  // Handle runtime function symbols
   if (s == "objc_msgSend")                 return ret(m_objc_msgSend_addr);
   if (s == "objc_msgSend_stret")           return ret(m_objc_msgSend_stret_addr);
   if (s == "objc_msgSend_fpret")           return ret(m_objc_msgSend_fpret_addr);

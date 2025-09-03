@@ -342,6 +342,9 @@ private:
   /// The address of the function sel_registerName, cast to the appropriate
   /// function pointer type.
   llvm::FunctionCallee m_sel_registerName;
+  /// The address of the function objc_getClass, cast to the appropriate
+  /// function pointer type.
+  llvm::FunctionCallee m_objc_getClass;
   /// The type of an integer large enough to hold a pointer.
   llvm::IntegerType *m_intptr_ty = nullptr;
   /// The stream on which errors should be printed.
