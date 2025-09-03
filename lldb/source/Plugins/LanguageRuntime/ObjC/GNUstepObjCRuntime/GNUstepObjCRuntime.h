@@ -113,8 +113,7 @@ public:
   void DidAttach(ArchSpec &arch_spec);
 
 private:
-  // Helper method to call runtime functions with string arguments
-  lldb::addr_t CallRuntimeFunction(const char *function_name, const char *string_arg);
+  // PHASE 5 CLEANUP: Removed CallRuntimeFunction - functionality replaced by IRForTarget
 
   std::unique_ptr<GNUstepObjCRuntimeIntrospector> m_introspector_up;
   std::unique_ptr<GNUstepRuntimeV2API> m_runtime_api_up;
@@ -145,22 +144,11 @@ private:
   // CFString fallback utility function if needed
   std::unique_ptr<UtilityFunction> m_cfstring_utility_fn;
   
-  // Array/Dictionary literal support utility functions
-  std::unique_ptr<UtilityFunction> m_array_literal_utility_fn;
-  std::unique_ptr<UtilityFunction> m_dict_literal_utility_fn;
-  lldb::addr_t m_array_literal_addr = LLDB_INVALID_ADDRESS;
-  lldb::addr_t m_dict_literal_addr = LLDB_INVALID_ADDRESS;
-  
-  // Subscript shim support
-  std::unique_ptr<UtilityFunction> m_subscript_utils_fn;
-  lldb::addr_t m_imp_array_subscript_addr = LLDB_INVALID_ADDRESS;
-  lldb::addr_t m_imp_dict_subscript_addr = LLDB_INVALID_ADDRESS;
-  lldb::addr_t m_install_subscripts_addr = LLDB_INVALID_ADDRESS;
-  bool m_subscripts_installed = false;
-
-  // Diagnostic utility for field testing
-  std::unique_ptr<UtilityFunction> m_diagnostic_utility_fn;
-  lldb::addr_t m_diagnostic_function_addr = LLDB_INVALID_ADDRESS;
+  // PHASE 5 CLEANUP: Removed hardcoded utility support
+  // Deleted: m_array_literal_utility_fn, m_dict_literal_utility_fn 
+  // Deleted: m_subscript_utils_fn, m_diagnostic_utility_fn
+  // Deleted: Associated addresses and flags
+  // All functionality now handled by IRForTarget with objc_getClass calls
   
   // Helper method to register formatters
   void RegisterFormatters();
@@ -177,12 +165,15 @@ private:
   // Helper methods for expression evaluation setup
   void ResolveAndCacheRuntimeSymbols();
   void EnsureCFStringCreateWithBytes();
-  void EnsureArrayDictionaryLiteralSupport();
-  void CreateAndInstallSubscriptShims(ExecutionContext &exe_ctx);
-  void RegisterSymbolsWithIRForTarget();
+  
+  // PHASE 5 CLEANUP: Removed obsolete methods (~500 lines total)
+  // Deleted: EnsureArrayDictionaryLiteralSupport()
+  // Deleted: CreateAndInstallSubscriptShims()
+  // Deleted: InjectRuntimeFunctionDecls()
+  // Deleted: CreateDiagnosticUtility()
+  // Deleted: RegisterSymbolsWithIRForTarget()
+  // Deleted: CallRuntimeFunction()
   void ArmEarlyInstall();
-  void InjectRuntimeFunctionDecls(TypeSystemClang &ts);
-  void CreateDiagnosticUtility(ExecutionContext &exe_ctx);
 };
 
 } // namespace lldb_private
