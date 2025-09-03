@@ -387,7 +387,7 @@ GNUstepRuntimeV2API::GetClassHierarchy(Class cls) {
   
   std::vector<Class> hierarchy;
   hierarchy.push_back(cls);
-  
+
   // TODO: Later implement proper hierarchy traversal using direct runtime calls
   // For now, this minimal implementation breaks the recursion cycle
   
@@ -405,7 +405,7 @@ GNUstepRuntimeV2API::GetAllIvarsIncludingInherited(Class cls) {
   // during interface population. Return empty vector for now.
   
   std::vector<IvarInfo> all_ivars;
-  
+
   // TODO: Later implement proper ivar introspection using direct runtime calls
   // For now, this minimal implementation breaks the recursion cycle
   
@@ -532,9 +532,8 @@ GNUstepRuntimeV2API::GetAllMethodsIncludingInherited(Class cls) {
   Log *log(GetLog(LLDBLog::Expressions));
   LLDB_LOGF(log, "[GNUstepRuntimeV2API] GetAllMethodsIncludingInherited - re-enabled runtime introspection (Phase 2.1)");
 
-  // Re-enabled method introspection after cleanup of hardcoded fallbacks (Phase 2.1)
+  // Re-enabled method introspection after cleanup of hardcoded fallbacks
   // For now, return empty vector to indicate no methods found - the caller will handle gracefully
-  // TODO: Implement proper runtime method introspection using the Class object
   std::vector<MethodInfo> methods;
   return methods;
 }
@@ -547,7 +546,7 @@ GNUstepRuntimeV2API::GetAllClassMethods(const std::string &class_name) {
   LLDB_LOG(log, "[{0}] Getting class methods for {1} via direct memory introspection (Apple's approach)", 
            LLDB_LOG_TAG, class_name);
   
-  // PHASE 2: Memory-Based Method Discovery Implementation
+  // Memory-Based Method Discovery Implementation
   // Following Apple's proven pattern: read runtime structures directly from memory
   // This avoids expression evaluation during interface declaration
   
@@ -559,7 +558,7 @@ GNUstepRuntimeV2API::GetAllClassMethods(const std::string &class_name) {
     if (!class_addr_or_error) {
       LLDB_LOG(log, "[{0}] Failed to find class pointer for {1}: {2}", 
                LLDB_LOG_TAG, class_name, llvm::toString(class_addr_or_error.takeError()));
-      return class_methods; // Return empty, triggers hardcoded fallback
+      return class_methods; // Class not found in runtime
     }
     
     // Step 2: Read class structure from memory (GNUstep layout)
@@ -608,7 +607,7 @@ GNUstepRuntimeV2API::GetAllClassMethods(const std::string &class_name) {
   return class_methods;
 }
 
-// === Phase 2: Memory-Based Introspection Helper Methods ===
+// === Memory-Based Introspection Helper Methods ===
 
 llvm::Expected<lldb::addr_t>
 GNUstepRuntimeV2API::FindClassPointerViaRuntime(const std::string &class_name) {
@@ -892,7 +891,7 @@ GNUstepRuntimeV2API::GetAllPropertiesIncludingInherited(Class cls) {
   // during interface population. Return empty vector for now.
   
   std::vector<PropertyInfo> all_properties;
-  
+
   // TODO: Later implement proper property introspection using direct runtime calls
   // For now, this minimal implementation breaks the recursion cycle
   

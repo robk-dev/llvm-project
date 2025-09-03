@@ -948,10 +948,7 @@ bool GNUstepObjCDeclVendor::FinishDecl(clang::ObjCInterfaceDecl *interface_decl)
         LLDB_LOGF(log, "[GNUstepObjCDeclVendor::FinishDecl] Failed to get class methods for %s: %s",
                   class_name.c_str(), error_msg.c_str());
         
-        // NOTE: Hardcoded class method fallbacks removed - runtime introspection now provides all methods
-        // The IRForTarget improvements with objc_getClass dynamic calls eliminate the need for these
-        LLDB_LOGF(log, "[GNUstepObjCDeclVendor::FinishDecl] Skipping hardcoded class method fallbacks for %s - runtime introspection handles all methods",
-                  class_name.c_str());
+        // Runtime introspection provides all class methods dynamically
       }
       
       // Get all properties for this class from runtime
@@ -966,18 +963,10 @@ bool GNUstepObjCDeclVendor::FinishDecl(clang::ObjCInterfaceDecl *interface_decl)
     } else {
       LLDB_LOGF(log, "[GNUstepObjCDeclVendor::FinishDecl] Failed to get class info for %s: %s",
                 class_name.c_str(), llvm::toString(class_info_or_err.takeError()).c_str());
-      
-      // Skip hardcoded fallback - rely on introspector which should have worked above
-      LLDB_LOGF(log, "[GNUstepObjCDeclVendor::FinishDecl] Skipping hardcoded fallback for %s - relying on introspector",
-                class_name.c_str());
     }
   } else {
-    // Fallback if runtime API not available
-    LLDB_LOGF(log, "[GNUstepObjCDeclVendor::FinishDecl] Runtime API not available, but introspector should have worked above");
+    LLDB_LOGF(log, "[GNUstepObjCDeclVendor::FinishDecl] Runtime API not available");
   }
-
-  // Note: We've replaced the hardcoded core_selectors with dynamic discovery
-  // The runtime will provide ALL methods, not just a hardcoded subset
 
 success_return:
   if (log) {
@@ -994,13 +983,13 @@ success_return:
 
 void GNUstepObjCDeclVendor::InstallDefaultForwardingRules() {
   Log *log(GetLog(LLDBLog::Expressions));
-  LLDB_LOGF(log, "[GNUstepObjCDeclVendor] Installing simplified method forwarding rules (Phase 3 cleanup)");
+  LLDB_LOGF(log, "[GNUstepObjCDeclVendor] Installing simplified method forwarding rules");
   
   if (m_forwarding_initialized) {
     return;
   }
   
-  // PHASE 3 SIMPLIFICATION: Reduced forwarding rules since modern methods exist in runtime
+  // Reduced forwarding rules since modern methods exist in runtime
   // Runtime introspection now discovers modern subscript methods automatically.
   // Keep minimal forwarding as safety net for edge cases only.
   

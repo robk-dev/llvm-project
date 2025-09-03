@@ -475,7 +475,6 @@ llvm::Error GNUstepObjCRuntime::GetObjectDescription(
 
   // CRITICAL FIX: Try to use our ID dispatcher as a fallback
   // This makes po commands work by using our formatter dispatch system
-  LLDB_LOG(log, "GNUstepObjCRuntime: Expression evaluation failed, trying formatter dispatch fallback");
   
   // Create a temporary ValueObject to pass to our formatters
   if (exe_ctx.GetFramePtr()) {
@@ -513,7 +512,6 @@ llvm::Error GNUstepObjCRuntime::GetObjectDescription(
           if (!formatter_output.empty() && formatter_output != "nil" && 
               formatter_output.find("GNUstep object at") == std::string::npos) {
             str.Printf("%s", formatter_output.c_str());
-            LLDB_LOG(log, "GNUstepObjCRuntime: Using ID dispatcher fallback: {0}", formatter_output);
             return llvm::Error::success();
           }
         }
@@ -522,21 +520,16 @@ llvm::Error GNUstepObjCRuntime::GetObjectDescription(
   }
 
   // Fallback: try to get class name using introspector  
-  LLDB_LOG(log, "GNUstepObjCRuntime: Formatter fallback failed, trying introspector fallback");
   if (m_introspector_up) {
-    LLDB_LOG(log, "GNUstepObjCRuntime: About to call GetClassName(0x{0:x})", object_ptr);
     class_name = m_introspector_up->GetClassName(object_ptr);
-    LLDB_LOG(log, "GNUstepObjCRuntime: GetClassName returned: '{0}'", class_name);
     if (!class_name.empty()) {
       str.Printf("(%s *) 0x%" PRIx64, class_name.c_str(), object_ptr);
-      LLDB_LOG(log, "GNUstepObjCRuntime: Using introspector class name fallback: {0}", class_name);
       return llvm::Error::success();
     }
   }
 
   // Final safe fallback - raw address
   str.Printf("GNUstep object at 0x%" PRIx64, object_ptr);
-  LLDB_LOG(log, "GNUstepObjCRuntime: Using final raw address fallback");
   
   
   return llvm::Error::success();
@@ -1222,7 +1215,7 @@ GNUstepObjCRuntime::GetClassDescriptorFromClassName(ConstString class_name) {
     return cached_descriptor;
   }
   
-  // PHASE 5 CLEANUP: Use runtime introspector for class resolution instead of CallRuntimeFunction
+  // Use runtime introspector for class resolution instead of CallRuntimeFunction
   if (!m_introspector_up) {
     LLDB_LOG(log, "Runtime introspector not available for class: {0}", class_name.GetCString());
     return ClassDescriptorSP();
@@ -1425,11 +1418,9 @@ void GNUstepObjCRuntime::InstallExpressionEvaluationHooks() {
   // 2) Ensure CFStringCreateWithBytes is available (real or fallback) 
   EnsureCFStringCreateWithBytes();
   
-  // PHASE 5 CLEANUP: Removed EnsureArrayDictionaryLiteralSupport() - handled by IRForTarget
-  // PHASE 5 CLEANUP: Removed InjectRuntimeFunctionDecls() - handled by IRForTarget  
-  // PHASE 5 CLEANUP: Removed CreateAndInstallSubscriptShims() - handled by IRForTarget
-  // PHASE 5 CLEANUP: Removed CreateDiagnosticUtility() - handled by IRForTarget
-  // PHASE 5 CLEANUP: Removed RegisterSymbolsWithIRForTarget() - handled by IRForTarget
+  // Removed hardcoded utility functions - IRForTarget handles all expression evaluation
+  // Array/dictionary literal support, function injection, shims, and diagnostics
+  // are now provided dynamically through runtime introspection
   
   // IRForTarget with objc_getClass dynamic calls now handles all expression evaluation needs
   LLDB_LOG(log, "[GNUstep] Expression evaluation relies on IRForTarget with runtime introspection");
@@ -1686,7 +1677,7 @@ void *CFStringCreateWithBytes(void *alloc,
   LLDB_LOG(log, "Failed to get address of CFStringCreateWithBytes fallback after installation");
 }
 
-// PHASE 5 CLEANUP: Removed hardcoded utility functions (~500+ lines)
+// Runtime introspection implementation - dynamic discovery replaces hardcoded utilities
 // IRForTarget with objc_getClass dynamic calls now handles:
 // - Array/Dictionary literal support automatically
 // - Subscript shims via runtime method discovery  

@@ -113,7 +113,7 @@ public:
   void DidAttach(ArchSpec &arch_spec);
 
 private:
-  // PHASE 5 CLEANUP: Removed CallRuntimeFunction - functionality replaced by IRForTarget
+  // IRForTarget provides all runtime function calls dynamically
 
   std::unique_ptr<GNUstepObjCRuntimeIntrospector> m_introspector_up;
   std::unique_ptr<GNUstepRuntimeV2API> m_runtime_api_up;
@@ -144,7 +144,7 @@ private:
   // CFString fallback utility function if needed
   std::unique_ptr<UtilityFunction> m_cfstring_utility_fn;
   
-  // PHASE 5 CLEANUP: Removed hardcoded utility support
+  // Dynamic runtime discovery replaces hardcoded utilities
   // Deleted: m_array_literal_utility_fn, m_dict_literal_utility_fn 
   // Deleted: m_subscript_utils_fn, m_diagnostic_utility_fn
   // Deleted: Associated addresses and flags
@@ -166,7 +166,7 @@ private:
   void ResolveAndCacheRuntimeSymbols();
   void EnsureCFStringCreateWithBytes();
   
-  // PHASE 5 CLEANUP: Removed obsolete methods (~500 lines total)
+  // Dynamic runtime introspection eliminates need for hardcoded methods
   // Deleted: EnsureArrayDictionaryLiteralSupport()
   // Deleted: CreateAndInstallSubscriptShims()
   // Deleted: InjectRuntimeFunctionDecls()
