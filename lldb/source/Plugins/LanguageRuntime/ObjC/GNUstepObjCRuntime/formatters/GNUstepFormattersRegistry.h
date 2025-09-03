@@ -18,106 +18,12 @@ class TypeCategoryImpl;
 namespace formatters {
 
 /// Central registry for all GNUstep formatters
+/// TEST: Minimal approach - relying on LLDB's expression evaluation
 class GNUstepFormattersRegistry {
 public:
   /// Register all GNUstep formatters with LLDB
+  /// Currently empty - testing if expression evaluation handles everything
   static void RegisterFormatters(TypeCategoryImpl &category);
-  
-  /// Register string formatters
-  static void RegisterStringFormatters(TypeCategoryImpl &category);
-  
-  /// Register number formatters (to be implemented)
-  static void RegisterNumberFormatters(TypeCategoryImpl &category);
-  
-  /// Register collection formatters (to be implemented)
-  static void RegisterCollectionFormatters(TypeCategoryImpl &category);
-  
-  /// Register array formatters
-  static void RegisterArrayFormatters(TypeCategoryImpl &category);
-  
-  /// Register dictionary formatters
-  static void RegisterDictionaryFormatters(TypeCategoryImpl &category);
-  
-  /// Register set formatters
-  static void RegisterSetFormatters(TypeCategoryImpl &category);
-  
-  /// Register NSOrderedSet formatters
-  static void RegisterOrderedSetFormatters(TypeCategoryImpl &category);
-  
-  /// Register foundation formatters
-  static void RegisterFoundationFormatters(TypeCategoryImpl &category);
-  
-  /// Register date formatters (NSDate, NSCalendarDate)
-  static void RegisterDateFormatters(TypeCategoryImpl &category);
-  
-  /// Register calendar formatters (NSCalendar)
-  static void RegisterCalendarFormatters(TypeCategoryImpl &category);
-  
-  /// Register URL formatters (NSURL)
-  static void RegisterURLFormatters(TypeCategoryImpl &category);
-  
-  /// Register error formatters (NSError)
-  static void RegisterErrorFormatters(TypeCategoryImpl &category);
-  
-  /// Register data formatters (NSData, NSMutableData)
-  static void RegisterDataFormatters(TypeCategoryImpl &category);
-  
-  /// Register UUID formatters (NSUUID)
-  static void RegisterUUIDFormatters(TypeCategoryImpl &category);
-  
-  /// Register NSNull formatter
-  static void RegisterNullFormatter(TypeCategoryImpl &category);
-  
-  /// Register NSException formatter
-  static void RegisterExceptionFormatter(TypeCategoryImpl &category);
-  
-  /// Register NSAttributedString formatter
-  static void RegisterAttributedStringFormatter(TypeCategoryImpl &category);
-  
-  /// Register NSIndexPath formatter
-  static void RegisterIndexPathFormatter(TypeCategoryImpl &category);
-  
-  /// Register NSNotification formatter
-  static void RegisterNotificationFormatter(TypeCategoryImpl &category);
-  
-  /// Register generic formatter for any Objective-C object
-  static void RegisterGenericFormatter(TypeCategoryImpl &category);
-
-  /// Register Priority 1 Foundation formatters (NSIndexSet, NSDecimalNumber, NSCharacterSet)
-  static void RegisterPriority1Formatters(TypeCategoryImpl &category);
-  
-  /// Register NSIndexSet and NSMutableIndexSet formatters
-  static void RegisterIndexSetFormatters(TypeCategoryImpl &category);
-  
-  /// Register NSDecimalNumber formatters
-  static void RegisterDecimalNumberFormatters(TypeCategoryImpl &category);
-  
-  /// Register NSCharacterSet and NSMutableCharacterSet formatters
-  static void RegisterCharacterSetFormatters(TypeCategoryImpl &category);
-  
-  /// Register NSBundle formatters
-  static void RegisterBundleFormatters(TypeCategoryImpl &category);
-
-  /// Register NSScanner formatters
-  static void RegisterScannerFormatters(TypeCategoryImpl &category);
-
-  /// Register NSLocale formatters
-  static void RegisterLocaleFormatters(TypeCategoryImpl &category);
-
-  /// Register NSProcessInfo formatters
-  static void RegisterProcessInfoFormatters(TypeCategoryImpl &category);
-
-  /// Register NSUserDefaults formatters
-  static void RegisterUserDefaultsFormatters(TypeCategoryImpl &category);
-
-  /// Register NSTimeInterval formatters
-  static void RegisterTimeIntervalFormatters(TypeCategoryImpl &category);
-
-  /// Register NSJSONSerialization formatter
-  static void RegisterJSONSerializationFormatters(TypeCategoryImpl &category);
-  
-  /// Register NSProxy formatters
-  static void RegisterProxyFormatters(TypeCategoryImpl &category);
 
 private:
   GNUstepFormattersRegistry() = delete; // Static class only

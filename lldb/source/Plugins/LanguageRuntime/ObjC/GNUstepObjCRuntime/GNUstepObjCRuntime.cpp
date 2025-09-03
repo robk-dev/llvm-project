@@ -1724,4 +1724,11 @@ void *CFStringCreateWithBytes(void *alloc,
 // - Runtime function declarations via automatic symbol resolution
 // - Direct runtime function calls through improved expression evaluation
 
+// Minimal implementation for symbol lookup - returns LLDB_INVALID_ADDRESS
+// to let the base class handle symbol resolution
+lldb::addr_t GNUstepObjCRuntime::LookupRuntimeSymbol(ConstString name) {
+  // For our minimal test approach, let the base class handle symbol lookup
+  return LLDB_INVALID_ADDRESS;
+}
+
 LLDB_PLUGIN_DEFINE(GNUstepObjCRuntime)
