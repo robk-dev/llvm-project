@@ -380,115 +380,6 @@ GNUstepObjCDeclVendor::GetDeclForISA(ObjCLanguageRuntime::ObjCISA isa) {
 
   return new_iface_decl;
 }
-
-// NOTE: Hardcoded Foundation method tables disabled - runtime introspection now provides all methods
-// The IRForTarget improvements with objc_getClass dynamic calls make these tables obsolete
-// Runtime discovery via FinishDecl() provides complete and accurate method signatures
-
-#if 0  // DISABLED: Runtime introspection replaces hardcoded method tables
-
-// Foundation class method signatures for common classes
-struct FoundationMethodSignature {
-  const char *name;
-  const char *types;
-  bool is_instance;
-};
-
-// Method signatures for NSString
-static const FoundationMethodSignature NSString_methods[] = {
-  {"length", "L@:", true},
-  {"characterAtIndex:", "S@:L", true},
-  {"UTF8String", "*@:", true},
-  {"stringWithFormat:", "@#@:@", false},
-  {"stringWithCString:encoding:", "@#@:*L", false},
-  {"description", "@@:", true},
-  {"isEqualToString:", "c@:@", true},
-  {"substringFromIndex:", "@@:L", true},
-  {"substringToIndex:", "@@:L", true},
-  {"substringWithRange:", "@@:{_NSRange=LL}", true},
-  {nullptr, nullptr, false}
-};
-
-// Method signatures for NSNumber
-static const FoundationMethodSignature NSNumber_methods[] = {
-  {"numberWithInt:", "@#@:i", false},
-  {"numberWithDouble:", "@#@:d", false},
-  {"numberWithBool:", "@#@:c", false},
-  {"intValue", "i@:", true},
-  {"doubleValue", "d@:", true},
-  {"boolValue", "c@:", true},
-  {"stringValue", "@@:", true},
-  {"description", "@@:", true},
-  {nullptr, nullptr, false}
-};
-
-// Method signatures for NSArray
-static const FoundationMethodSignature NSArray_methods[] = {
-  {"count", "L@:", true},
-  {"objectAtIndex:", "@@:L", true},
-  {"objectAtIndexedSubscript:", "@@:L", true},  // Modern subscript syntax support (array[index])
-  {"firstObject", "@@:", true},
-  {"lastObject", "@@:", true},
-  {"arrayWithObjects:", "@#@:@@", false},
-  {"arrayWithObjects:count:", "@32@0:8r^@16Q24", false},  // CRITICAL: Array literal support - FIXED Windows/Linux encoding
-  {"description", "@@:", true},
-  {"containsObject:", "c@:@", true},
-  {nullptr, nullptr, false}
-};
-
-// Method signatures for NSDictionary
-static const FoundationMethodSignature NSDictionary_methods[] = {
-  {"count", "L@:", true},
-  {"objectForKey:", "@@:@", true},
-  {"objectForKeyedSubscript:", "@@:@", true},  // Modern subscript syntax support (dict[@"key"])
-  {"allKeys", "@@:", true},
-  {"allValues", "@@:", true},
-  {"dictionaryWithObject:forKey:", "@#@:@@", false},
-  {"dictionaryWithObjects:forKeys:count:", "@40@0:8r^@16r^@24Q32", false},  // CRITICAL: Dictionary literal support - FIXED Windows/Linux encoding
-  {"description", "@@:", true},
-  {nullptr, nullptr, false}
-};
-
-// Method signatures for NSSet
-static const FoundationMethodSignature NSSet_methods[] = {
-  {"count", "L@:", true},
-  {"anyObject", "@@:", true},
-  {"allObjects", "@@:", true},
-  {"containsObject:", "c@:@", true},
-  {"setWithObjects:", "@#@:@@", false},
-  {"description", "@@:", true},
-  {nullptr, nullptr, false}
-};
-
-// Class-specific method signature tables
-static const struct {
-  const char *class_name;
-  const FoundationMethodSignature *methods;
-} foundation_class_methods[] = {
-  {"NSString", NSString_methods},
-  {"NSMutableString", NSString_methods},
-  {"NSConstantString", NSString_methods},
-  {"GSTinyString", NSString_methods},
-  {"GSMutableString", NSString_methods},
-  {"NSNumber", NSNumber_methods},
-  {"GSNumber", NSNumber_methods},
-  {"NSArray", NSArray_methods},
-  {"NSMutableArray", NSArray_methods},
-  {"GSArray", NSArray_methods},
-  {"GSMutableArray", NSArray_methods},
-  {"NSDictionary", NSDictionary_methods},
-  {"NSMutableDictionary", NSDictionary_methods},
-  {"GSDictionary", NSDictionary_methods},
-  {"GSMutableDictionary", NSDictionary_methods},
-  {"NSSet", NSSet_methods},
-  {"NSMutableSet", NSSet_methods},
-  {"GSSet", NSSet_methods},
-  {"GSMutableSet", NSSet_methods},
-  {nullptr, nullptr}
-};
-
-#endif  // DISABLED hardcoded method tables - runtime introspection provides all methods
-
 class GNUstepObjCRuntimeMethodType {
 public:
   GNUstepObjCRuntimeMethodType(const char *types) {
@@ -1103,74 +994,33 @@ success_return:
 
 void GNUstepObjCDeclVendor::InstallDefaultForwardingRules() {
   Log *log(GetLog(LLDBLog::Expressions));
-  LLDB_LOGF(log, "[GNUstepObjCDeclVendor] Installing method forwarding rules for modern subscript syntax");
+  LLDB_LOGF(log, "[GNUstepObjCDeclVendor] Installing simplified method forwarding rules (Phase 3 cleanup)");
   
   if (m_forwarding_initialized) {
     return;
   }
   
-  // Modern NSArray subscript to traditional method forwarding
+  // PHASE 3 SIMPLIFICATION: Reduced forwarding rules since modern methods exist in runtime
+  // Runtime introspection now discovers modern subscript methods automatically.
+  // Keep minimal forwarding as safety net for edge cases only.
+  
+  // Essential forwarding rules for rare cases where modern methods might not be available
   m_method_forwarding_rules.push_back({
     "objectAtIndexedSubscript:",   // Modern method
-    "objectAtIndex:",              // Legacy method
-    "NSArray",                     // Class prefix
+    "objectAtIndex:",              // Legacy method  
+    "*",                           // All classes (simplified from specific class checks)
     true                           // Enabled
   });
   
-  // Modern NSDictionary subscript to traditional method forwarding
   m_method_forwarding_rules.push_back({
     "objectForKeyedSubscript:",    // Modern method
     "objectForKey:",               // Legacy method
-    "NSDictionary",                // Class prefix
+    "*",                           // All classes (simplified from specific class checks)
     true                           // Enabled
   });
   
-  // Also support mutable variants
-  m_method_forwarding_rules.push_back({
-    "objectAtIndexedSubscript:",
-    "objectAtIndex:",
-    "NSMutableArray",
-    true
-  });
-  
-  m_method_forwarding_rules.push_back({
-    "objectForKeyedSubscript:",
-    "objectForKey:",
-    "NSMutableDictionary",
-    true
-  });
-  
-  // Support GNUstep-specific class names
-  m_method_forwarding_rules.push_back({
-    "objectAtIndexedSubscript:",
-    "objectAtIndex:",
-    "GSArray",
-    true
-  });
-  
-  m_method_forwarding_rules.push_back({
-    "objectAtIndexedSubscript:",
-    "objectAtIndex:",
-    "GSMutableArray",
-    true
-  });
-  
-  m_method_forwarding_rules.push_back({
-    "objectForKeyedSubscript:",
-    "objectForKey:",
-    "GSDictionary",
-    true
-  });
-  
-  m_method_forwarding_rules.push_back({
-    "objectForKeyedSubscript:",
-    "objectForKey:",
-    "GSMutableDictionary",
-    true
-  });
-  
   m_forwarding_initialized = true;
-  LLDB_LOGF(log, "[GNUstepObjCDeclVendor] Installed %zu method forwarding rules", 
+  LLDB_LOGF(log, "[GNUstepObjCDeclVendor] Installed %zu simplified forwarding rules (reduced from 8 rules)", 
             m_method_forwarding_rules.size());
 }
 
@@ -1318,12 +1168,24 @@ clang::ObjCMethodDecl *GNUstepObjCDeclVendor::ResolveMethodWithForwarding(
     }
   }
 
-  // Method not found directly, check if we should forward it
+  // PHASE 3 IMPROVEMENT: Only forward if modern method doesn't exist in runtime
+  // Check if we should forward it (only for missing modern methods)
   auto forwarding_target = GetForwardingTarget(method_name, class_name);
   if (!forwarding_target) {
     LLDB_LOGF(log, "[GNUstepObjCDeclVendor] No forwarding rule found for method %s in class %s",
               method_name.c_str(), class_name.c_str());
     return nullptr;
+  }
+  
+  // PHASE 3 IMPROVEMENT: Check if modern method exists before forwarding
+  LLDB_LOGF(log, "[GNUstepObjCDeclVendor] Checking if modern method %s exists before forwarding to %s",
+            method_name.c_str(), forwarding_target->c_str());
+  
+  // If modern method exists in runtime, don't forward (runtime introspection will handle it)
+  if (DoesClassRespondToSelector(class_name, method_name)) {
+    LLDB_LOGF(log, "[GNUstepObjCDeclVendor] Modern method %s exists in runtime, skipping forwarding to %s",
+              method_name.c_str(), forwarding_target->c_str());
+    return nullptr; // Let runtime introspection handle the modern method
   }
   
   // Check if the target method exists at runtime
@@ -1651,45 +1513,29 @@ void GNUstepObjCDeclVendor::EnsureMinimalFoundationInterfaces(TypeSystemClang &t
   
   LLDB_LOG(log, "[TRACE] Starting EnsureMinimalFoundationInterfaces with runtime discovery");
 
-  // Critical Foundation classes that need early population for expression evaluation
+  // PHASE 1.3 SIMPLIFICATION: Just ensure interfaces exist, runtime introspection handles methods
+  // Critical Foundation classes that need early interface creation for expression evaluation
   const std::vector<std::string> foundation_classes = {
     "NSObject",    // Root class
     "NSNumber",    // Literal support: @123
-    "NSString",    // Literal support: @"string"
+    "NSString",    // Literal support: @"string"  
     "NSArray",     // Literal support: @[]
     "NSDictionary" // Literal support: @{}
   };
   
-  // Use runtime discovery to populate each Foundation class
+  // Create empty interfaces - runtime introspection via FinishDecl will populate methods
   for (const auto &class_name : foundation_classes) {
-    if (m_runtime_api) {
-      // Try runtime discovery first
-      if (PopulateInterfaceFromRuntime(ts, class_name)) {
-        LLDB_LOG(log, "Successfully populated {0} from runtime", class_name);
-      } else {
-        LLDB_LOG(log, "Runtime discovery failed for {0}", class_name);
-      }
-    }
-    
-    // CRITICAL: Always ensure comprehensive Foundation methods are present for literal support
-    // This supplements runtime discovery and handles cases where runtime 
-    // introspection is disabled or incomplete
-    LLDB_LOG(log, "Ensuring comprehensive Foundation methods for {0} (needed for literals)", class_name);
+    LLDB_LOG(log, "Ensuring interface exists for {0} (runtime introspection will populate methods)", class_name);
     
     ObjCInterfaceDecl *interface_decl = GetOrCreateInterface(ctx, class_name);
     if (!interface_decl)
       continue;
     
-    // DISABLED: Use runtime introspection instead of hardcoded methods
-    // The hardcoded methods have invalid type encodings that cause failures
-    // Runtime introspection via FinishDecl provides correct method signatures
-    LLDB_LOG(log, "Skipping hardcoded methods for {0}, relying on runtime introspection", class_name);
-    
-    // Ensure external storage flags are cleared
+    // Clear external storage flags to trigger method population via FinishDecl
     interface_decl->setHasExternalVisibleStorage(false);
     interface_decl->setHasExternalLexicalStorage(false);
   }
 
   m_foundation_minimals_injected = true;
-  LLDB_LOG(log, "[TRACE] Completed EnsureMinimalFoundationInterfaces - all Foundation interfaces populated");
+  LLDB_LOG(log, "[TRACE] Completed EnsureMinimalFoundationInterfaces - interfaces created, runtime introspection will populate methods");
 }
