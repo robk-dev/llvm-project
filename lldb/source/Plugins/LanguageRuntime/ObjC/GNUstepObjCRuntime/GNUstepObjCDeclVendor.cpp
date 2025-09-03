@@ -1157,8 +1157,8 @@ clang::ObjCMethodDecl *GNUstepObjCDeclVendor::ResolveMethodWithForwarding(
     }
   }
 
-  // PHASE 3 IMPROVEMENT: Only forward if modern method doesn't exist in runtime
-  // Check if we should forward it (only for missing modern methods)
+  // Only forward if modern method doesn't exist in runtime.
+  // Check if we should forward it (only for missing modern methods).
   auto forwarding_target = GetForwardingTarget(method_name, class_name);
   if (!forwarding_target) {
     LLDB_LOGF(log, "[GNUstepObjCDeclVendor] No forwarding rule found for method %s in class %s",
@@ -1166,7 +1166,7 @@ clang::ObjCMethodDecl *GNUstepObjCDeclVendor::ResolveMethodWithForwarding(
     return nullptr;
   }
   
-  // PHASE 3 IMPROVEMENT: Check if modern method exists before forwarding
+  // Check if modern method exists before forwarding.
   LLDB_LOGF(log, "[GNUstepObjCDeclVendor] Checking if modern method %s exists before forwarding to %s",
             method_name.c_str(), forwarding_target->c_str());
   
@@ -1502,8 +1502,8 @@ void GNUstepObjCDeclVendor::EnsureMinimalFoundationInterfaces(TypeSystemClang &t
   
   LLDB_LOG(log, "[TRACE] Starting EnsureMinimalFoundationInterfaces with runtime discovery");
 
-  // PHASE 1.3 SIMPLIFICATION: Just ensure interfaces exist, runtime introspection handles methods
-  // Critical Foundation classes that need early interface creation for expression evaluation
+  // Just ensure interfaces exist, runtime introspection handles methods.
+  // Critical Foundation classes that need early interface creation for expression evaluation.
   const std::vector<std::string> foundation_classes = {
     "NSObject",    // Root class
     "NSNumber",    // Literal support: @123

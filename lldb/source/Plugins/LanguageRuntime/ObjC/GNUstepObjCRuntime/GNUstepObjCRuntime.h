@@ -144,6 +144,10 @@ private:
   // CFString fallback utility function if needed
   std::unique_ptr<UtilityFunction> m_cfstring_utility_fn;
   
+  // Phase B: Thread safety for symbol resolution
+  mutable std::once_flag m_symbol_resolution_flag;
+  mutable std::mutex m_symbol_mutex;
+  
   // Dynamic runtime discovery replaces hardcoded utilities
   // Deleted: m_array_literal_utility_fn, m_dict_literal_utility_fn 
   // Deleted: m_subscript_utils_fn, m_diagnostic_utility_fn

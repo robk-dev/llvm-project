@@ -41,10 +41,37 @@
 #include "clang/AST/ASTContext.h"
 #include "clang/AST/Decl.h"
 #include <atomic>
+#include <mutex>
 
 using namespace lldb;
 using namespace lldb_private;
 using namespace lldb_private::formatters;
+
+// Thread-local recursion guard to prevent infinite loops in runtime operations
+namespace {
+thread_local static int s_recursion_depth = 0;
+constexpr int MAX_RECURSION_DEPTH = 10;
+
+class RecursionGuard {
+public:
+  RecursionGuard() : m_valid(s_recursion_depth < MAX_RECURSION_DEPTH) {
+    if (m_valid) {
+      ++s_recursion_depth;
+    }
+  }
+  
+  ~RecursionGuard() {
+    if (m_valid) {
+      --s_recursion_depth;
+    }
+  }
+  
+  bool IsValid() const { return m_valid; }
+  
+private:
+  bool m_valid;
+};
+} // namespace
 
 // Utility function to create safe expression evaluation options
 // Especially important for Windows to avoid first-chance exception issues
@@ -66,9 +93,8 @@ void GNUstepObjCRuntime::Initialize() {
   Log *log = GetLog(LLDBLog::Process | LLDBLog::Types);
   LLDB_LOG(log, "GNUstepObjCRuntime::Initialize() called");
   
-  // CRITICAL FIX: DO NOT register formatters during static initialization!
-  // This was causing infinite recursion during module loading.
-  // Formatters will be registered lazily when the runtime is actually created.
+  // Note: Formatters are registered lazily when runtime is created
+  // to avoid infinite recursion during module loading.
   
   LLDB_LOG(log, "GNUstepObjCRuntime: Plugin registered, formatters will be registered when runtime is created");
 }
@@ -112,9 +138,9 @@ GNUstepObjCRuntime::CreateInstance(Process *process,
     return nullptr;
   }
 
-  // CRITICAL FIX: Check for GNUstep/ObjC markers before creating instance
-  // This prevents the plugin from claiming non-GNUstep programs
-  // We do a lightweight check here and defer heavy initialization to ModulesDidLoad
+  // Check for GNUstep/ObjC markers before creating instance.
+  // This prevents the plugin from claiming non-GNUstep programs.
+  // We do a lightweight check here and defer heavy initialization to ModulesDidLoad.
   
   Target &target = process->GetTarget();
   bool found_objc_markers = false;
@@ -332,6 +358,14 @@ llvm::Error GNUstepObjCRuntime::GetObjectDescription(
   Log *log = GetLog(LLDBLog::Process | LLDBLog::Types);
   LLDB_LOG(log, "GNUstepObjCRuntime::GetObjectDescription(Value&) called");
   
+  // Recursion guard to prevent infinite loops during object description
+  RecursionGuard guard;
+  if (!guard.IsValid()) {
+    LLDB_LOG(log, "GNUstepObjCRuntime: Recursion limit exceeded in GetObjectDescription");
+    str.Printf("<recursion limit exceeded>");
+    return llvm::Error::success();
+  }
+  
   if (!exe_scope)
     return llvm::createStringError(llvm::inconvertibleErrorCode(), "no execution context scope");
     
@@ -360,8 +394,8 @@ llvm::Error GNUstepObjCRuntime::GetObjectDescription(
 
   LLDB_LOG(log, "GNUstepObjCRuntime: Attempting to get description for object at 0x{0:x}", object_ptr);
 
-  // CRITICAL FIX: Handle tagged pointers BEFORE expression evaluation
-  // Tagged pointers are immediate values that cannot be handled by expression evaluation
+  // Handle tagged pointers before expression evaluation.
+  // Tagged pointers are immediate values that cannot be handled by expression evaluation.
   if (m_introspector_up && m_introspector_up->IsTaggedPointer(object_ptr)) {
     LLDB_LOG(log, "GNUstepObjCRuntime: Object 0x{0:x} is a tagged pointer", object_ptr);
     
@@ -429,7 +463,7 @@ llvm::Error GNUstepObjCRuntime::GetObjectDescription(
     char expr[256];
     snprintf(expr, sizeof(expr), "(NSString*)[(id)0x%" PRIx64 " description]", object_ptr);
     
-    // DEBUG: Log what we're trying to evaluate
+    // Log expression evaluation
     LLDB_LOG(log, "GNUstepObjCRuntime: About to evaluate expression: {0}", expr);
     
     ValueObjectSP result_sp;
@@ -473,7 +507,7 @@ llvm::Error GNUstepObjCRuntime::GetObjectDescription(
     }
   }
 
-  // CRITICAL FIX: Try to use our ID dispatcher as a fallback
+  // Try to use our ID dispatcher as a fallback
   // This makes po commands work by using our formatter dispatch system
   
   // Create a temporary ValueObject to pass to our formatters
@@ -487,7 +521,7 @@ llvm::Error GNUstepObjCRuntime::GetObjectDescription(
     if (void_ptr_type.IsValid()) {
       // Create a Value and then a ValueObject for the object pointer
       Value temp_value;
-      // CRITICAL FIX: Use correct ValueType for tagged vs regular pointers
+      // Use correct ValueType for tagged vs regular pointers
       if (m_introspector_up && m_introspector_up->IsTaggedPointer(object_ptr)) {
         // Tagged pointers are immediate values, not memory addresses
         temp_value.SetValueType(Value::ValueType::Scalar);
@@ -589,7 +623,7 @@ bool GNUstepObjCRuntime::GetDynamicTypeAndAddress(ValueObject &in_value,
   
   LLDB_LOG(log, "Got dynamic class name: {0}", class_name);
   
-  // CRITICAL FIX: For tagged pointers, NEVER set LoadAddress - keep as Scalar
+  // For tagged pointers, NEVER set LoadAddress - keep as Scalar
   // This prevents LLDB from trying to dereference tagged pointer values as memory addresses
   if (is_tagged) {
     // Tagged pointers are immediate values, not memory addresses
@@ -607,7 +641,7 @@ bool GNUstepObjCRuntime::GetDynamicTypeAndAddress(ValueObject &in_value,
   // Set the class name in the result
   class_type_or_name.SetName(ConstString(class_name));
   
-  // CRITICAL FIX: Get CompilerType from DeclVendor to enable proper formatter dispatch
+  // Get CompilerType from DeclVendor to enable proper formatter dispatch
   // This is what was missing - LLDB needs CompilerType information to dispatch formatters
   // for synthetic children properly (like dictionary [0].key, [0].value)
   DeclVendor *decl_vendor = GetDeclVendor();
@@ -1224,7 +1258,7 @@ GNUstepObjCRuntime::GetClassDescriptorFromClassName(ConstString class_name) {
   // Get class address via runtime introspector
   lldb::addr_t class_addr = m_introspector_up->FindClass(class_name.GetCString());
   if (class_addr == LLDB_INVALID_ADDRESS || class_addr == 0) {
-    LLDB_LOG(log, "Runtime introspector returned invalid address for class: {0}", class_name.GetCString());
+    LLDB_LOG(log, "Runtime introspector failed to find class: {0}", class_name.GetCString());
     return ClassDescriptorSP();
   }
   
@@ -1430,8 +1464,12 @@ void GNUstepObjCRuntime::InstallExpressionEvaluationHooks() {
 }
 
 void GNUstepObjCRuntime::ResolveAndCacheRuntimeSymbols() {
-  Log *log = GetLog(LLDBLog::Language | LLDBLog::Types);
-  LLDB_LOG(log, "Resolving GNUstep runtime symbols for expression evaluation");
+  // Phase B: Thread-safe once-only symbol resolution
+  std::call_once(m_symbol_resolution_flag, [this]() {
+    std::lock_guard<std::mutex> lock(m_symbol_mutex);
+    
+    Log *log = GetLog(LLDBLog::Language | LLDBLog::Types);
+    LLDB_LOG(log, "Resolving GNUstep runtime symbols for expression evaluation (thread-safe)");
   
   Target &target = GetProcess()->GetTarget();
   const ModuleList &modules = target.GetImages();
@@ -1510,6 +1548,7 @@ void GNUstepObjCRuntime::ResolveAndCacheRuntimeSymbols() {
   
   LLDB_LOG(log, "Resolved {0} out of {1} runtime symbols", resolved_count, 
            sizeof(symbols)/sizeof(symbols[0]) - 1);
+  }); // End of std::call_once lambda
 }
 
 void GNUstepObjCRuntime::EnsureCFStringCreateWithBytes() {
@@ -1521,7 +1560,7 @@ void GNUstepObjCRuntime::EnsureCFStringCreateWithBytes() {
     return;
   }
   
-  // CRITICAL FIX: Ensure we have execution context before trying to install utility function
+  // Ensure we have execution context before trying to install utility function
   if (!m_process || !m_process->IsAlive()) {
     LLDB_LOG(log, "Process not available for CFStringCreateWithBytes installation");
     return;

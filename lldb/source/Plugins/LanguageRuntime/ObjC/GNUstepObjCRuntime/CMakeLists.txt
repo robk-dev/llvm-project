@@ -4,38 +4,18 @@ add_lldb_library(lldbPluginGNUstepObjCRuntime PLUGIN
   GNUstepObjCRuntimeIntrospector.cpp
   GNUstepObjCDeclVendor.cpp
   GNUstepRuntimeV2API.cpp
-  formatters/GNUstepFormattersBase.cpp
   formatters/GNUstepIdDispatcher.cpp
   formatters/GNUstepStringFormatters.cpp
   formatters/GNUstepNumberFormatters.cpp
   formatters/GNUstepArrayFormatters.cpp
   formatters/GNUstepDictionaryFormatters.cpp
   formatters/GNUstepSetFormatters.cpp
-  formatters/GNUstepOrderedSetFormatters.cpp
   formatters/GNUstepDateFormatters.cpp
   formatters/GNUstepURLFormatters.cpp
-  formatters/GNUstepErrorFormatters.cpp
   formatters/GNUstepDataFormatters.cpp
   formatters/GNUstepUUIDFormatters.cpp
   formatters/GNUstepNullFormatter.cpp
-  formatters/GNUstepExceptionFormatter.cpp
-  formatters/GNUstepAttributedStringFormatter.cpp
-  formatters/GNUstepIndexPathFormatter.cpp
-  formatters/GNUstepNotificationFormatter.cpp
   formatters/GNUstepGenericFormatter.cpp
-  formatters/GNUstepNoOpSyntheticProvider.cpp
-  formatters/GNUstepIndexSetFormatters.cpp
-  formatters/GNUstepJSONSerializationFormatters.cpp
-  formatters/GNUstepDecimalNumberFormatters.cpp
-  formatters/GNUstepCharacterSetFormatters.cpp
-  formatters/GNUstepBundleFormatters.cpp
-  formatters/GNUstepScannerFormatters.cpp
-  formatters/GNUstepLocaleFormatters.cpp
-  formatters/GNUstepUserDefaultsFormatters.cpp
-  formatters/GNUstepCalendarFormatters.cpp
-  formatters/GNUstepProcessInfoFormatters.cpp
-  formatters/GNUstepProxyFormatters.cpp
-  formatters/GNUstepTimeIntervalFormatters.cpp
   formatters/GNUstepFormattersRegistry.cpp
 
   LINK_LIBS

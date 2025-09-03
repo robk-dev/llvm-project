@@ -382,13 +382,13 @@ GNUstepRuntimeV2API::GetClassHierarchy(Class cls) {
   Log *log(GetLog(LLDBLog::Expressions));
   LLDB_LOGF(log, "[GNUstepRuntimeV2API] GetClassHierarchy - minimal implementation to avoid recursion");
   
-  // CRITICAL FIX: Avoid infinite recursion by NOT using EvaluateExpression
+  // Avoid infinite recursion by not using EvaluateExpression
   // during interface population. Return just the single class for now.
   
   std::vector<Class> hierarchy;
   hierarchy.push_back(cls);
 
-  // TODO: Later implement proper hierarchy traversal using direct runtime calls
+  // TODO: Implement proper hierarchy traversal using direct runtime calls.
   // For now, this minimal implementation breaks the recursion cycle
   
   return hierarchy;
@@ -401,12 +401,12 @@ GNUstepRuntimeV2API::GetAllIvarsIncludingInherited(Class cls) {
   Log *log(GetLog(LLDBLog::Expressions));
   LLDB_LOGF(log, "[GNUstepRuntimeV2API] GetAllIvarsIncludingInherited - minimal implementation to avoid recursion");
   
-  // CRITICAL FIX: Avoid infinite recursion by NOT using EvaluateExpression
+  // Avoid infinite recursion by not using EvaluateExpression
   // during interface population. Return empty vector for now.
   
   std::vector<IvarInfo> all_ivars;
 
-  // TODO: Later implement proper ivar introspection using direct runtime calls
+  // TODO: Implement proper ivar introspection using direct runtime calls.
   // For now, this minimal implementation breaks the recursion cycle
   
   return all_ivars;
@@ -441,7 +441,7 @@ GNUstepRuntimeV2API::GetClassInfoFromPointer(Class cls) {
     return CreateError("Invalid class pointer");
   }
   
-  // CRITICAL FIX: Avoid infinite recursion by NOT using EvaluateExpression
+  // Avoid infinite recursion by not using EvaluateExpression
   // during interface population. Use direct memory access instead.
   
   ClassInfo info;
@@ -887,12 +887,12 @@ GNUstepRuntimeV2API::GetAllPropertiesIncludingInherited(Class cls) {
   Log *log(GetLog(LLDBLog::Expressions));
   LLDB_LOGF(log, "[GNUstepRuntimeV2API] GetAllPropertiesIncludingInherited - minimal implementation to avoid recursion");
   
-  // CRITICAL FIX: Avoid infinite recursion by NOT using EvaluateExpression
+  // Avoid infinite recursion by not using EvaluateExpression
   // during interface population. Return empty vector for now.
   
   std::vector<PropertyInfo> all_properties;
 
-  // TODO: Later implement proper property introspection using direct runtime calls
+  // TODO: Implement proper property introspection using direct runtime calls.
   // For now, this minimal implementation breaks the recursion cycle
   
   return all_properties;

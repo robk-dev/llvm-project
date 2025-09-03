@@ -32,6 +32,32 @@
 using namespace lldb;
 using namespace lldb_private;
 
+// Thread-local recursion guard to prevent infinite loops in introspector operations
+namespace {
+thread_local static int s_introspector_recursion_depth = 0;
+constexpr int MAX_INTROSPECTOR_RECURSION_DEPTH = 5;
+
+class IntrospectorRecursionGuard {
+public:
+  IntrospectorRecursionGuard() : m_valid(s_introspector_recursion_depth < MAX_INTROSPECTOR_RECURSION_DEPTH) {
+    if (m_valid) {
+      ++s_introspector_recursion_depth;
+    }
+  }
+  
+  ~IntrospectorRecursionGuard() {
+    if (m_valid) {
+      --s_introspector_recursion_depth;
+    }
+  }
+  
+  bool IsValid() const { return m_valid; }
+  
+private:
+  bool m_valid;
+};
+} // namespace
+
 // Utility function to create safe expression evaluation options
 // Especially important for Windows to avoid first-chance exception issues
 static EvaluateExpressionOptions MakeSafeExprOpts() {
@@ -220,8 +246,27 @@ ConstString GNUstepObjCRuntimeIntrospector::GetClassNameFromISA(lldb::addr_t isa
 }
 
 lldb::addr_t GNUstepObjCRuntimeIntrospector::FindClass(const std::string &class_name) {
+  // Recursion guard to prevent infinite loops during class lookup
+  IntrospectorRecursionGuard guard;
+  if (!guard.IsValid()) {
+    Log *log = GetLog(LLDBLog::Types);
+    LLDB_LOG(log, "GNUstepObjCRuntimeIntrospector: Recursion limit exceeded in FindClass for {0}", class_name);
+    return LLDB_INVALID_ADDRESS;
+  }
+  
   if (!m_process || class_name.empty()) {
     return LLDB_INVALID_ADDRESS;
+  }
+
+  // Phase B: Check cache first to avoid redundant runtime calls
+  {
+    std::lock_guard<std::mutex> lock(m_cache_mutex);
+    auto it = m_class_name_to_addr_cache.find(class_name);
+    if (it != m_class_name_to_addr_cache.end()) {
+      Log *log = GetLog(LLDBLog::Types);
+      LLDB_LOG(log, "GNUstepObjCRuntimeIntrospector: Found {0} in cache at 0x{1:x}", class_name, it->second);
+      return it->second;
+    }
   }
 
   // Try to call objc_lookup_class function in the target
@@ -250,7 +295,16 @@ lldb::addr_t GNUstepObjCRuntimeIntrospector::FindClass(const std::string &class_
   // Clean up the allocated string
   m_process->DeallocateMemory(string_addr);
 
-  return class_addr;
+  // Phase B: Cache the result for future lookups (only if valid)
+  if (class_addr != LLDB_INVALID_ADDRESS) {
+    std::lock_guard<std::mutex> lock(m_cache_mutex);
+    m_class_name_to_addr_cache[class_name] = class_addr;
+    Log *log = GetLog(LLDBLog::Types);
+    LLDB_LOG(log, "GNUstepObjCRuntimeIntrospector: Cached {0} at 0x{1:x}", class_name, class_addr);
+    return class_addr;
+  }
+
+  return LLDB_INVALID_ADDRESS;
 }
 
 bool GNUstepObjCRuntimeIntrospector::IsValidGNUstepRuntime() {
@@ -935,7 +989,7 @@ lldb::addr_t GNUstepObjCRuntimeIntrospector::GetClassPointer(const std::string &
   Log *log = GetLog(LLDBLog::Language);
   LLDB_LOG(log, "[GNUstepIntrospector] GetClassPointer: Looking for class '{0}'", class_name);
   
-  // CRITICAL FIX: Allocate class name string in target process memory
+  // Allocate class name string in target process memory
   Status error;
   lldb::addr_t string_addr = m_process->AllocateMemory(
       class_name.length() + 1, 
@@ -984,7 +1038,7 @@ lldb::addr_t GNUstepObjCRuntimeIntrospector::GetMetaClassPointer(const std::stri
   Log *log = GetLog(LLDBLog::Language);
   LLDB_LOG(log, "[GNUstepIntrospector] GetMetaClassPointer: Looking for metaclass '{0}'", class_name);
   
-  // CRITICAL FIX: Allocate class name string in target process memory
+  // Allocate class name string in target process memory
   Status error;
   lldb::addr_t string_addr = m_process->AllocateMemory(
       class_name.length() + 1, 

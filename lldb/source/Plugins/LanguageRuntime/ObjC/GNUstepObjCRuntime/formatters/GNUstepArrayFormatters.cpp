@@ -10,7 +10,6 @@
 #include "GNUstepNumberFormatters.h"
 #include "GNUstepDictionaryFormatters.h"
 #include "GNUstepSetFormatters.h"
-#include "GNUstepPerformanceTimer.h"
 #include "../GNUstepObjCRuntimeIntrospector.h"
 #include "lldb/ValueObject/ValueObjectConstResult.h"
 #include "lldb/ValueObject/ValueObject.h"
@@ -46,7 +45,7 @@ static std::string DecodeTaggedNumberOptimized(lldb::addr_t tagged_addr);
 // Global Recursion Protection
 //===----------------------------------------------------------------------===//
 
-// CRITICAL FIX: Thread-local static recursion guard that persists across all
+// Thread-local static recursion guard that persists across all
 // formatter invocations to prevent infinite loops when LLDB's formatting
 // system creates new ValueObjects that trigger our formatters recursively
 namespace {
@@ -94,12 +93,14 @@ namespace {
 bool GNUstepNSArraySummaryProvider::FormatObject(ValueObject &valobj, 
                                                  Stream &stream, 
                                                  const TypeSummaryOptions &options) {
-  GNUSTEP_PERFORMANCE_TIMER("NSArraySummary");
+  // Performance timer removed - use LLDB profiling if needed
   
   // Debug logging removed for performance - use LLDB logging system if needed
   
-  if (!GNUstepRuntimeHelper::IsValidGNUstepObject(valobj)) {
-    WriteErrorSummary(stream, "invalid object");
+  // Simple validation: check for valid object address
+  lldb::addr_t obj_addr = valobj.GetPointerValue();
+  if (obj_addr == 0 || obj_addr == LLDB_INVALID_ADDRESS) {
+    stream.Printf("<invalid object>");
     return false;
   }
   
@@ -133,19 +134,35 @@ bool GNUstepNSArraySummaryProvider::FormatObject(ValueObject &valobj,
 }
 
 uint32_t GNUstepNSArraySummaryProvider::ExtractArrayCount(ValueObject &valobj) {
-  Process *process = GNUstepRuntimeHelper::GetProcessFromValueObject(valobj);
-  if (!process) {
-    return 0;
-  }
-  
+  // Simplified: try to read count from common offset, fallback to 0
   lldb::addr_t obj_addr = valobj.GetPointerValue();
   if (obj_addr == 0 || obj_addr == LLDB_INVALID_ADDRESS) {
     return 0;
   }
   
+  // Try to get process for memory reading
+  ExecutionContext exe_ctx(valobj.GetExecutionContextRef());
+  Process *process = exe_ctx.GetProcessPtr();
+  if (!process) {
+    return 0;
+  }
+  
+  // Simple attempt to read count at common offset (after isa pointer)
+  Status error;
+  uint32_t count = 0;
+  lldb::addr_t count_addr = obj_addr + process->GetAddressByteSize(); // After isa
+  
+  size_t bytes_read = process->ReadMemory(count_addr, &count, sizeof(count), error);
+  if (bytes_read == sizeof(count) && error.Success() && count < 1000000) {
+    return count;
+  }
+  
+  return 0; // Unknown count
+}
+  
   // ExtractArrayCount called
   
-  // CRITICAL FIX: For custom class properties, we need to get the actual class name 
+  // For custom class properties, we need to get the actual class name 
   // of the object at obj_addr, not the ValueObject's declared type
   std::string class_name;
   
@@ -239,7 +256,7 @@ uint32_t GNUstepNSArraySummaryProvider::ExtractArrayCount(ValueObject &valobj) {
   
   // Successfully read count
   
-  // CRITICAL FIX: Detect and correct ISA pointer bug
+  // Detect and correct ISA pointer bug
   if (count > 1000000) {
     // Detected corrupted count - ISA pointer bug
            
@@ -352,7 +369,7 @@ std::string GNUstepNSArraySummaryProvider::GetInlineElementsPreview(ValueObject 
       continue;
     }
     
-    // Debug: If we got a raw address back, it means formatting failed
+    // If we got a raw address back, it means formatting failed
     if (!element_summary.empty() && element_summary.find("0x") == 0) {
       // Try direct string extraction as a fallback
       std::string direct_string = TryExtractStringContent(process, element_addr);
@@ -364,7 +381,7 @@ std::string GNUstepNSArraySummaryProvider::GetInlineElementsPreview(ValueObject 
     if (element_summary.empty()) {
       result += "<object>";
     } else {
-      // CRITICAL FIX: Ensure clean string concatenation to prevent buffer corruption
+      // Ensure clean string concatenation to prevent buffer corruption
       result += element_summary;
     }
   }
@@ -376,7 +393,7 @@ std::string GNUstepNSArraySummaryProvider::GetInlineElementsPreview(ValueObject 
   
   result += ")";
   
-  // CRITICAL FIX: Ensure proper string termination to prevent corruption
+  // Ensure proper string termination to prevent corruption
   result.shrink_to_fit();
   
   // Performance optimization: debug logging removed
@@ -389,7 +406,7 @@ std::string GNUstepNSArraySummaryProvider::GetElementSummary(Process *process, l
     return "<nil>";
   }
   
-  // CRITICAL FIX: Use global recursion guard to prevent infinite loops
+  // Use global recursion guard to prevent infinite loops
   // This persists across LLDB's ValueObject creation and formatting calls
   GlobalFormatterGuard global_guard(element_addr);
   if (global_guard.should_stop()) {
@@ -404,7 +421,7 @@ std::string GNUstepNSArraySummaryProvider::GetElementSummary(Process *process, l
   // Enter this object in our recursion tracking
   context.EnterObject(element_addr);
   
-  // CRITICAL FIX: Check for tagged pointers FIRST, before trying to read ISA
+  // Check for tagged pointers FIRST, before trying to read ISA
   // Tagged pointers encode data directly in the pointer value, not as memory addresses
   if ((element_addr & 0x7) != 0) {
     // It's a tagged pointer - handle immediately without trying to read ISA
@@ -493,7 +510,7 @@ std::string GNUstepNSArraySummaryProvider::GetElementSummary(Process *process, l
           CompilerType id_type = scratch_ts_sp->GetType(
               scratch_ts_sp->getASTContext().ObjCBuiltinIdTy);
           
-          // CRITICAL FIX: Create ValueObject from ADDRESS, not from data containing pointer
+          // Create ValueObject from ADDRESS, not from data containing pointer
           // This allows LLDB to properly resolve the object and apply formatters
           ExecutionContext exe_ctx;
           exe_scope->CalculateExecutionContext(exe_ctx);
@@ -501,7 +518,7 @@ std::string GNUstepNSArraySummaryProvider::GetElementSummary(Process *process, l
               "element", element_addr, exe_ctx, id_type);
           
           if (valobj_sp) {
-            // CRITICAL FIX: For NSNumber objects in collections, manually extract the value
+            // For NSNumber objects in collections, manually extract the value
             // instead of relying on the complex NSNumber formatter which may fail in nested contexts
             
             // Read the ISA pointer first to get the exact class name
@@ -581,7 +598,7 @@ std::string GNUstepNSArraySummaryProvider::GetElementSummary(Process *process, l
       CompilerType id_type = scratch_ts_sp->GetType(
           scratch_ts_sp->getASTContext().ObjCBuiltinIdTy);
       
-      // CRITICAL FIX: Create ValueObject from ADDRESS, not from data containing pointer
+      // Create ValueObject from ADDRESS, not from data containing pointer
       // This allows LLDB to properly resolve nested objects and apply formatters recursively
       ExecutionContext exe_ctx;
       exe_scope->CalculateExecutionContext(exe_ctx);
@@ -589,7 +606,7 @@ std::string GNUstepNSArraySummaryProvider::GetElementSummary(Process *process, l
           "element", element_addr, exe_ctx, id_type);
       
       if (valobj_sp) {
-        // CRITICAL FIX: Manually apply GNUstep formatters since LLDB may not
+        // Manually apply GNUstep formatters since LLDB may not
         // automatically select them for nested objects created programmatically
         
         // Try to get the class name to determine which formatter to use
@@ -640,7 +657,7 @@ std::string GNUstepNSArraySummaryProvider::GetElementSummary(Process *process, l
           return "{set}";
         }
         
-        // CRITICAL FIX: AVOID GetSummaryAsCString() which can cause infinite recursion
+        // AVOID GetSummaryAsCString() which can cause infinite recursion
         // Instead, try to extract basic information directly without triggering formatters
         
         // For unknown object types, just show the class name if we have it
@@ -649,7 +666,7 @@ std::string GNUstepNSArraySummaryProvider::GetElementSummary(Process *process, l
           return "<" + class_name + ">";
         }
         
-        // CRITICAL FIX: AVOID Dump() which can also trigger recursive formatting
+        // AVOID Dump() which can also trigger recursive formatting
         // For unknown objects, just return a generic placeholder
       }
     }
@@ -1252,7 +1269,7 @@ lldb::ValueObjectSP GNUstepNSArraySyntheticProvider::GetChildAtIndex(uint32_t id
     return nullptr;
   }
   
-  // CRITICAL FIX: Pass the ADDRESS where the pointer is stored, not the pointer value!
+  // Pass the ADDRESS where the pointer is stored, not the pointer value!
   // This allows LLDB to properly read the pointer and handle tagged pointers automatically.
   // Apple's NSArray formatters do exactly this - they calculate the address where the
   // element pointer is stored and pass that to CreateValueObjectFromAddress.

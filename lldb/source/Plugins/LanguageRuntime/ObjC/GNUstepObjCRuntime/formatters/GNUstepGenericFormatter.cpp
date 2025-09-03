@@ -156,13 +156,11 @@ std::vector<IvarInfo> GNUstepGenericFormatter::ExtractIvarsFromClass(
   // ExtractIvarsFromClass: class_addr, obj_addr
   
   if (!process || class_addr == LLDB_INVALID_ADDRESS || obj_addr == LLDB_INVALID_ADDRESS) {
-  // printf("ExtractIvarsFromClass: Invalid process or class address\n");
     return ivars;
   }
   
   // Validate process state
   if (!process->IsValid()) {
-  // printf("ExtractIvarsFromClass: Process is not in valid state\n");
     return ivars;
   }
   
@@ -173,10 +171,8 @@ std::vector<IvarInfo> GNUstepGenericFormatter::ExtractIvarsFromClass(
   lldb::addr_t ivars_addr_ptr = class_addr + (addr_size * 6);
   lldb::addr_t ivars_addr = GNUstepRuntimeHelper::ReadPointer(process, ivars_addr_ptr, error);
   
-  // printf("ExtractIvarsFromClass: ivars pointer at 0x%llx = 0x%llx\n");
   
   if (error.Fail() || ivars_addr == 0) {
-  // printf("ExtractIvarsFromClass: No ivars pointer or read failed\n");
     return ivars;
   }
   
@@ -186,31 +182,25 @@ std::vector<IvarInfo> GNUstepGenericFormatter::ExtractIvarsFromClass(
   
   // Validate the address before reading
   if (ivars_addr == 0 || ivars_addr == LLDB_INVALID_ADDRESS) {
-  // printf("ExtractIvarsFromClass: Invalid ivars address\n");
     return ivars;
   }
   
   const size_t ivar_list_header_size = sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint64_t); // count + padding + size
   if (!GNUstepRuntimeHelper::ReadMemory(process, ivars_addr, &ivar_list, ivar_list_header_size)) {
-  // printf("ExtractIvarsFromClass: Failed to read ivar list header\n");
     return ivars;
   }
   
-  // printf("ExtractIvarsFromClass: ivar_list count=%d, size=%d\n");
   
   // Comprehensive sanity checks
   if (ivar_list.count == 0) {
-  // printf("ExtractIvarsFromClass: No ivars in this class\n");
     return ivars; // Not an error, just no ivars
   }
   
   if (ivar_list.count > MAX_LOOP_ITERATIONS) {
-  // printf("ExtractIvarsFromClass: Too many ivars (%u), limiting to %u\n", ivar_list.count, MAX_LOOP_ITERATIONS);
     // Don't return empty - process what we can safely
   }
   
   if (ivar_list.size == 0 || ivar_list.size > 1024) { // Reasonable upper bound for ivar struct size
-  // printf("ExtractIvarsFromClass: Invalid ivar struct size: %llu\n", (unsigned long long)ivar_list.size);
     return ivars;
   }
   
@@ -219,20 +209,16 @@ std::vector<IvarInfo> GNUstepGenericFormatter::ExtractIvarsFromClass(
   
   // Additional safety check for the starting address
   if (ivar_ptr == LLDB_INVALID_ADDRESS) {
-  // printf("ExtractIvarsFromClass: Invalid ivar array start address\n");
     return ivars;
   }
   
-  // printf("ExtractIvarsFromClass: Starting to read %d ivars from 0x%llx\n");
   
   const uint32_t safe_count = (ivar_list.count > MAX_LOOP_ITERATIONS) ? MAX_LOOP_ITERATIONS : ivar_list.count;
   
   for (uint32_t i = 0; i < safe_count; ++i) {
-  // printf("ExtractIvarsFromClass: Reading ivar %d at 0x%llx\n", i, (unsigned long long)ivar_ptr);
     
     // Validate the ivar pointer before reading
     if (ivar_ptr == 0 || ivar_ptr == LLDB_INVALID_ADDRESS) {
-  // printf("ExtractIvarsFromClass: Invalid ivar pointer at index %u\n", i);
       break;
     }
     
@@ -242,11 +228,9 @@ std::vector<IvarInfo> GNUstepGenericFormatter::ExtractIvarsFromClass(
     
     const size_t ivar_struct_size = sizeof(lldb::addr_t) * 3 + sizeof(uint32_t) * 2; // name, type, offset, size, flags
     if (!GNUstepRuntimeHelper::ReadMemory(process, ivar_ptr, &ivar_data, ivar_struct_size)) {
-  // printf("ExtractIvarsFromClass: Failed to read ivar at 0x%llx\n", (unsigned long long)ivar_ptr);
       break; // Don't continue if we can't read this ivar
     }
     
-  // printf("ExtractIvarsFromClass: ivar %d - name=0x%llx, type=0x%llx, offset=0x%llx, size=%u\n");
     
     IvarInfo info;
     
@@ -255,10 +239,8 @@ std::vector<IvarInfo> GNUstepGenericFormatter::ExtractIvarsFromClass(
       info.name = GNUstepRuntimeHelper::ReadUTF8String(process, ivar_data.name, 256);
       // Validate the name was read successfully
       if (info.name.empty()) {
-  // printf("ExtractIvarsFromClass: Failed to read ivar name at 0x%llx\n", (unsigned long long)ivar_data.name);
         info.name = "<unknown>";
       }
-  // printf("  Name: '%s'\n", info.name.c_str());
     } else {
       info.name = "<unnamed>";
     }
@@ -268,17 +250,15 @@ std::vector<IvarInfo> GNUstepGenericFormatter::ExtractIvarsFromClass(
       info.type_encoding = GNUstepRuntimeHelper::ReadUTF8String(process, ivar_data.type, 256);
       // Validate the type encoding was read successfully
       if (info.type_encoding.empty()) {
-  // printf("ExtractIvarsFromClass: Failed to read ivar type at 0x%llx\n", (unsigned long long)ivar_data.type);
         info.type_encoding = "?";
       }
-  // printf("  Type: '%s'\n", info.type_encoding.c_str());
     } else {
       info.type_encoding = "?";
     }
     
     // Read the offset value with proper validation (it's a pointer to the offset)
     if (ivar_data.offset != 0 && ivar_data.offset != LLDB_INVALID_ADDRESS) {
-      // CRITICAL FIX: The offset stored in runtime is usually ptrdiff_t or size_t, not int32_t
+      // The offset stored in runtime is usually ptrdiff_t or size_t, not int32_t
       // On 64-bit systems, we need to check if this is stored as 32-bit or 64-bit integer
       // Let's try reading as size_t (pointer-sized) first, then fall back to int32_t if needed
       
@@ -306,10 +286,8 @@ std::vector<IvarInfo> GNUstepGenericFormatter::ExtractIvarsFromClass(
       }
       
       if (read_success) {
-  // printf("  Ivar '%s': Offset: %d, Size: %u, Type: %s\n", 
   //        info.name.c_str(), info.offset, ivar_data.size, info.type_encoding.c_str());
       } else {
-  // printf("ExtractIvarsFromClass: Failed to read ivar offset at 0x%llx\n", (unsigned long long)ivar_data.offset);
         info.offset = -1; // Invalid offset
       }
     } else {
@@ -321,22 +299,18 @@ std::vector<IvarInfo> GNUstepGenericFormatter::ExtractIvarsFromClass(
     // Only calculate value_addr if we have a valid offset
     if (info.offset >= 0) {
       info.value_addr = obj_addr + info.offset;
-  // printf("    -> value_addr = 0x%llx (obj_addr 0x%llx + offset %d)\n", 
   //        (unsigned long long)info.value_addr, (unsigned long long)obj_addr, info.offset);
       
       // Basic sanity check for the calculated address
       if (info.value_addr != LLDB_INVALID_ADDRESS && info.value_addr != 0) {
         ivars.push_back(info);
       } else {
-  // printf("ExtractIvarsFromClass: Invalid calculated value address for ivar '%s'\n", info.name.c_str());
       }
     } else {
-  // printf("ExtractIvarsFromClass: Skipping ivar '%s' due to invalid offset\n", info.name.c_str());
     }
     
     // Move to next ivar with overflow protection
     if (ivar_ptr > LLDB_INVALID_ADDRESS - ivar_list.size) {
-  // printf("ExtractIvarsFromClass: Address overflow protection triggered\n");
       break;
     }
     ivar_ptr += ivar_list.size;
@@ -349,18 +323,14 @@ std::vector<IvarInfo> GNUstepGenericFormatter::CollectAllIvars(Process *process,
                                                                lldb::addr_t obj_addr) {
   std::vector<IvarInfo> all_ivars;
   
-  // printf("CollectAllIvars: Starting for object at 0x%llx\n", (unsigned long long)obj_addr);
   
   if (!process || obj_addr == LLDB_INVALID_ADDRESS) {
-  // printf("CollectAllIvars: Invalid process or object address\n");
     return all_ivars;
   }
   
   // Get the class of this object
   lldb::addr_t class_addr = GetClassFromObject(process, obj_addr);
-  // printf("CollectAllIvars: Class address is 0x%llx\n", (unsigned long long)class_addr);
   if (class_addr == LLDB_INVALID_ADDRESS) {
-  // printf("CollectAllIvars: Failed to get class address\n");
     return all_ivars;
   }
   
@@ -371,7 +341,6 @@ std::vector<IvarInfo> GNUstepGenericFormatter::CollectAllIvars(Process *process,
   // Collect classes from most derived to base
   while (current_class != LLDB_INVALID_ADDRESS && current_class != 0) {
     std::string class_name = GetClassName(process, current_class);
-  // printf("CollectAllIvars: Found class '%s' at 0x%llx\n");
     class_hierarchy.push_back(current_class);
     current_class = GetSuperclass(process, current_class);
     
@@ -380,13 +349,11 @@ std::vector<IvarInfo> GNUstepGenericFormatter::CollectAllIvars(Process *process,
       break;
   }
   
-  // printf("CollectAllIvars: Class hierarchy has %zu classes\n", class_hierarchy.size());
   
   // Now collect ivars from base to most derived (reverse order)
   for (auto it = class_hierarchy.rbegin(); it != class_hierarchy.rend(); ++it) {
     std::string class_name = GetClassName(process, *it);
     std::vector<IvarInfo> class_ivars = ExtractIvarsFromClass(process, *it, obj_addr);
-  // printf("CollectAllIvars: Found %zu ivars in class '%s'\n", class_ivars.size(), class_name.c_str());
     
     // Add class name prefix for inherited ivars (optional, for clarity)
     // Currently we don't prefix inherited ivars, but could be enabled in the future
@@ -403,7 +370,6 @@ std::vector<IvarInfo> GNUstepGenericFormatter::CollectAllIvars(Process *process,
     all_ivars.insert(all_ivars.end(), class_ivars.begin(), class_ivars.end());
   }
   
-  // printf("CollectAllIvars: Total ivars collected: %zu\n", all_ivars.size());
   
   return all_ivars;
 }
@@ -478,7 +444,7 @@ std::string GNUstepGenericFormatter::FormatObjectIvar(Process *process,
   if (obj_addr == 0 || obj_addr == LLDB_INVALID_ADDRESS)
     return "nil";
   
-  // CRITICAL FIX: For object ivars, obj_addr is the ADDRESS where the object pointer is stored,
+  // For object ivars, obj_addr is the ADDRESS where the object pointer is stored,
   // not the object itself. We need to read the pointer first.
   Status error;
   lldb::addr_t obj_ptr = GNUstepRuntimeHelper::ReadPointer(process, obj_addr, error);
@@ -867,12 +833,10 @@ bool GNUstepGenericObjectSyntheticProvider::UpdateImpl() {
   std::vector<IvarInfo> all_ivars = formatter.CollectAllIvars(m_process, m_obj_addr);
   
   // Debug: Print number of ivars collected
-  // printf("GNUstepGenericObjectSyntheticProvider: Collected %zu ivars for object at 0x%llx\n");
   
   // Filter out the isa pointer and any other runtime-internal ivars
   for (const auto& ivar : all_ivars) {
     // Debug: Print each ivar
-  // printf("  Ivar: name='%s', type='%s', offset=%d\n");
     
     // Skip isa pointer - it's always the first ivar at offset 0 with type "@"
     if (ivar.name == "isa")
@@ -885,7 +849,6 @@ bool GNUstepGenericObjectSyntheticProvider::UpdateImpl() {
     m_ivars.push_back(ivar);
   }
   
-  // printf("GNUstepGenericObjectSyntheticProvider: After filtering, %zu ivars remain\n", m_ivars.size());
   
   return true;
 }
@@ -897,20 +860,18 @@ llvm::Expected<uint32_t> GNUstepGenericObjectSyntheticProvider::CalculateNumChil
 }
 
 lldb::ValueObjectSP GNUstepGenericObjectSyntheticProvider::GetChildAtIndex(uint32_t idx) {
-  // printf("GNUstepGenericObjectSyntheticProvider::GetChildAtIndex(%u) called, m_update_called=%d, m_ivars.size()=%zu\n", idx, m_update_called, m_ivars.size());
   
-  // CRITICAL FIX: Add safety checks to prevent crashes when expanding problematic objects
+  // Add safety checks to prevent crashes when expanding problematic objects
   if (!m_update_called || idx >= m_ivars.size())
     return nullptr;
   
-  // CRITICAL FIX: Check child cache first to avoid recreation and address reuse
+  // Check child cache first to avoid recreation and address reuse
   auto cache_iter = m_children_cache.find(idx);
   if (cache_iter != m_children_cache.end() && cache_iter->second) {
-    // printf("  Returning cached child at index %u: %p\n", idx, cache_iter->second.get());
     return cache_iter->second;
   }
   
-  // CRITICAL FIX: Check if backend has valid execution context
+  // Check if backend has valid execution context
   // Since m_backend is a reference, it's always valid, but we can check if it has a process
   Process *process = GNUstepRuntimeHelper::GetProcessFromValueObject(m_backend);
   if (!process) {
@@ -921,7 +882,7 @@ lldb::ValueObjectSP GNUstepGenericObjectSyntheticProvider::GetChildAtIndex(uint3
   
   // Create child for ivar
   
-  // CRITICAL FIX: Add bounds checking for ivar access to prevent buffer overrun
+  // Add bounds checking for ivar access to prevent buffer overrun
   if (ivar.name.empty() || ivar.type_encoding.empty()) {
     return nullptr;
   }
@@ -929,13 +890,13 @@ lldb::ValueObjectSP GNUstepGenericObjectSyntheticProvider::GetChildAtIndex(uint3
   // Determine the type for the ivar
   CompilerType ivar_type;
   
-  // CRITICAL FIX: Wrap execution context creation in safety checks
+  // Wrap execution context creation in safety checks
   ExecutionContextRef exe_ctx_ref = m_backend.GetExecutionContextRef();
   // Skip complex validation - if the ref is invalid, ExecutionContext will handle it safely
   
   ExecutionContext exe_ctx(exe_ctx_ref);
   
-  // CRITICAL FIX: Add safety checks around type system access to prevent crashes
+  // Add safety checks around type system access to prevent crashes
   CompilerType backend_type = m_backend.GetCompilerType();
   if (!backend_type.IsValid()) {
     return nullptr;
@@ -1016,7 +977,7 @@ lldb::ValueObjectSP GNUstepGenericObjectSyntheticProvider::GetChildAtIndex(uint3
     return nullptr;
   }
   
-  // CRITICAL FIX: Validate ivar value address before creating ValueObject
+  // Validate ivar value address before creating ValueObject
   if (ivar.value_addr == 0 || ivar.value_addr == LLDB_INVALID_ADDRESS) {
     return nullptr;
   }
@@ -1024,7 +985,7 @@ lldb::ValueObjectSP GNUstepGenericObjectSyntheticProvider::GetChildAtIndex(uint3
   // Create a value object for this ivar
   DataExtractor data;
   if (ivar.type_encoding[0] == '@') {
-    // CRITICAL FIX: For object types, read the pointer value first
+    // For object types, read the pointer value first
     Status error;
     lldb::addr_t obj_ptr = GNUstepRuntimeHelper::ReadPointer(m_process, ivar.value_addr, error);
     if (!error.Success() || obj_ptr == 0) {
@@ -1034,7 +995,6 @@ lldb::ValueObjectSP GNUstepGenericObjectSyntheticProvider::GetChildAtIndex(uint3
       lldb::ValueObjectSP result = ValueObject::CreateValueObjectFromData(ivar.name, data, exe_ctx, ivar_type);
       if (result) {
         m_children_cache[idx] = result;
-        // printf("  Created nil object child at index %u: %p\n", idx, result.get());
       }
       return result;
     }
@@ -1047,10 +1007,9 @@ lldb::ValueObjectSP GNUstepGenericObjectSyntheticProvider::GetChildAtIndex(uint3
     DataExtractor data(data_buffer_sp, m_process->GetByteOrder(), m_process->GetAddressByteSize());
     lldb::ValueObjectSP result = ValueObject::CreateValueObjectFromData(ivar.name, data, exe_ctx, ivar_type);
     
-    // CRITICAL FIX: Cache the result to avoid recreation
+    // Cache the result to avoid recreation
     if (result) {
       m_children_cache[idx] = result;
-      // printf("  Created and cached object child at index %u: %p (obj_ptr=0x%llx)\n", idx, result.get(), (unsigned long long)obj_ptr);
     }
     
     return result;
@@ -1064,16 +1023,15 @@ lldb::ValueObjectSP GNUstepGenericObjectSyntheticProvider::GetChildAtIndex(uint3
       DataExtractor data(data_buffer_sp, m_process->GetByteOrder(), m_process->GetAddressByteSize());
       lldb::ValueObjectSP result = ValueObject::CreateValueObjectFromData(ivar.name, data, exe_ctx, ivar_type);
       
-      // CRITICAL FIX: Cache the result
+      // Cache the result
       if (result) {
         m_children_cache[idx] = result;
-        // printf("  Created and cached pointer child at index %u: %p\n", idx, result.get());
       }
       
       return result;
     }
   } else {
-    // CRITICAL FIX: For primitive types, read the value and create from data
+    // For primitive types, read the value and create from data
     // Determine the size of the primitive type
     uint32_t value_size = ivar.size;
     if (value_size == 0) {
@@ -1097,10 +1055,9 @@ lldb::ValueObjectSP GNUstepGenericObjectSyntheticProvider::GetChildAtIndex(uint3
     DataExtractor data(data_buffer_sp, m_process->GetByteOrder(), m_process->GetAddressByteSize());
     lldb::ValueObjectSP result = ValueObject::CreateValueObjectFromData(ivar.name, data, exe_ctx, ivar_type);
     
-    // CRITICAL FIX: Cache the result
+    // Cache the result
     if (result) {
       m_children_cache[idx] = result;
-      // printf("  Created and cached primitive child at index %u: %p\n", idx, result.get());
     }
     
     return result;

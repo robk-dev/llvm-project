@@ -1,4 +1,4 @@
-//===-- GNUstepDictionaryFormatters.cpp -----------------------------------===//
+  //===-- GNUstepDictionaryFormatters.cpp -----------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -11,7 +11,6 @@
 #include "GNUstepArrayFormatters.h"
 #include "GNUstepSetFormatters.h"
 #include "GNUstepIdDispatcher.h"
-#include "GNUstepPerformanceTimer.h"
 #include "../GNUstepObjCRuntimeIntrospector.h"
 #include "lldb/ValueObject/ValueObject.h"
 #include "lldb/ValueObject/ValueObjectConstResult.h"
@@ -46,7 +45,7 @@ using namespace lldb_private::formatters;
 bool GNUstepNSDictionarySummaryProvider::FormatObject(ValueObject &valobj, 
                                                       Stream &stream, 
                                                       const TypeSummaryOptions &options) {
-  GNUSTEP_PERFORMANCE_TIMER("NSDictionarySummary");
+  // Performance timer removed - use LLDB profiling if needed
   
   if (!GNUstepRuntimeHelper::IsValidGNUstepObject(valobj)) {
     WriteErrorSummary(stream, "invalid object");
@@ -375,7 +374,7 @@ std::string GNUstepNSDictionarySummaryProvider::GetElementSummary(Process *proce
     class_name = introspector.GetClassName(isa_addr);
   }
   
-  // CRITICAL FIX: Handle arrays and numbers directly without creating ValueObjects
+  // Handle arrays and numbers directly without creating ValueObjects
   // This avoids issues with GetSummaryAsCString() on nested objects
   
   // Handle arrays directly  
@@ -458,7 +457,7 @@ std::string GNUstepNSDictionarySummaryProvider::GetElementSummary(Process *proce
         element_valobj_sp = ValueObject::CreateValueObjectFromData("element", data, exe_ctx, id_type);
       } else {
         // For regular objects, create from storage address (not the object address!)
-        // CRITICAL FIX: Use storage_addr which contains the pointer, not element_addr which IS the pointer
+        // Use storage_addr which contains the pointer, not element_addr which IS the pointer
         // This matches how arrays and dictionaries create their synthetic children
         element_valobj_sp = ValueObject::CreateValueObjectFromAddress("element", 
                                                                       storage_addr,  // Use storage address!
@@ -648,7 +647,7 @@ std::string GNUstepNSDictionarySummaryProvider::GetElementSummary(Process *proce
           CompilerType id_type = scratch_ts_sp->GetType(
               scratch_ts_sp->getASTContext().ObjCBuiltinIdTy);
           
-          // CRITICAL FIX: Create ValueObject from ADDRESS, not from data containing pointer
+          // Create ValueObject from ADDRESS, not from data containing pointer
           // This allows LLDB to properly resolve the object and apply formatters
           ExecutionContext exe_ctx;
           exe_scope->CalculateExecutionContext(exe_ctx);
@@ -697,7 +696,7 @@ std::string GNUstepNSDictionarySummaryProvider::GetElementSummary(Process *proce
       CompilerType id_type = scratch_ts_sp->GetType(
           scratch_ts_sp->getASTContext().ObjCBuiltinIdTy);
       
-      // CRITICAL FIX: Create ValueObject from ADDRESS, not from data containing pointer
+      // Create ValueObject from ADDRESS, not from data containing pointer
       // This allows LLDB to properly resolve nested objects and apply formatters recursively
       ExecutionContext exe_ctx;
       exe_scope->CalculateExecutionContext(exe_ctx);
@@ -717,13 +716,13 @@ std::string GNUstepNSDictionarySummaryProvider::GetElementSummary(Process *proce
       }
       
       if (valobj_sp) {
-        // CRITICAL FIX: Manually apply GNUstep formatters since LLDB may not
+        // Manually apply GNUstep formatters since LLDB may not
         // automatically select them for nested objects created programmatically
         
         // Try to get the class name to determine which formatter to use
         std::string class_name = introspector.GetClassName(isa_addr);
         
-        // CRITICAL FIX: For nested collections, prefer the ID dispatcher over direct formatter calls
+        // For nested collections, prefer the ID dispatcher over direct formatter calls
         // The ID dispatcher will properly route to the correct formatter and handle all edge cases
         // This provides consistent behavior and proper nested formatting
         
@@ -800,7 +799,7 @@ std::string GNUstepNSDictionarySummaryProvider::GetElementSummary(Process *proce
           return "{set}";
         }
         
-        // CRITICAL FIX: Try to get dynamic value to ensure proper type resolution
+        // Try to get dynamic value to ensure proper type resolution
         ValueObjectSP dynamic_valobj_sp = valobj_sp->GetDynamicValue(eDynamicCanRunTarget);
         if (dynamic_valobj_sp) {
           valobj_sp = dynamic_valobj_sp;
@@ -821,7 +820,7 @@ std::string GNUstepNSDictionarySummaryProvider::GetElementSummary(Process *proce
           context.ExitObject(element_addr);
           std::string result = dispatch_stream.GetString().str();
           
-          // CRITICAL FIX: Apply the same improved logic as above for value type detection
+          // Apply the same improved logic as above for value type detection
           bool is_already_quoted = (result.find("@\"") == 0 || (result.length() > 0 && result[0] == '"'));
           bool is_numeric = false;
           bool is_boolean = (result == "YES" || result == "NO" || result == "true" || result == "false");
@@ -1705,7 +1704,7 @@ lldb::ValueObjectSP GNUstepNSDictionarySyntheticProvider::GetChildAtIndex(uint32
     }
   } else {
     // For regular object pointers, create ValueObject from the storage address
-    // CRITICAL FIX: Use storage_addr (storage address) not object_ptr (actual object)
+    // Use storage_addr (storage address) not object_ptr (actual object)
     // This follows the same pattern as GNUstepNSArraySyntheticProvider - pass the address
     // where the pointer is stored, not the pointer value itself. LLDB will read from this
     // address and properly handle the object pointer (including dynamic type resolution).

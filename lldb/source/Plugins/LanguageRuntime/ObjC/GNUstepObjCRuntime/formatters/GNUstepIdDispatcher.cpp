@@ -15,17 +15,9 @@
 #include "GNUstepSetFormatters.h"
 #include "GNUstepDateFormatters.h"
 #include "GNUstepURLFormatters.h"
-#include "GNUstepErrorFormatters.h"
 #include "GNUstepDataFormatters.h"
 #include "GNUstepUUIDFormatters.h"
-#include "GNUstepJSONSerializationFormatters.h"
 #include "GNUstepGenericFormatter.h"
-#include "GNUstepLocaleFormatters.h"
-#include "GNUstepCalendarFormatters.h"
-#include "GNUstepProcessInfoFormatters.h"
-#include "GNUstepBundleFormatters.h"
-#include "GNUstepScannerFormatters.h"
-#include "GNUstepUserDefaultsFormatters.h"
 #include "../GNUstepObjCRuntimeIntrospector.h"
 #include "Plugins/LanguageRuntime/ObjC/ObjCLanguageRuntime.h"
 #include "lldb/Utility/Log.h"
@@ -181,9 +173,9 @@ bool lldb_private::formatters::GNUstepIdDispatcherFunction(ValueObject &valobj, 
     return GNUstepNSURLFormatterFunction(valobj, stream, options);
   }
   
-  // Check for NSError and variants
+  // Check for NSError and variants  
   if (class_name.find("Error") != std::string::npos) {
-    return GNUstepNSErrorFormatterFunction(valobj, stream, options);
+    return GNUstepGenericFormatterFunction(valobj, stream, options);
   }
   
   // Check for NSData and variants
@@ -199,40 +191,40 @@ bool lldb_private::formatters::GNUstepIdDispatcherFunction(ValueObject &valobj, 
   
   // Check for NSJSONSerialization and JSON-related classes
   if (class_name.find("JSON") != std::string::npos) {
-    return GNUstepNSJSONSerializationFormatterFunction(valobj, stream, options);
+    return GNUstepGenericFormatterFunction(valobj, stream, options);
   }
   
   // Check for NSLocale and variants
   if (class_name.find("Locale") != std::string::npos &&
       class_name.find("LocaleChangeNotification") == std::string::npos) {
-    return GNUstepNSLocaleFormatterFunction(valobj, stream, options);
+    return GNUstepGenericFormatterFunction(valobj, stream, options);
   }
   
   // Check for NSCalendar and variants
   if (class_name.find("Calendar") != std::string::npos &&
       class_name.find("CalendarDate") == std::string::npos) { // Exclude NSCalendarDate (handled by Date)
-    return GNUstepNSCalendarFormatterFunction(valobj, stream, options);
+    return GNUstepGenericFormatterFunction(valobj, stream, options);
   }
   
   // Check for NSProcessInfo and variants
   if (class_name.find("ProcessInfo") != std::string::npos ||
       class_name == "_NSConcreteProcessInfo") {
-    return GNUstepNSProcessInfoFormatterFunction(valobj, stream, options);
+    return GNUstepGenericFormatterFunction(valobj, stream, options);
   }
   
   // Check for NSBundle and variants
   if (class_name.find("Bundle") != std::string::npos) {
-    return GNUstepNSBundleFormatterFunction(valobj, stream, options);
+    return GNUstepGenericFormatterFunction(valobj, stream, options);
   }
   
   // Check for NSScanner and variants
   if (class_name.find("Scanner") != std::string::npos) {
-    return GNUstepNSScannerFormatterFunction(valobj, stream, options);
+    return GNUstepGenericFormatterFunction(valobj, stream, options);
   }
   
   // Check for NSUserDefaults and variants
   if (class_name.find("UserDefaults") != std::string::npos) {
-    return GNUstepNSUserDefaultsFormatterFunction(valobj, stream, options);
+    return GNUstepGenericFormatterFunction(valobj, stream, options);
   }
   
   // Check for NSValue (including NSNumber which inherits from NSValue)

@@ -1,4 +1,4 @@
-//===-- GNUstepObjCRuntimeIntrospector.h ------------------------*- C++ -*-===//
+//===-- GNUstepObjCRuntimeIntrospector.h ----------------------*- C++ -*-===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -12,8 +12,10 @@
 #include "lldb/lldb-private.h"
 #include "lldb/Target/Process.h"
 #include "lldb/Expression/FunctionCaller.h"
+#include "llvm/Support/Error.h"
 #include <memory>
 #include <unordered_map>
+#include <mutex>
 
 namespace lldb_private {
 
@@ -134,6 +136,11 @@ private:
   
   // Cache for ISA to class name mapping
   mutable std::unordered_map<lldb::addr_t, lldb_private::ConstString> m_isa_to_name_cache;
+  
+  // Phase B: Enhanced caching system for improved performance  
+  mutable std::unordered_map<std::string, lldb::addr_t> m_class_name_to_addr_cache;
+  mutable std::unordered_map<lldb::addr_t, std::vector<MethodInfo>> m_class_methods_cache;
+  mutable std::mutex m_cache_mutex;
   
   // New implementation methods for function calling
   lldb::addr_t CallRuntimeFunctionImpl(
