@@ -210,6 +210,9 @@ GNUstepObjCRuntime::GNUstepObjCRuntime(Process *process)
   Log *log = GetLog(LLDBLog::Process | LLDBLog::Types);
   LLDB_LOG(log, "GNUstepObjCRuntime constructor called");
   
+  // Initialize the introspector - this is essential for object introspection
+  m_introspector_up = std::make_unique<GNUstepObjCRuntimeIntrospector>(process);
+  
   // CRITICAL: Do absolutely NOTHING during construction that could trigger module loading
   // Just store the process and defer all initialization to ModulesDidLoad
   
@@ -244,6 +247,11 @@ void GNUstepObjCRuntime::ArmEarlyInstall() {
 void GNUstepObjCRuntime::ModulesDidLoad(const ModuleList &module_list) {
   Log *log = GetLog(LLDBLog::Language | LLDBLog::Types);
   LLDB_LOG(log, "[GNUstep] ModulesDidLoad: {0} modules loaded", module_list.GetSize());
+  
+  // Invalidate object description cache when modules load
+  // New modules may change object layouts, so cached descriptions may become stale
+  m_object_description_cache.descriptions.clear();
+  m_object_description_cache.last_invalidation = std::chrono::steady_clock::now();
   
   if (m_expression_hooks_installed) {
     return;
@@ -330,7 +338,7 @@ llvm::Error GNUstepObjCRuntime::GetObjectDescription(
   Log *log = GetLog(LLDBLog::Process | LLDBLog::Types);
   LLDB_LOG(log, "GNUstepObjCRuntime::GetObjectDescription(Value&) called");
   
-  // TASK 4: Add reentrancy guard to prevent recursive calls
+  // Add reentrancy guard to prevent recursive calls
   ReentrancyGuard guard(m_in_object_description);
   if (!guard.IsAcquired()) {
     LLDB_LOG(log, "GNUstepObjCRuntime: Reentrancy detected in GetObjectDescription, returning minimal info");
@@ -364,6 +372,15 @@ llvm::Error GNUstepObjCRuntime::GetObjectDescription(
     return llvm::Error::success();
   }
 
+  // Check cache first
+  m_object_description_cache.InvalidateIfStale();
+  auto cache_it = m_object_description_cache.descriptions.find(object_ptr);
+  if (cache_it != m_object_description_cache.descriptions.end()) {
+    LLDB_LOG(log, "GNUstepObjCRuntime: Found cached description for 0x{0:x}: {1}", object_ptr, cache_it->second);
+    str.Printf("%s", cache_it->second.c_str());
+    return llvm::Error::success();
+  }
+
   LLDB_LOG(log, "GNUstepObjCRuntime: Attempting to get description for object at 0x{0:x}", object_ptr);
 
   // Handle tagged pointers BEFORE expression evaluation
@@ -378,6 +395,10 @@ llvm::Error GNUstepObjCRuntime::GetObjectDescription(
       if (!decoded_string.empty()) {
         str.Printf("%s", decoded_string.c_str());
         LLDB_LOG(log, "GNUstepObjCRuntime: Decoded tagged string: {0}", decoded_string);
+        
+        // Cache the description
+        m_object_description_cache.descriptions[object_ptr] = decoded_string;
+        
         return llvm::Error::success();
       }
     } else if (tag == 1 || tag == 3) { // Tagged numbers
@@ -386,6 +407,11 @@ llvm::Error GNUstepObjCRuntime::GetObjectDescription(
         int64_t int_value = ((int64_t)object_ptr) >> 3;
         str.Printf("%" PRId64, int_value);
         LLDB_LOG(log, "GNUstepObjCRuntime: Decoded tagged int: {0}", int_value);
+        
+        // Cache the description
+        std::string int_desc = std::to_string(int_value);
+        m_object_description_cache.descriptions[object_ptr] = int_desc;
+        
         return llvm::Error::success();
       }
     }
@@ -395,6 +421,11 @@ llvm::Error GNUstepObjCRuntime::GetObjectDescription(
     if (!tag_class_name.empty()) {
       str.Printf("<%s tagged pointer: 0x%llx>", tag_class_name.c_str(), (unsigned long long)object_ptr);
       LLDB_LOG(log, "GNUstepObjCRuntime: Tagged pointer class name: {0}", tag_class_name);
+      
+      // Cache the description
+      std::string tag_desc = llvm::formatv("<{0} tagged pointer: 0x{1:x}>", tag_class_name, object_ptr);
+      m_object_description_cache.descriptions[object_ptr] = tag_desc;
+      
       return llvm::Error::success();
     }
   }
@@ -437,6 +468,10 @@ llvm::Error GNUstepObjCRuntime::GetObjectDescription(
     // Use FunctionCaller to safely call -description and UTF8String methods
     if (auto desc_result = GetObjectDescriptionViaFunctionCaller(object_ptr, exe_ctx)) {
       str << desc_result->c_str();
+      
+      // Cache the description
+      m_object_description_cache.descriptions[object_ptr] = *desc_result;
+      
       return llvm::Error::success();
     }
     
@@ -467,6 +502,10 @@ llvm::Error GNUstepObjCRuntime::GetObjectDescription(
         // Use FunctionCaller for UTF8String method instead of expression evaluation
         if (auto utf8_result = GetUTF8StringViaFunctionCaller(nsstring_addr, exe_ctx)) {
           str << utf8_result->c_str();
+          
+          // Cache the description
+          m_object_description_cache.descriptions[object_ptr] = *utf8_result;
+          
           return llvm::Error::success();
         }
         
@@ -489,6 +528,10 @@ llvm::Error GNUstepObjCRuntime::GetObjectDescription(
             if (read_error.Success() && bytes_read > 0) {
               str.Printf("%s", desc_buffer);
               LLDB_LOG(log, "GNUstepObjCRuntime: Successfully got description via expression evaluation: {0}", desc_buffer);
+              
+              // Cache the description
+              m_object_description_cache.descriptions[object_ptr] = std::string(desc_buffer);
+              
               return llvm::Error::success();
             }
           }
@@ -577,7 +620,7 @@ bool GNUstepObjCRuntime::GetDynamicTypeAndAddress(ValueObject &in_value,
   Log *log = GetLog(LLDBLog::Process | LLDBLog::Types);
   LLDB_LOG(log, "GNUstepObjCRuntime::GetDynamicTypeAndAddress called");
   
-  // TASK 4: Add reentrancy guard to prevent recursive calls
+  // Add reentrancy guard to prevent recursive calls
   ReentrancyGuard guard(m_in_dynamic_type_check);
   if (!guard.IsAcquired()) {
     LLDB_LOG(log, "GNUstepObjCRuntime: Reentrancy detected in GetDynamicTypeAndAddress, returning false");
@@ -1634,9 +1677,9 @@ void GNUstepObjCRuntime::EnsureCFStringCreateWithBytes() {
       break;
     }
   }
-  
-  // Research Agent Plan: Always install fallback for robust IR rewriting support
-  // Install fallback even when real function exists to ensure IR compatibility
+
+  // Install fallback for IR rewriting support
+  // even when real function exists to ensure IR compatibility
   LLDB_LOG(log, "Installing CFStringCreateWithBytes fallback for comprehensive IR support");
   
   // Create fallback implementation with the correct function name for IR linking
@@ -2249,7 +2292,7 @@ lldb::addr_t GNUstepObjCRuntime::CallRuntimeFunction(const char *function_name, 
   Log *log = GetLog(LLDBLog::Language | LLDBLog::Types);
   LLDB_LOG(log, "CallRuntimeFunction: {0}(\"{1}\")", function_name, string_arg);
   
-  // TASK 4: Add reentrancy guard to prevent recursive calls
+  // Add reentrancy guard to prevent recursive calls
   ReentrancyGuard guard(m_in_runtime_function_call);
   if (!guard.IsAcquired()) {
     LLDB_LOG(log, "CallRuntimeFunction: Reentrancy detected, returning INVALID_ADDRESS");
@@ -2279,12 +2322,21 @@ lldb::addr_t GNUstepObjCRuntime::CallRuntimeFunction(const char *function_name, 
   
   // Make sure we have execution context with a valid thread
   ExecutionContext exe_ctx(m_process);
-  if (!exe_ctx.HasThreadScope()) {
-    LLDB_LOG(log, "CallRuntimeFunction: No valid thread context");
-    return LLDB_INVALID_ADDRESS;
+  
+  // Try to get a suitable thread for execution
+  Thread *thread = exe_ctx.GetThreadPtr();
+  if (!thread) {
+    // If no thread in execution context, try to get a stopped thread from the process
+    ThreadSP thread_sp = m_process->GetThreadList().GetSelectedThread();
+    if (!thread_sp) {
+      thread_sp = m_process->GetThreadList().GetThreadAtIndex(0);
+    }
+    if (thread_sp) {
+      exe_ctx.SetThreadSP(thread_sp);
+      thread = thread_sp.get();
+    }
   }
   
-  Thread *thread = exe_ctx.GetThreadPtr();
   if (!thread) {
     LLDB_LOG(log, "CallRuntimeFunction: No thread available");
     return LLDB_INVALID_ADDRESS;
@@ -2485,7 +2537,7 @@ std::optional<std::string> GNUstepObjCRuntime::GetObjectDescriptionViaFunctionCa
   Log *log = GetLog(LLDBLog::Language);
   LLDB_LOG(log, "GNUstepObjCRuntime: GetObjectDescriptionViaFunctionCaller called for object 0x{0:x}", object_ptr);
   
-  // TASK 6: Check cache first
+  // Check cache first
   m_object_description_cache.InvalidateIfStale();
   auto cache_iter = m_object_description_cache.descriptions.find(object_ptr);
   if (cache_iter != m_object_description_cache.descriptions.end()) {

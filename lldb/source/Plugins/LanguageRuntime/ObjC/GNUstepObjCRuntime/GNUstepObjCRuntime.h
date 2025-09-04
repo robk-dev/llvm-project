@@ -160,7 +160,7 @@ private:
   bool m_in_dynamic_type_check = false;
   bool m_in_runtime_function_call = false;
   
-  // TASK 6: Caching for performance
+  // Caching for performance
   struct ObjectDescriptionCache {
     std::unordered_map<lldb::addr_t, std::string> descriptions;
     std::chrono::steady_clock::time_point last_invalidation = std::chrono::steady_clock::now();
