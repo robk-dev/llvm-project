@@ -4,14 +4,35 @@
         // ============================================
         // EXISTING CONFIGURATIONS
         // ============================================
+                {
+            "type": "lldb",
+            "request": "launch",
+            "name": "🚀 GNUstep/libobjc2 - Linux",
+            "program": "${workspaceFolder}/examples/custom_class_test",
+            "args": [],
+            "cwd": "${workspaceFolder}",
+            // "preLaunchTask": "build-all-examples-linux",
+            "initCommands": [
+                // "log enable lldb formatters",
+                "b main",
+                // "settings set target.language objc",
+                "type category enable gnustep/libobjc2",
+                "settings set target.process.stop-on-sharedlibrary-events false",
+                "settings set target.prefer-dynamic-value no-dynamic-values"
+            ],
+            "env": {
+                "LD_LIBRARY_PATH": "${workspaceFolder}/gnustep-install/lib:/usr/local/lib:/home/robk/code/llvm-project/build/lib",
+                "PATH": "/home/robk/code/llvm-project/build/bin:${workspaceFolder}/gnustep-install/bin:${env:PATH}"
+            }
+        },
         {
             "type": "lldb",
             "request": "launch",
-            "name": "🚀 GNUstep/libobjc2 - Debug (Fixed)",
-            "program": "${workspaceFolder}/examples/custom_class_test.exe",
+            "name": "🚀 GNUstep/libobjc2 - Windows",
+            "program": "${workspaceFolder}/examples/custom_class_test",
             "args": [],
             "console": "integratedTerminal",
-            // "preLaunchTask": "build-all-examples",
+            "preLaunchTask": "build-all-examples-linux",
             "initCommands": [
                 "settings set target.language objc",
                 "settings set target.process.stop-on-sharedlibrary-events false",
@@ -36,7 +57,7 @@
             "program": "${workspaceFolder}/examples/custom_class_test",
             "args": [],
             "cwd": "${workspaceFolder}",
-            "preLaunchTask": "build-all-examples",
+            "preLaunchTask": "build-all-examples-linux",
             "initCommands": [
                 "log enable -f ${workspaceFolder}/lldb_full.log -v lldb all",
                 "log enable -f ${workspaceFolder}/lldb_language.log -v lldb language",
@@ -67,7 +88,7 @@
             "program": "${workspaceFolder}/examples/foundation_test_simple",
             "args": [],
             "cwd": "${workspaceFolder}/examples",
-            "preLaunchTask": "build-all-examples",
+            "preLaunchTask": "build-all-examples-linux",
             "initCommands": [
                 // "log enable lldb formatters",
                 "settings set target.language objc",
@@ -93,7 +114,7 @@
                 "--gtest_filter=*"
             ],
             "cwd": "${workspaceFolder}/../build/tools/lldb/unittests/Language/ObjC/GNUstep",
-            "preLaunchTask": "build-all-examples",
+            "preLaunchTask": "build-all-examples-linux",
             "MIMode": "gdb",
             "setupCommands": [
                 {
@@ -130,7 +151,7 @@
                 "."
             ],
             "cwd": "${workspaceFolder}/../build/tools/lldb/test/API",
-            "preLaunchTask": "build-all-examples",
+            "preLaunchTask": "build-all-examples-linux",
             "env": {
                 "LD_LIBRARY_PATH": "/usr/local/lib:${workspaceFolder}/../build/lib:${workspaceFolder}/../build",
                 "PATH": "${workspaceFolder}/../build/bin:${workspaceFolder}/../build/bin:${env:PATH}",
@@ -156,7 +177,7 @@
                 "."
             ],
             "cwd": "${workspaceFolder}/../build/tools/lldb/test/API",
-            "preLaunchTask": "build-all-examples",
+            "preLaunchTask": "build-all-examples-linux",
             "env": {
                 "LD_LIBRARY_PATH": "/usr/local/lib:${workspaceFolder}/../build/lib:${workspaceFolder}/../build/lib",
                 "PATH": "${workspaceFolder}/../build/bin:${workspaceFolder}/../build/bin:${env:PATH}",
@@ -175,7 +196,7 @@
         //     "program": "${workspaceFolder}/examples/string_test",
         //     "args": [],
         //     "cwd": "${workspaceFolder}/examples",
-        //     "preLaunchTask": "build-all-examples",
+        //     "preLaunchTask": "build-all-examples-linux",
         //     "env": {
         //         "LD_LIBRARY_PATH": "/usr/local/lib:${workspaceFolder}/../build/lib",
         //         "PATH": "${workspaceFolder}/../build/bin:${env:PATH}"
@@ -188,7 +209,7 @@
         //     "program": "${workspaceFolder}/examples/test_nsnumber_comprehensive",
         //     "args": [],
         //     "cwd": "${workspaceFolder}/examples",
-        //     "preLaunchTask": "build-all-examples",
+        //     "preLaunchTask": "build-all-examples-linux",
         //     "env": {
         //         "LD_LIBRARY_PATH": "/usr/local/lib:${workspaceFolder}/../build/lib",
         //         "PATH": "${workspaceFolder}/../build/bin:${env:PATH}"
@@ -201,7 +222,7 @@
         //     "program": "${workspaceFolder}/examples/test_collections_formatter",
         //     "args": [],
         //     "cwd": "${workspaceFolder}/examples",
-        //     "preLaunchTask": "build-all-examples",
+        //     "preLaunchTask": "build-all-examples-linux",
         //     "env": {
         //         "LD_LIBRARY_PATH": "/usr/local/lib:${workspaceFolder}/../build/lib",
         //         "PATH": "${workspaceFolder}/../build/bin:${env:PATH}"
@@ -214,7 +235,7 @@
         //     "program": "${workspaceFolder}/examples/test_date",
         //     "args": [],
         //     "cwd": "${workspaceFolder}/examples",
-        //     "preLaunchTask": "build-all-examples",
+        //     "preLaunchTask": "build-all-examples-linux",
         //     "env": {
         //         "LD_LIBRARY_PATH": "/usr/local/lib:${workspaceFolder}/../build/lib",
         //         "PATH": "${workspaceFolder}/../build/bin:${env:PATH}"
@@ -227,7 +248,7 @@
         //     "program": "${workspaceFolder}/examples/test_url",
         //     "args": [],
         //     "cwd": "${workspaceFolder}/examples",
-        //     "preLaunchTask": "build-all-examples",
+        //     "preLaunchTask": "build-all-examples-linux",
         //     "env": {
         //         "LD_LIBRARY_PATH": "/usr/local/lib:${workspaceFolder}/../build/lib",
         //         "PATH": "${workspaceFolder}/../build/bin:${env:PATH}"
@@ -240,7 +261,7 @@
         //     "program": "${workspaceFolder}/examples/error_test",
         //     "args": [],
         //     "cwd": "${workspaceFolder}/examples",
-        //     "preLaunchTask": "build-all-examples",
+        //     "preLaunchTask": "build-all-examples-linux",
         //     "env": {
         //         "LD_LIBRARY_PATH": "/usr/local/lib:${workspaceFolder}/../build/lib",
         //         "PATH": "${workspaceFolder}/../build/bin:${env:PATH}"
@@ -253,7 +274,7 @@
         //     "program": "${workspaceFolder}/examples/test_data",
         //     "args": [],
         //     "cwd": "${workspaceFolder}/examples",
-        //     "preLaunchTask": "build-all-examples",
+        //     "preLaunchTask": "build-all-examples-linux",
         //     "env": {
         //         "LD_LIBRARY_PATH": "/usr/local/lib:${workspaceFolder}/../build/lib",
         //         "PATH": "${workspaceFolder}/../build/bin:${env:PATH}"
@@ -266,7 +287,7 @@
         //     "program": "${workspaceFolder}/examples/test_uuid",
         //     "args": [],
         //     "cwd": "${workspaceFolder}/examples",
-        //     "preLaunchTask": "build-all-examples",
+        //     "preLaunchTask": "build-all-examples-linux",
         //     "env": {
         //         "LD_LIBRARY_PATH": "/usr/local/lib:${workspaceFolder}/../build/lib",
         //         "PATH": "${workspaceFolder}/../build/bin:${env:PATH}"
@@ -279,7 +300,7 @@
         //     "program": "${workspaceFolder}/examples/test_indexset",
         //     "args": [],
         //     "cwd": "${workspaceFolder}/examples",
-        //     "preLaunchTask": "build-all-examples",
+        //     "preLaunchTask": "build-all-examples-linux",
         //     "env": {
         //         "LD_LIBRARY_PATH": "/usr/local/lib:${workspaceFolder}/../build/lib",
         //         "PATH": "${workspaceFolder}/../build/bin:${env:PATH}"
@@ -292,7 +313,7 @@
         //     "program": "${workspaceFolder}/examples/test_characterset",
         //     "args": [],
         //     "cwd": "${workspaceFolder}/examples",
-        //     "preLaunchTask": "build-all-examples",
+        //     "preLaunchTask": "build-all-examples-linux",
         //     "env": {
         //         "LD_LIBRARY_PATH": "/usr/local/lib:${workspaceFolder}/../build/lib",
         //         "PATH": "${workspaceFolder}/../build/bin:${env:PATH}"
@@ -305,7 +326,7 @@
         //     "program": "${workspaceFolder}/examples/test_decimalnumber",
         //     "args": [],
         //     "cwd": "${workspaceFolder}/examples",
-        //     "preLaunchTask": "build-all-examples",
+        //     "preLaunchTask": "build-all-examples-linux",
         //     "env": {
         //         "LD_LIBRARY_PATH": "/usr/local/lib:${workspaceFolder}/../build/lib",
         //         "PATH": "${workspaceFolder}/../build/bin:${env:PATH}"
@@ -321,7 +342,7 @@
         //     "program": "${workspaceFolder}/examples/test_synthetic_children",
         //     "args": [],
         //     "cwd": "${workspaceFolder}/examples",
-        //     "preLaunchTask": "build-all-examples",
+        //     "preLaunchTask": "build-all-examples-linux",
         //     "env": {
         //         "LD_LIBRARY_PATH": "/usr/local/lib:${workspaceFolder}/../build/lib",
         //         "PATH": "${workspaceFolder}/../build/bin:${env:PATH}"
@@ -337,7 +358,7 @@
         //     "program": "${workspaceFolder}/examples/${fileBasenameNoExtension}",
         //     "args": [],
         //     "cwd": "${workspaceFolder}/examples",
-        //     "preLaunchTask": "build-all-examples",
+        //     "preLaunchTask": "build-all-examples-linux",
         //     "env": {
         //         "LD_LIBRARY_PATH": "/usr/local/lib:${workspaceFolder}/../build/lib",
         //         "PATH": "${workspaceFolder}/../build/bin:${env:PATH}"

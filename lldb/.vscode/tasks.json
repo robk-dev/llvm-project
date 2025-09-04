@@ -2,6 +2,26 @@
     "version": "2.0.0",
     "tasks": [
         {
+            "label": "configure-full-development (CMake)",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "-S", "${workspaceFolder}/../llvm",
+                "-B", "${workspaceFolder}/../build",
+                "-G", "Ninja",
+                "-DCMAKE_BUILD_TYPE=Debug",
+                "-DLLVM_ENABLE_PROJECTS=clang;lldb",
+                "-DLLVM_ENABLE_ASSERTIONS=ON",
+                "-DLLDB_ENABLE_PYTHON=OFF",
+                "-DCMAKE_C_COMPILER=clang",
+                "-DCMAKE_CXX_COMPILER=clang++",
+                "-DLLVM_USE_LINKER=lld"
+            ],
+            "options": { "cwd": "${workspaceFolder}" },
+            "group": "build",
+            "problemMatcher": "$gcc"
+        },
+        {
             "label": "build-plugin",
             "type": "shell",
             "command": "ninja",
@@ -15,21 +35,28 @@
             "problemMatcher": "$gcc"
         },
         {
-            "label": "build-one-example",
+            "label": "examples: configure (CMake)",
             "type": "shell",
-            "command": "make",
+            "command": "cmake",
             "args": [
-                "simple_test.exe"
+                "-S", "${workspaceFolder}/examples",
+                "-B", "${workspaceFolder}/examples/build-examples",
+                "-DCMAKE_OBJC_COMPILER=clang"
             ],
             "options": {
-                "cwd": "${workspaceFolder}/examples",
-                "env": {
-                    "PATH": "/ucrt64/lib:/ucrt64/bin:${workspaceFolder}/../build/bin:${env:PATH}"
-                }
+                "cwd": "${workspaceFolder}"
             },
-            // "dependsOn": [
-            //     "build-full-development"
-            // ],
+            "group": "build"
+        },
+        {
+            "label": "examples: build all (CMake)",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "--build", "${workspaceFolder}/examples/build-examples",
+                "-j${config:numberOfJobs}"
+            ],
+            "dependsOn": ["examples: configure (CMake)", "build-full-development"],
             "group": {
                 "kind": "build",
                 "isDefault": true
@@ -37,7 +64,48 @@
             "problemMatcher": "$gcc"
         },
         {
-            "label": "build-all-examples",
+            "label": "examples: build one (CMake)",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "--build", "${workspaceFolder}/examples/build-examples",
+                "--target", "${input:exampleName}",
+                "-j${config:numberOfJobs}"
+            ],
+            "dependsOn": ["examples: configure (CMake)", "build-full-development"],
+            "group": "build",
+            "problemMatcher": "$gcc"
+        },
+        {
+            "label": "examples: debug one (CMake)",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "--build", "${workspaceFolder}/examples/build-examples",
+                "--target", "debug-${input:exampleName}",
+                "-j1"
+            ],
+            "dependsOn": ["examples: configure (CMake)", "examples: build one (CMake)"],
+            "group": "build",
+            "problemMatcher": "$gcc"
+        },
+        {
+            "label": "build-all-examples-linux",
+            "type": "shell",
+            "command": "make",
+            "args": ["all"],
+            "options": {
+                "cwd": "${workspaceFolder}/examples"
+            },
+            "dependsOn": ["build-plugin", "build-full-development"],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": "$gcc"
+        },
+        {
+            "label": "build-all-examples-windows",
             "type": "shell",
             "command": "make",
             "args": [
@@ -62,6 +130,7 @@
             "label": "build-full-development",
             "type": "shell",
             "dependsOn": [
+                "configure-full-development (CMake)",
                 "build-plugin"
             ],
             "command": "ninja",
@@ -77,6 +146,39 @@
                 "isDefault": false
             },
             "problemMatcher": "$gcc"
+        }
+    ]
+    ,
+    "inputs": [
+        {
+            "id": "exampleName",
+            "type": "pickString",
+            "description": "Select example to build",
+            "options": [
+                "simple_test",
+                "custom_class_test",
+                "foundation_test",
+                "string_test",
+                "test_nsstring_formatter",
+                "test_nsnumber_formatter",
+                "array_test",
+                "simple_array_test",
+                "test_nsnumber_comprehensive",
+                "test_nsarray_comprehensive",
+                "dictionary_test",
+                "nsset_test",
+                "test_collections_formatter",
+                "test_method_enum",
+                "test_indexset",
+                "test_decimalnumber",
+                "test_characterset",
+                "test_data_url_uuid",
+                "test_userdefaults",
+                "test_tagged_pointers",
+                "test_stepping_trampoline",
+                "test_object_checker",
+                "test_exception_resolver"
+            ]
         }
     ]
 }

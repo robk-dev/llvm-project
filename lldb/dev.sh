@@ -7,8 +7,12 @@ set -u  # Exit on undefined variables
 
 # Script configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BUILD_DIR="../build"
+# Repository root is one level above lldb/
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+LLVM_SRC_DIR="$REPO_ROOT/llvm"
+BUILD_DIR="$REPO_ROOT/build"
 EXAMPLES_DIR="$SCRIPT_DIR/examples"
+EXAMPLES_BUILD_DIR="$EXAMPLES_DIR/build-examples"
 # Build targets - using main LLDB targets instead of plugin-specific one
 BUILD_TARGETS="lldb lldb-server"
 LLDB_BIN="$BUILD_DIR/bin/lldb"
@@ -54,12 +58,7 @@ check_prerequisites() {
         exit 1
     fi
     
-    # Check build directory exists
-    if [[ ! -d "$BUILD_DIR" ]]; then
-        log_error "Build directory not found: $BUILD_DIR"
-        log_info "Run initial CMake configuration first."
-        exit 1
-    fi
+    # Build directory may not exist until we configure; that's okay for some commands
     
     # Check ninja is available
     if ! command -v ninja &> /dev/null; then
@@ -76,11 +75,36 @@ check_prerequisites() {
     log_success "Prerequisites check passed"
 }
 
+configure_full_build() {
+    log_section "🔧 Configuring top-level LLVM/LLDB (clang + Ninja) ..."
+    mkdir -p "$BUILD_DIR"
+    cmake -S "$LLVM_SRC_DIR" -B "$BUILD_DIR" -G Ninja \
+      -DCMAKE_BUILD_TYPE=Debug \
+      -DLLVM_ENABLE_PROJECTS="clang;lldb" \
+      -DLLVM_ENABLE_ASSERTIONS=ON \
+      -DLLDB_ENABLE_PYTHON=OFF \
+      -DCMAKE_C_COMPILER=clang \
+      -DCMAKE_CXX_COMPILER=clang++ \
+      -DLLVM_USE_LINKER=lld
+    log_success "Top-level configure complete"
+}
+
+# Configure and build examples via CMake
+build_examples_cmake() {
+    log_section "🔧 Configuring and building examples (CMake)..."
+    mkdir -p "$EXAMPLES_BUILD_DIR"
+    cmake -S "$EXAMPLES_DIR" -B "$EXAMPLES_BUILD_DIR" -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_OBJC_COMPILER=clang
+    cmake --build "$EXAMPLES_BUILD_DIR" -j$(nproc)
+    log_success "Examples built in $EXAMPLES_BUILD_DIR"
+}
+
 # Clean build function - full rebuild
 clean_build() {
     log_section "🧹 Cleaning and rebuilding GNUstep plugin..."
     check_prerequisites
     
+    rm -rf "$BUILD_DIR"
+    configure_full_build
     cd "$BUILD_DIR" || exit 1
     
     # Clean specific plugin artifacts
@@ -116,7 +140,11 @@ clean_build() {
 quick_build() {
     log_section "🔨 Quick rebuild..."
     check_prerequisites
-    
+    # Ensure configured
+    if [[ ! -f "$BUILD_DIR/CMakeCache.txt" ]]; then
+        log_warning "No CMakeCache.txt found; configuring first."
+        configure_full_build
+    fi
     cd "$BUILD_DIR" || exit 1
     
     log_info "Incremental build of GNUstep plugin..."
@@ -512,12 +540,15 @@ clean_examples() {
     
     log_info "Found $executable_count executable files to clean"
     
-    # Use Makefile clean if available
-    if [[ -f "Makefile" ]]; then
+    # If CMake build dir exists, clean it; otherwise fallback to Makefile clean if present
+    if [[ -d "$EXAMPLES_BUILD_DIR" ]]; then
+        log_info "Removing examples build directory $EXAMPLES_BUILD_DIR"
+        rm -rf "$EXAMPLES_BUILD_DIR"
+    elif [[ -f "Makefile" ]]; then
         log_info "Using Makefile clean target..."
         make clean
     else
-        log_warning "No Makefile found, performing manual cleanup..."
+        log_warning "No examples build found, performing manual cleanup..."
     fi
     
     # Additional cleanup - remove any remaining executables without extensions
@@ -567,22 +598,22 @@ debug_example() {
     # Default example if none specified
     if [[ -z "${example_name:-}" ]]; then
         example_name="custom_class_test"
-        log_info "No example specified, using default: $example_name"
+            log_info "No example specified, using default: $example_name"
     fi
     
-    # Build the example if it doesn't exist
-    if [[ ! -f "$example_name" ]]; then
-        log_info "Building example: $example_name"
-        if [[ -f "Makefile" ]]; then
-            make "$example_name"
-        else
-            log_error "Cannot build $example_name: No Makefile found"
+    # Build the example with CMake if the executable is missing in build dir
+    local exe_path="$EXAMPLES_BUILD_DIR/$example_name"
+    if [[ ! -x "$exe_path" ]]; then
+        log_info "Example $example_name not built; building via CMake..."
+        build_examples_cmake
+        if [[ ! -x "$exe_path" ]]; then
+            log_error "Failed to build $example_name"
             exit 1
         fi
     fi
     
     # Verify example is executable
-    if [[ ! -x "$example_name" ]]; then
+    if [[ ! -x "$EXAMPLES_BUILD_DIR/$example_name" ]]; then
         log_error "Example not executable: $example_name"
         exit 1
     fi
@@ -598,13 +629,13 @@ debug_example() {
     # Provide helpful commands based on example type
     case "$example_name" in
         "custom_class_test"|"custom_class_test_custom"|"custom_class_test_updated")
-            echo -e "\n${CYAN}Suggested LLDB commands for custom class testing:${NC}"
-            echo "  (lldb) b custom_class_test.m:228"
-            echo "  (lldb) run"
-            echo "  (lldb) po account          # Test custom object"
-            echo "  (lldb) po personInfo       # Test NSDictionary"  
-            echo "  (lldb) po fruits           # Test NSArray"
-            echo "  (lldb) po magicNumber      # Test NSNumber"
+                echo -e "\n${CYAN}Suggested LLDB commands for custom class testing:${NC}"
+                echo "  (lldb) b custom_class_test.m:228"
+                echo "  (lldb) run"
+                echo "  (lldb) po account          # Test custom object"
+                echo "  (lldb) po personInfo       # Test NSDictionary"  
+                echo "  (lldb) po fruits           # Test NSArray"
+                echo "  (lldb) po magicNumber      # Test NSNumber"
             ;;
         "test_nsnumber_comprehensive")
             echo -e "\n${CYAN}Suggested LLDB commands for NSNumber testing:${NC}"
@@ -634,7 +665,7 @@ debug_example() {
     echo -e "\n${GREEN}Starting LLDB session...${NC}\n"
     
     # Launch LLDB
-    "$LLDB_BIN" "$example_name"
+    "$LLDB_BIN" "$EXAMPLES_BUILD_DIR/$example_name"
 }
 
 # Build specific example
@@ -643,13 +674,11 @@ build_example() {
     
     log_section "🔨 Building example: $example_name"
     
-    cd "$EXAMPLES_DIR" || exit 1
-    
-    if [[ -f "Makefile" ]]; then
-        make "$example_name"
+    build_examples_cmake
+    if [[ -x "$EXAMPLES_BUILD_DIR/$example_name" ]]; then
         log_success "Built $example_name"
     else
-        log_error "No Makefile found in examples directory"
+        log_error "Failed to build $example_name"
         exit 1
     fi
 }
@@ -773,6 +802,9 @@ show_status() {
 # Main command dispatcher
 main() {
     case "${1:-help}" in
+        "configure")
+            configure_full_build
+            ;;
         "clean-build")
             clean_build
             ;;

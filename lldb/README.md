@@ -10,7 +10,19 @@
 ```
 
 ### Initial Configuration
+
+```
+./dev.sh configure
+./dev.sh build
+```
+
+- Linux
 ```bash
+# Clone LLVM project https://github.com/robk-dev/llvm-project.git
+# git clone https://github.com/llvm/llvm-project.git
+# cd llvm-project
+# check out branch `gnustep-lldb-plugin`
+# git checkout gnustep-lldb-plugin
 mkdir build
 cd build
 cmake -G Ninja ../llvm \
@@ -18,9 +30,13 @@ cmake -G Ninja ../llvm \
     -DLLVM_ENABLE_PROJECTS="clang;lldb;lld" \
     -DLLVM_ENABLE_ASSERTIONS=ON \
     -DLLDB_INCLUDE_TESTS=ON \
+    -DLLDB_ENABLE_PYTHON=ON \
+    -DPython3_EXECUTABLE=/usr/bin/python3 \
     -DBUILD_SHARED_LIBS=ON \
     -DLLVM_CCACHE_BUILD=ON \
     -DCMAKE_INSTALL_PREFIX=/usr/local/llvm-reldeb
+ninja lldb lldb-server -j$(nproc)
+ninja install-lldb install-lldb-server
 ```
 
 # For intensive LLVM development
@@ -46,11 +62,15 @@ cd /c/tools/msys64/home/kardjali/code/llvm-project/build && ninja install-lldb i
 ### Building Test Programs
 
 ```bash
-# Build all test examples
-cd /c/tools/msys64/home/kardjali/code/llvm-project/lldb/examples && make all
+# Build all examples with CMake (cross-platform)
+cmake -S ${PWD}/lldb/examples -B ${PWD}/lldb/examples/build-examples -DCMAKE_OBJC_COMPILER=clang
+cmake --build ${PWD}/lldb/examples/build-examples -j
 
-# Build specific test program
-cd /c/tools/msys64/home/kardjali/code/llvm-project/lldb/examples && make custom_class_test
+# Build a specific example
+cmake --build ${PWD}/lldb/examples/build-examples --target custom_class_test -j
+
+# Or use helper script
+./lldb/dev.sh build-example custom_class_test
 ```
 
 ## Testing the GNUstep Plugin
@@ -89,8 +109,8 @@ The project includes a comprehensive automated test suite with three levels of t
 
 #### Quick LLDB Validation
 ```bash
-cd /c/tools/msys64/home/kardjali/code/llvm-project/lldb/examples
-/c/tools/msys64/home/kardjali/code/llvm-project/build/bin/lldb custom_class_test
+# Using the dev script (builds LLDB if needed, builds examples via CMake, then launches LLDB):
+./lldb/dev.sh debug custom_class_test
 
 # In LLDB:
 (lldb) b custom_class_test.m:228

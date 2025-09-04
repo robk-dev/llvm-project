@@ -1,9 +1,8 @@
 {
-    "lldb.executable": "/c/code/llvm-project/build/bin/lldb.exe",
+    "lldb.library": "/home/robk/code/llvm-project/build/lib/liblldb.so",
     "lldb.adapterEnv": {
-        "LLDB_DEBUGSERVER_PATH": "/c/code/llvm-project/build/bin/lldb-server.exe",
-        // "PATH": "C:\\tools\\msys64\\ucrt64\\lib\\lib;C:\\tools\\msys64\\ucrt64\\lib\\bin;C:\\code\\llvm-project\\build\\bin"
-        "PATH": "/c/tools/msys64/ucrt64/lib/lib:/c/tools/msys64/ucrt64/lib/bin:/c/code/llvm-project/build/bin",
+        "LLDB_DEBUGSERVER_PATH": "/home/robk/code/llvm-project/build/bin/lldb-server",
+        "PATH": "/home/robk/code/llvm-project/build/bin:${env:PATH}"
     },
     "lldb.showDisassembly": "never",
     "lldb.evaluateForHovers": true,
@@ -33,8 +32,15 @@
         "chrono": "cpp",
         "variant": "cpp"
     },
-    "C_Cpp.default.configurationProvider": "ms-vscode.makefile-tools",
-    "makefile.configureOnOpen": true,
+    "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
+    "cmake.configureOnOpen": false,
+    "cmake.sourceDirectory": "${workspaceFolder}/examples",
+    "cmake.buildDirectory": "${workspaceFolder}/examples/build-examples",
+    "cmake.generator": "Ninja",
+    "cmake.configureSettings": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_OBJC_COMPILER": "clang"
+    },
     "lldb.displayFormat": "auto",
     "lldb.commandCompletions": true,
     "lldb.suppressUpdateNotifications": false,
