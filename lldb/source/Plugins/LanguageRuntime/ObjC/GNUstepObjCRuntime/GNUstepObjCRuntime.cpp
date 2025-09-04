@@ -1505,17 +1505,6 @@ void GNUstepObjCRuntime::InstallExpressionEvaluationHooks() {
           
           // Research Agent Plan: Unconditionally declare prototypes for comprehensive IR support
           InjectRuntimeFunctionDecls(*ts);
-          
-          // Also inject minimal Foundation interfaces so utility functions can compile
-          if (m_decl_vendor_up) {
-            LLDB_LOG(log, "Injecting minimal Foundation interfaces into scratch AST for language: {0}", 
-                     (lang == eLanguageTypeC) ? "C" : 
-                     (lang == eLanguageTypeObjC) ? "ObjC" : "ObjC++");
-            auto *gnustep_vendor = static_cast<GNUstepObjCDeclVendor *>(m_decl_vendor_up.get());
-            if (gnustep_vendor) {
-              gnustep_vendor->EnsureMinimalFoundationInterfaces(*ts);
-            }
-          }
         }
       }
     }
