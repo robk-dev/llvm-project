@@ -9,6 +9,7 @@
 #include "GNUstepObjCRuntime.h"
 #include "GNUstepObjCDeclVendor.h"
 #include "GNUstepClassDescriptor.h"
+#include "GNUstepObjCRuntimeUtilities.h"
 #include "formatters/GNUstepFormattersRegistry.h"
 #include "formatters/GNUstepIdDispatcher.h"
 #include "lldb/Core/PluginManager.h"
@@ -45,18 +46,7 @@
 using namespace lldb;
 using namespace lldb_private;
 using namespace lldb_private::formatters;
-
-// Utility function to create safe expression evaluation options
-// Especially important for Windows to avoid first-chance exception issues
-static EvaluateExpressionOptions MakeSafeExprOpts() {
-  EvaluateExpressionOptions opts;
-  opts.SetUnwindOnError(true);
-  opts.SetIgnoreBreakpoints(true);
-  opts.SetTryAllThreads(false);
-  opts.SetTimeout(std::chrono::microseconds(2500000));  // 2.5 seconds
-  opts.SetTrapExceptions(false);       // Critical on Windows
-  return opts;
-}
+using namespace lldb_private::gnustep_objc_runtime_utilities;
 
 void GNUstepObjCRuntime::Initialize() {
   PluginManager::RegisterPlugin(
@@ -339,7 +329,7 @@ llvm::Error GNUstepObjCRuntime::GetObjectDescription(
   LLDB_LOG(log, "GNUstepObjCRuntime::GetObjectDescription(Value&) called");
   
   // Add reentrancy guard to prevent recursive calls
-  ReentrancyGuard guard(m_in_object_description);
+  SimpleReentrancyGuard guard(m_in_object_description);
   if (!guard.IsAcquired()) {
     LLDB_LOG(log, "GNUstepObjCRuntime: Reentrancy detected in GetObjectDescription, returning minimal info");
     str.Printf("<object description recursion detected>");
@@ -476,7 +466,7 @@ llvm::Error GNUstepObjCRuntime::GetObjectDescription(
     }
     
     // Fallback: If FunctionCaller fails, try simple expression evaluation
-    EvaluateExpressionOptions options = MakeSafeExprOpts();
+    EvaluateExpressionOptions options = MakeSafeExpressionOptions();
     options.SetSuppressPersistentResult(true);
     options.SetKeepInMemory(false);
     options.SetUseDynamic(lldb::eDynamicCanRunTarget);
@@ -621,7 +611,7 @@ bool GNUstepObjCRuntime::GetDynamicTypeAndAddress(ValueObject &in_value,
   LLDB_LOG(log, "GNUstepObjCRuntime::GetDynamicTypeAndAddress called");
   
   // Add reentrancy guard to prevent recursive calls
-  ReentrancyGuard guard(m_in_dynamic_type_check);
+  SimpleReentrancyGuard guard(m_in_dynamic_type_check);
   if (!guard.IsAcquired()) {
     LLDB_LOG(log, "GNUstepObjCRuntime: Reentrancy detected in GetDynamicTypeAndAddress, returning false");
     return false;
@@ -1452,7 +1442,7 @@ void GNUstepObjCRuntime::InstallSubscriptMethodMapping() {
     (BOOL)[(Class)objc_getClass("NSDictionary") respondsToSelector:@selector(objectForKey:)]
   )";
   
-  EvaluateExpressionOptions options = MakeSafeExprOpts();
+  EvaluateExpressionOptions options = MakeSafeExpressionOptions();
   
   ValueObjectSP result_sp;
   Status error;
@@ -2293,7 +2283,7 @@ lldb::addr_t GNUstepObjCRuntime::CallRuntimeFunction(const char *function_name, 
   LLDB_LOG(log, "CallRuntimeFunction: {0}(\"{1}\")", function_name, string_arg);
   
   // Add reentrancy guard to prevent recursive calls
-  ReentrancyGuard guard(m_in_runtime_function_call);
+  SimpleReentrancyGuard guard(m_in_runtime_function_call);
   if (!guard.IsAcquired()) {
     LLDB_LOG(log, "CallRuntimeFunction: Reentrancy detected, returning INVALID_ADDRESS");
     return LLDB_INVALID_ADDRESS;
@@ -2342,20 +2332,10 @@ lldb::addr_t GNUstepObjCRuntime::CallRuntimeFunction(const char *function_name, 
     return LLDB_INVALID_ADDRESS;
   }
   
-  // Allocate memory for the string argument in the target process
-  Status error;
-  size_t string_len = strlen(string_arg) + 1;
-  lldb::addr_t string_addr = m_process->AllocateMemory(string_len, lldb::ePermissionsReadable, error);
-  if (string_addr == LLDB_INVALID_ADDRESS || error.Fail()) {
-    LLDB_LOG(log, "CallRuntimeFunction: Failed to allocate memory for string: {0}", error.AsCString());
-    return LLDB_INVALID_ADDRESS;
-  }
-  
-  // Write the string to target memory
-  size_t bytes_written = m_process->WriteMemory(string_addr, string_arg, string_len, error);
-  if (bytes_written != string_len || error.Fail()) {
-    LLDB_LOG(log, "CallRuntimeFunction: Failed to write string to memory: {0}", error.AsCString());
-    m_process->DeallocateMemory(string_addr);
+  // Allocate string in target memory using RAII helper
+  TargetStringAllocator string_alloc(m_process, string_arg);
+  if (!string_alloc.IsValid()) {
+    LLDB_LOG(log, "CallRuntimeFunction: Failed to allocate memory for string: {0}", string_alloc.GetError().AsCString());
     return LLDB_INVALID_ADDRESS;
   }
   
@@ -2367,14 +2347,13 @@ lldb::addr_t GNUstepObjCRuntime::CallRuntimeFunction(const char *function_name, 
   ValueList arg_values;
   Value string_value;
   string_value.SetValueType(Value::ValueType::LoadAddress);
-  string_value.GetScalar() = string_addr;
+  string_value.GetScalar() = string_alloc.GetAddress();
   arg_values.PushValue(string_value);
   
   // Get the ABI for function calling conventions
   ABISP abi_sp = m_process->GetABI();
   if (!abi_sp) {
     LLDB_LOG(log, "CallRuntimeFunction: No ABI available");
-    m_process->DeallocateMemory(string_addr);
     return LLDB_INVALID_ADDRESS;
   }
   
@@ -2382,7 +2361,6 @@ lldb::addr_t GNUstepObjCRuntime::CallRuntimeFunction(const char *function_name, 
   TypeSystemClangSP ts = ScratchTypeSystemClang::GetForTarget(m_process->GetTarget());
   if (!ts) {
     LLDB_LOG(log, "CallRuntimeFunction: No type system available");
-    m_process->DeallocateMemory(string_addr);
     return LLDB_INVALID_ADDRESS;
   }
   
@@ -2403,16 +2381,12 @@ lldb::addr_t GNUstepObjCRuntime::CallRuntimeFunction(const char *function_name, 
   
   if (!call_plan_sp || !call_plan_sp->ValidatePlan(nullptr)) {
     LLDB_LOG(log, "CallRuntimeFunction: Failed to create valid call plan");
-    m_process->DeallocateMemory(string_addr);
     return LLDB_INVALID_ADDRESS;
   }
   
   // Execute the function call
   DiagnosticManager diagnostics;
   ExpressionResults result = m_process->RunThreadPlan(exe_ctx, call_plan_sp, EvaluateExpressionOptions(), diagnostics);
-  
-  // Clean up the allocated string memory
-  m_process->DeallocateMemory(string_addr);
   
   if (result != eExpressionCompleted) {
     LLDB_LOG(log, "CallRuntimeFunction: Function call failed with result {0}: {1}", 

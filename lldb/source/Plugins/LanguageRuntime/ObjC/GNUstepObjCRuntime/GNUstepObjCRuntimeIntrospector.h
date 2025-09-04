@@ -12,6 +12,7 @@
 #include "lldb/lldb-private.h"
 #include "lldb/Target/Process.h"
 #include "lldb/Expression/FunctionCaller.h"
+#include "GNUstepObjCRuntimeUtilities.h"
 #include <memory>
 #include <unordered_map>
 #include <atomic>
@@ -23,6 +24,9 @@ class ExecutionContext;
 class CompilerType;
 class ValueList;
 class Status;
+
+// Import the utilities namespace for convenience
+using namespace gnustep_objc_runtime_utilities;
 
 class GNUstepObjCRuntimeIntrospector {
 public:
@@ -95,27 +99,6 @@ public:
   lldb::addr_t CallRuntimeFunction(const std::string &function_name,
                                    const std::vector<lldb::addr_t> &args);
 
-  /// RAII guard for preventing reentrancy in runtime calls
-  class ReentrancyGuard {
-  public:
-    explicit ReentrancyGuard(std::atomic<bool> &flag) : m_flag(flag) {
-      bool expected = false;
-      m_acquired = m_flag.compare_exchange_strong(expected, true);
-    }
-    
-    ~ReentrancyGuard() {
-      if (m_acquired) {
-        m_flag.store(false);
-      }
-    }
-    
-    bool IsAcquired() const { return m_acquired; }
-    
-  private:
-    std::atomic<bool> &m_flag;
-    bool m_acquired;
-  };
-
 private:
   Process *m_process;
   uint32_t m_address_size;
@@ -174,8 +157,6 @@ private:
       const ValueList &arg_types,
       ExecutionContext &exe_ctx,
       Status &error) const;
-      
-  bool SetupExecutionContext(ExecutionContext &exe_ctx) const;
   
   // Helper to get modules
   lldb::ModuleSP GetObjCModule() const;
