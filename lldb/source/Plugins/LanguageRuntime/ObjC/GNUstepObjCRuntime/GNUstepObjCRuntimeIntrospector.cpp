@@ -362,21 +362,22 @@ lldb::addr_t GNUstepObjCRuntimeIntrospector::CallRuntimeFunctionImpl(
     const ValueList &args,
     ExecutionContext &exe_ctx,
     Status &error) const {
+  using namespace gnustep_objc_runtime_utilities;
     
-  Log *log = GetLog(LLDBLog::Language);
-  LLDB_LOG(log, "[GNUstep] CallRuntimeFunctionImpl: Starting function call for {0}", function_name);
+  GNUStepLogger::ScopedLogger logger("CallRuntimeFunctionImpl", "[GNUstep]");
+  logger.LogMessage("Starting function call for {0}", function_name);
     
   // Get or create the function caller
   std::unique_ptr<FunctionCaller> &caller = 
       GetOrCreateFunctionCaller(function_name, return_type, args, 
                                 exe_ctx, error);
   if (!caller || error.Fail()) {
-    LLDB_LOG(log, "[GNUstep] CallRuntimeFunctionImpl: Failed to get/create function caller for {0}: {1}",
-             function_name, error.Fail() ? error.AsCString() : "null caller");
+    logger.LogMessage("Failed to get/create function caller for {0}: {1}",
+                     function_name, error.Fail() ? error.AsCString() : "null caller");
     return LLDB_INVALID_ADDRESS;
   }
   
-  LLDB_LOG(log, "[GNUstep] CallRuntimeFunctionImpl: Got function caller for {0}", function_name);
+  logger.LogMessage("Got function caller for {0}", function_name);
   
   // Prepare for execution
   DiagnosticManager diagnostics;
@@ -689,46 +690,26 @@ lldb::addr_t GNUstepObjCRuntimeIntrospector::GetRuntimeFunctionAddress(const cha
     const char *module_name = module_sp->GetFileSpec().GetFilename().GetCString();
     if (!module_name) continue;
 
-    // Check if this is a GNUstep runtime module
+    // Check if this is a GNUstep runtime module (prefer these)
     if (strstr(module_name, "libobjc.so") || 
         strstr(module_name, "libobjc2") ||
         strstr(module_name, "libgnustep-base.so")) {
-
-      const Symbol *symbol = module_sp->FindFirstSymbolWithNameAndType(
-          ConstString(function_name), eSymbolTypeCode);
-
-      if (symbol) {
-        lldb::addr_t addr = symbol->GetAddress().GetLoadAddress(&target);
-        if (addr != LLDB_INVALID_ADDRESS) {
-          Log *log = GetLog(LLDBLog::Language);
-          LLDB_LOG(log, "[GNUstepIntrospector] Resolved {0} to 0x{1:x} in {2}",
-                   function_name, addr, module_name);
-          return addr;
-        }
+      
+      SymbolResolver resolver(target);
+      if (const Symbol *symbol = resolver.FindSymbolWithFallback(
+              ConstString(function_name), eSymbolTypeCode, module_sp)) {
+        return symbol->GetAddress().GetLoadAddress(&target);
       }
     }
   }
-
-  // Fallback: try to find in any module (for system functions like 'free')
-  SymbolContextList sc_list;
-  target.GetImages().FindSymbolsWithNameAndType(
-      ConstString(function_name), eSymbolTypeCode, sc_list);
-
-  if (sc_list.GetSize() > 0) {
-    SymbolContext sc;
-    if (sc_list.GetContextAtIndex(0, sc) && sc.symbol) {
-      lldb::addr_t addr = sc.symbol->GetAddress().GetLoadAddress(&target);
-      if (addr != LLDB_INVALID_ADDRESS) {
-        Log *log = GetLog(LLDBLog::Language);
-        LLDB_LOG(log, "[GNUstepIntrospector] Resolved {0} to 0x{1:x} (fallback search)",
-                 function_name, addr);
-        return addr;
-      }
-    }
+  // Fallback: use symbol resolver for global search
+  SymbolResolver resolver(target);
+  if (const Symbol *symbol = resolver.FindSymbolWithFallback(
+          ConstString(function_name), eSymbolTypeCode)) {
+    return symbol->GetAddress().GetLoadAddress(&target);
   }
 
-  Log *log = GetLog(LLDBLog::Language);
-  LLDB_LOG(log, "[GNUstepIntrospector] Failed to resolve symbol: {0}", function_name);
+  // SymbolResolver already logs failure, just return
   return LLDB_INVALID_ADDRESS;
 }
 

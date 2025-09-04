@@ -53,6 +53,93 @@ private:
   void Cleanup();
 };
 
+/// RAII helper for allocating typed data in target process memory
+template<typename T>
+class TargetDataAllocator {
+public:
+  explicit TargetDataAllocator(Process *process) 
+      : m_process(process), m_address(LLDB_INVALID_ADDRESS), m_needs_cleanup(false) {}
+  
+  ~TargetDataAllocator() {
+    if (m_needs_cleanup && m_address != LLDB_INVALID_ADDRESS) {
+      m_process->DeallocateMemory(m_address);
+    }
+  }
+  
+  // Non-copyable, movable
+  TargetDataAllocator(const TargetDataAllocator&) = delete;
+  TargetDataAllocator& operator=(const TargetDataAllocator&) = delete;
+  TargetDataAllocator(TargetDataAllocator&& other) noexcept 
+      : m_process(other.m_process), m_address(other.m_address), m_needs_cleanup(other.m_needs_cleanup) {
+    other.m_needs_cleanup = false;
+  }
+  
+  /// Allocates memory and optionally writes initial value
+  Status Allocate(const T* initial_value = nullptr) {
+    Status error;
+    m_address = m_process->AllocateMemory(
+        sizeof(T), 
+        lldb::ePermissionsReadable | lldb::ePermissionsWritable, 
+        error);
+    
+    if (error.Fail() || m_address == LLDB_INVALID_ADDRESS) {
+      return error;
+    }
+    
+    m_needs_cleanup = true;
+    
+    if (initial_value) {
+      size_t bytes_written = m_process->WriteMemory(m_address, initial_value, sizeof(T), error);
+      if (bytes_written != sizeof(T) || error.Fail()) {
+        return error;
+      }
+    }
+    
+    return error;
+  }
+  
+  /// Writes value to allocated memory
+  Status WriteValue(const T& value) {
+    if (m_address == LLDB_INVALID_ADDRESS) {
+      return Status("Memory not allocated");
+    }
+    
+    Status error;
+    size_t bytes_written = m_process->WriteMemory(m_address, &value, sizeof(T), error);
+    if (bytes_written != sizeof(T) || error.Fail()) {
+      return error;
+    }
+    
+    return error;
+  }
+  
+  /// Reads value from allocated memory
+  Status ReadValue(T& value) {
+    if (m_address == LLDB_INVALID_ADDRESS) {
+      return Status("Memory not allocated");
+    }
+    
+    Status error;
+    size_t bytes_read = m_process->ReadMemory(m_address, &value, sizeof(T), error);
+    if (bytes_read != sizeof(T) || error.Fail()) {
+      return error;
+    }
+    
+    return error;
+  }
+  
+  /// Get the allocated memory address
+  lldb::addr_t GetAddress() const { return m_address; }
+  
+  /// Check if allocation was successful
+  bool IsValid() const { return m_address != LLDB_INVALID_ADDRESS; }
+
+private:
+  Process *m_process;
+  lldb::addr_t m_address;
+  bool m_needs_cleanup;
+};
+
 /// Thread-safe reentrancy guard using atomic operations
 /// This version works correctly across threads unlike the bool version
 class ReentrancyGuard {
@@ -133,6 +220,55 @@ private:
   std::unordered_map<std::string, lldb::addr_t> m_symbol_cache;
   
   lldb::addr_t ResolveSymbol(const char *symbol_name);
+};
+
+/// Logging helpers for consistent formatting
+class GNUStepLogger {
+public:
+  // Get logger with standard GNUstep categories
+  static lldb_private::Log* GetLanguageLog();
+  static lldb_private::Log* GetProcessLog();
+  
+  // Scoped logging with automatic prefix
+  class ScopedLogger {
+  public:
+    ScopedLogger(const char* function_name, const char* prefix = "[GNUstep]");
+    ~ScopedLogger();
+    
+    template<typename... Args>
+    void LogMessage(const char* format, Args&&... args) const {
+      if (m_log) {
+        LLDB_LOG(m_log, "{0} {1}: {2}", m_prefix, m_function_name, 
+                 llvm::formatv(format, std::forward<Args>(args)...));
+      }
+    }
+    
+  private:
+    lldb_private::Log* m_log;
+    std::string m_prefix;
+    std::string m_function_name;
+  };
+};
+
+/// Symbol resolution helper with error handling
+class SymbolResolver {
+public:
+  SymbolResolver(Target& target) : m_target(target) {}
+  
+  // Find symbol with fallback search and logging
+  const Symbol* FindSymbolWithFallback(
+      const ConstString& symbol_name,
+      lldb::SymbolType symbol_type = lldb::eSymbolTypeCode,
+      lldb::ModuleSP preferred_module = nullptr);
+  
+  // Find symbols across all modules with logging
+  void FindSymbolsAcrossModules(
+      const ConstString& symbol_name,
+      lldb::SymbolType symbol_type,
+      SymbolContextList& sc_list);
+      
+private:
+  Target& m_target;
 };
 
 } // namespace gnustep_objc_runtime_utilities

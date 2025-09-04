@@ -245,5 +245,94 @@ lldb::addr_t RuntimeSymbolCache::ResolveSymbol(const char *symbol_name) {
   return LLDB_INVALID_ADDRESS;
 }
 
+/// Logging helper implementations
+lldb_private::Log* GNUStepLogger::GetLanguageLog() {
+  return GetLog(LLDBLog::Language);
+}
+
+lldb_private::Log* GNUStepLogger::GetProcessLog() {
+  return GetLog(LLDBLog::Process | LLDBLog::Types);
+}
+
+GNUStepLogger::ScopedLogger::ScopedLogger(const char* function_name, const char* prefix)
+    : m_log(GetLanguageLog()), m_prefix(prefix), m_function_name(function_name) {
+  if (m_log) {
+    LLDB_LOG(m_log, "{0} {1}: Starting", m_prefix, m_function_name);
+  }
+}
+
+GNUStepLogger::ScopedLogger::~ScopedLogger() {
+  if (m_log) {
+    LLDB_LOG(m_log, "{0} {1}: Finished", m_prefix, m_function_name);
+  }
+}
+
+/// Symbol resolution helper implementations
+const Symbol* SymbolResolver::FindSymbolWithFallback(
+    const ConstString& symbol_name,
+    lldb::SymbolType symbol_type,
+    lldb::ModuleSP preferred_module) {
+  
+  lldb_private::Log *log = GetLog(LLDBLog::Language);
+  
+  // Try preferred module first
+  if (preferred_module) {
+    if (const Symbol *symbol = preferred_module->FindFirstSymbolWithNameAndType(
+            symbol_name, symbol_type)) {
+      if (log) {
+        LLDB_LOG(log, "[GNUstepSymbolResolver] Found {0} in preferred module {1} at 0x{2:x}",
+                 symbol_name.GetCString(), 
+                 preferred_module->GetFileSpec().GetFilename().GetCString(),
+                 symbol->GetLoadAddress(&m_target));
+      }
+      return symbol;
+    }
+  }
+  
+  // Fallback to global search
+  SymbolContextList sc_list;
+  m_target.GetImages().FindSymbolsWithNameAndType(
+      symbol_name, symbol_type, sc_list);
+  
+  if (sc_list.GetSize() > 0) {
+    SymbolContext sc;
+    sc_list.GetContextAtIndex(0, sc);
+    if (sc.symbol) {
+      if (log) {
+        LLDB_LOG(log, "[GNUstepSymbolResolver] Found {0} via fallback search at 0x{1:x}",
+                 symbol_name.GetCString(),
+                 sc.symbol->GetLoadAddress(&m_target));
+      }
+      return sc.symbol;
+    }
+  }
+  
+  if (log) {
+    LLDB_LOG(log, "[GNUstepSymbolResolver] Failed to resolve symbol: {0}", 
+             symbol_name.GetCString());
+  }
+  return nullptr;
+}
+
+void SymbolResolver::FindSymbolsAcrossModules(
+    const ConstString& symbol_name,
+    lldb::SymbolType symbol_type,
+    SymbolContextList& sc_list) {
+  
+  lldb_private::Log *log = GetLog(LLDBLog::Language);
+  if (log) {
+    LLDB_LOG(log, "[GNUstepSymbolResolver] Searching for {0} across all modules",
+             symbol_name.GetCString());
+  }
+  
+  m_target.GetImages().FindSymbolsWithNameAndType(
+      symbol_name, symbol_type, sc_list);
+  
+  if (log) {
+    LLDB_LOG(log, "[GNUstepSymbolResolver] Found {0} instances of {1}",
+             sc_list.GetSize(), symbol_name.GetCString());
+  }
+}
+
 } // namespace gnustep_objc_runtime_utilities
 } // namespace lldb_private

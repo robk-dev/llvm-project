@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "GNUstepRuntimeV2API.h"
+#include "GNUstepObjCRuntimeUtilities.h"
 
 #include "lldb/Core/Module.h"
 #include "lldb/Core/Section.h"
@@ -297,28 +298,19 @@ GNUstepRuntimeV2API::GetAllClasses() {
   
   Log *log = GetLog(LLDBLog::Language);
   LLDB_LOG(log, "[{0}] Calling objc_copyClassList via FunctionCaller", LLDB_LOG_TAG);
+  using namespace gnustep_objc_runtime_utilities;
   
-  // Step 1: Allocate memory for the count parameter
-  Status error;
-  addr_t count_addr = m_process->AllocateMemory(sizeof(unsigned int), 
-                                                ePermissionsReadable | ePermissionsWritable, 
-                                                error);
-  if (error.Fail() || count_addr == LLDB_INVALID_ADDRESS) {
-    return CreateError("Failed to allocate memory for count parameter");
-  }
-  
-  // Initialize count to 0
+  // Step 1: Allocate memory for the count parameter using RAII
+  TargetDataAllocator<unsigned int> count_allocator(m_process);
   unsigned int zero = 0;
-  size_t bytes_written = m_process->WriteMemory(count_addr, &zero, sizeof(zero), error);
-  if (bytes_written != sizeof(zero) || error.Fail()) {
-    m_process->DeallocateMemory(count_addr);
-    return CreateError("Failed to initialize count parameter");
+  Status error = count_allocator.Allocate(&zero);
+  if (error.Fail()) {
+    return CreateError("Failed to allocate and initialize count parameter");
   }
   
   // Step 2: Call objc_copyClassList(&count) using FunctionCaller
   addr_t objc_copyClassList_addr = ResolveRuntimeSymbol("objc_copyClassList");
   if (objc_copyClassList_addr == LLDB_INVALID_ADDRESS) {
-    m_process->DeallocateMemory(count_addr);
     return CreateError("Could not resolve objc_copyClassList symbol");
   }
   
@@ -329,7 +321,6 @@ GNUstepRuntimeV2API::GetAllClasses() {
     void_ptr_type = ts->GetBasicType(eBasicTypeVoid).GetPointerType();
     uint_ptr_type = ts->GetBasicType(eBasicTypeUnsignedInt).GetPointerType();
   } else {
-    m_process->DeallocateMemory(count_addr);
     return CreateError("Could not get type system");
   }
   
@@ -339,7 +330,7 @@ GNUstepRuntimeV2API::GetAllClasses() {
   
   Value count_arg;
   count_arg.SetValueType(Value::ValueType::LoadAddress);
-  count_arg.GetScalar() = count_addr;
+  count_arg.GetScalar() = count_allocator.GetAddress();
   count_arg.SetCompilerType(uint_ptr_type);
   
   ValueList args;
@@ -354,7 +345,6 @@ GNUstepRuntimeV2API::GetAllClasses() {
           eLanguageTypeC, return_type, function_address, args, "objc_copyClassList", fc_error));
           
   if (!function_caller_up || fc_error.Fail()) {
-    m_process->DeallocateMemory(count_addr);
     return CreateError("Could not create function caller: %s", fc_error.AsCString());
   }
   
@@ -365,7 +355,6 @@ GNUstepRuntimeV2API::GetAllClasses() {
   ValueList mutable_args(args);
   if (!function_caller_up->WriteFunctionArguments(exe_ctx, wrapper_struct_addr, 
                                                    mutable_args, diagnostics)) {
-    m_process->DeallocateMemory(count_addr);
     return CreateError("Failed to write function arguments");
   }
   
@@ -387,7 +376,6 @@ GNUstepRuntimeV2API::GetAllClasses() {
   }
   
   if (results != eExpressionCompleted) {
-    m_process->DeallocateMemory(count_addr);
     return CreateError("objc_copyClassList function call failed");
   }
   
@@ -396,10 +384,10 @@ GNUstepRuntimeV2API::GetAllClasses() {
   
   // Read the count that was written by objc_copyClassList
   unsigned int count = 0;
-  size_t bytes_read = m_process->ReadMemory(count_addr, &count, sizeof(count), error);
-  m_process->DeallocateMemory(count_addr);  // Clean up count memory
+  error = count_allocator.ReadValue(count);
+  // RAII automatically cleans up count memory when function exits
   
-  if (bytes_read != sizeof(count) || error.Fail()) {
+  if (error.Fail()) {
     if (class_list_addr != LLDB_INVALID_ADDRESS) {
       // Free the class list if we got one
       CallFreeFunction(class_list_addr);
