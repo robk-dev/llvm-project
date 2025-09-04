@@ -93,14 +93,11 @@ lldb::addr_t GNUstepObjCRuntimeIntrospector::GetISAFromObject(ValueObject &valob
 
 std::string GNUstepObjCRuntimeIntrospector::GetClassName(lldb::addr_t isa_addr) {
   if (!m_process || isa_addr == LLDB_INVALID_ADDRESS) {
-    // printf("[DEBUG] GetClassName: Invalid process or ISA address\n");
     return "";
   }
   
   // Ensure runtime symbols are loaded for enhanced introspection
   EnsureRuntimeSymbolsLoaded();
-  
-  // printf("[DEBUG] GetClassName: Looking up class name for ISA 0x%llx\n", (unsigned long long)isa_addr);
   
   // Check if this is a tagged pointer
   if (IsTaggedPointer(isa_addr)) {
@@ -133,28 +130,21 @@ std::string GNUstepObjCRuntimeIntrospector::GetClassName(lldb::addr_t isa_addr) 
   // The 'name' field is at an offset of 2 * address_size from the start of the
   // class structure.
   const lldb::addr_t name_ptr_addr = isa_addr + (2 * m_address_size);
-  
-  // printf("[DEBUG] GetClassName: Reading name pointer from address 0x%llx\n", (unsigned long long)name_ptr_addr);
 
   const lldb::addr_t name_addr = m_process->ReadPointerFromMemory(name_ptr_addr, error);
 
   if (error.Fail() || name_addr == LLDB_INVALID_ADDRESS) {
-    // printf("[DEBUG] GetClassName: Failed to read name pointer: %s\n", error.AsCString());
     return "";
   }
 
   // Now read the C-string from the 'name' pointer.
-  // printf("[DEBUG] GetClassName: Reading C-string from address 0x%llx\n", (unsigned long long)name_addr);
-  
   std::string class_name;
   m_process->ReadCStringFromMemory(name_addr, class_name, error);
 
   if (error.Fail()) {
-    // printf("[DEBUG] GetClassName: Failed to read class name string: %s\n", error.AsCString());
     return "";
   }
 
-  // printf("[DEBUG] GetClassName: Found class name: %s\n", class_name.c_str());
   return class_name;
 }
 
@@ -280,33 +270,22 @@ bool GNUstepObjCRuntimeIntrospector::IsValidGNUstepRuntime() {
 lldb::addr_t GNUstepObjCRuntimeIntrospector::CallRuntimeFunction(
     const std::string &function_name, const std::vector<lldb::addr_t> &args) {
   
-  Log *log = GetLog(LLDBLog::Language);
-  LLDB_LOG(log, "[GNUstep] CallRuntimeFunction: {0} with {1} args", function_name, args.size());
-  
   if (!m_process || function_name.empty()) {
-    LLDB_LOG(log, "[GNUstep] CallRuntimeFunction: Invalid process or empty function name");
     return LLDB_INVALID_ADDRESS;
   }
   
   // Setup execution context
   ExecutionContext exe_ctx;
   if (!SetupExecutionContext(exe_ctx)) {
-    LLDB_LOG(log, "[GNUstep] CallRuntimeFunction: Failed to setup execution context for {0}",
-             function_name);
     return LLDB_INVALID_ADDRESS;
   }
-  
-  LLDB_LOG(log, "[GNUstep] CallRuntimeFunction: Execution context setup successful");
   
   // Get scratch type system for argument and return types
   TypeSystemClangSP scratch_ts_sp = 
       ScratchTypeSystemClang::GetForTarget(exe_ctx.GetTargetRef());
   if (!scratch_ts_sp) {
-    LLDB_LOG(log, "[GNUstep] CallRuntimeFunction: Failed to get scratch type system");
     return LLDB_INVALID_ADDRESS;
   }
-  
-  LLDB_LOG(log, "[GNUstep] CallRuntimeFunction: Got scratch type system");
   
   // Build argument list
   ValueList arg_values;
@@ -335,21 +314,15 @@ lldb::addr_t GNUstepObjCRuntimeIntrospector::CallRuntimeFunction(
   CompilerType return_type = 
       scratch_ts_sp->GetBasicType(eBasicTypeVoid).GetPointerType();
   
-  LLDB_LOG(log, "[GNUstep] CallRuntimeFunction: Prepared {0} arguments, calling implementation", arg_values.GetSize());
-  
   // Call the implementation
   Status error;
   lldb::addr_t result = CallRuntimeFunctionImpl(
       function_name.c_str(), return_type, arg_values, exe_ctx, error);
       
   if (error.Fail()) {
-    LLDB_LOG(log, "[GNUstep] CallRuntimeFunction: Failed to call {0}: {1}",
-             function_name, error.AsCString());
     return LLDB_INVALID_ADDRESS;
   }
   
-  LLDB_LOG(log, "[GNUstep] CallRuntimeFunction: Successfully called {0}, result = 0x{1:x}",
-           function_name, result);
   return result;
 }
 
@@ -523,20 +496,6 @@ lldb::addr_t GNUstepObjCRuntimeIntrospector::CallRuntimeFunctionImpl(
   
   // Check execution results
   if (results != eExpressionCompleted) {
-    Log *log = GetLog(LLDBLog::Language);
-    LLDB_LOG(log, "[GNUstep] Function execution failed for {0}: result={1}",
-             function_name, results);
-    
-    // Log diagnostics for debugging
-    std::string diagnostic_str;
-    for (const auto &diag : diagnostics.Diagnostics()) {
-      diagnostic_str += diag->GetMessage();
-      diagnostic_str += "; ";
-    }
-    if (!diagnostic_str.empty()) {
-      LLDB_LOG(log, "[GNUstep] Diagnostics: {0}", diagnostic_str);
-    }
-    
     error = Status::FromError(diagnostics.GetAsError(
         lldb::eExpressionParseError,
         "Function execution failed"));
@@ -546,11 +505,6 @@ lldb::addr_t GNUstepObjCRuntimeIntrospector::CallRuntimeFunctionImpl(
   // Extract return value
   lldb::addr_t return_addr = result_value.GetScalar().ULongLong(
       LLDB_INVALID_ADDRESS);
-      
-  LLDB_LOG(log, "[GNUstep] CallRuntimeFunctionImpl: Called {0}({1:x}) = {2:x}",
-           function_name, 
-           mutable_args.GetSize() > 0 ? mutable_args.GetValueAtIndex(0)->GetScalar().ULongLong() : 0,
-           return_addr);
            
   return return_addr;
 }
@@ -726,8 +680,6 @@ bool GNUstepObjCRuntimeIntrospector::SetupExecutionContext(
   
   // Ensure thread is stopped and safe for function calls
   if (!thread_sp->SafeToCallFunctions()) {
-    Log *log = GetLog(LLDBLog::Language);
-    LLDB_LOG(log, "[GNUstep] Thread not safe for function calls");
     return false;
   }
   
@@ -807,8 +759,6 @@ lldb::ModuleSP GNUstepObjCRuntimeIntrospector::GetFoundationModule() const {
 
 void GNUstepObjCRuntimeIntrospector::EnsureRuntimeSymbolsLoaded() {
   if (!m_runtime_symbols_loaded && m_process) {
-    Log *log = GetLog(LLDBLog::Language);
-    LLDB_LOG(log, "[GNUstepIntrospector] Loading runtime symbols on-demand");
     LoadRuntimeSymbols();
     m_runtime_symbols_loaded = true;
   }
@@ -818,9 +768,6 @@ bool GNUstepObjCRuntimeIntrospector::LoadRuntimeSymbols() {
   if (!m_process) {
     return false;
   }
-
-  Log *log = GetLog(LLDBLog::Language);
-  LLDB_LOG(log, "[GNUstepIntrospector] Loading runtime function symbols");
 
   // Load essential ObjC runtime functions for enhanced introspection
   m_object_getClass_addr = GetRuntimeFunctionAddress("object_getClass");
@@ -832,7 +779,7 @@ bool GNUstepObjCRuntimeIntrospector::LoadRuntimeSymbols() {
   m_class_getName_addr = GetRuntimeFunctionAddress("class_getName");
   m_free_addr = GetRuntimeFunctionAddress("free");
   
-  // CRITICAL: Load method introspection functions from runtime.h for dynamic method discovery
+  // Load method introspection functions for dynamic method discovery
   m_objc_getMetaClass_addr = GetRuntimeFunctionAddress("objc_getMetaClass");
   m_objc_getClass_addr = GetRuntimeFunctionAddress("objc_getClass");
   m_class_copyMethodList_addr = GetRuntimeFunctionAddress("class_copyMethodList");
@@ -840,63 +787,14 @@ bool GNUstepObjCRuntimeIntrospector::LoadRuntimeSymbols() {
   m_method_getTypeEncoding_addr = GetRuntimeFunctionAddress("method_getTypeEncoding");
   m_sel_getName_addr = GetRuntimeFunctionAddress("sel_getName");
 
-  // Count successful resolutions
-  int resolved_count = 0;
-  if (m_object_getClass_addr != LLDB_INVALID_ADDRESS) resolved_count++;
-  if (m_class_getSuperclass_addr != LLDB_INVALID_ADDRESS) resolved_count++;
-  if (m_class_getInstanceSize_addr != LLDB_INVALID_ADDRESS) resolved_count++;
-  if (m_class_getMethodImplementation_addr != LLDB_INVALID_ADDRESS) resolved_count++;
-  if (m_objc_msgSend_addr != LLDB_INVALID_ADDRESS) resolved_count++;
-  if (m_objc_copyClassList_addr != LLDB_INVALID_ADDRESS) resolved_count++;
-  if (m_class_getName_addr != LLDB_INVALID_ADDRESS) resolved_count++;
-  if (m_free_addr != LLDB_INVALID_ADDRESS) resolved_count++;
-  
-  // Count method introspection functions
-  if (m_objc_getMetaClass_addr != LLDB_INVALID_ADDRESS) resolved_count++;
-  if (m_objc_getClass_addr != LLDB_INVALID_ADDRESS) resolved_count++;
-  if (m_class_copyMethodList_addr != LLDB_INVALID_ADDRESS) resolved_count++;
-  if (m_method_getName_addr != LLDB_INVALID_ADDRESS) resolved_count++;
-  if (m_method_getTypeEncoding_addr != LLDB_INVALID_ADDRESS) resolved_count++;
-  if (m_sel_getName_addr != LLDB_INVALID_ADDRESS) resolved_count++;
-
-  LLDB_LOG(log, "[GNUstepIntrospector] Resolved {0}/14 runtime function symbols", resolved_count);
-
-  // Log individual resolutions for debugging
-  if (log) {
-    LLDB_LOG(log, "[GNUstepIntrospector]   object_getClass: 0x{0:x}", m_object_getClass_addr);
-    LLDB_LOG(log, "[GNUstepIntrospector]   class_getSuperclass: 0x{0:x}", m_class_getSuperclass_addr);
-    LLDB_LOG(log, "[GNUstepIntrospector]   class_getInstanceSize: 0x{0:x}", m_class_getInstanceSize_addr);
-    LLDB_LOG(log, "[GNUstepIntrospector]   class_getMethodImplementation: 0x{0:x}", m_class_getMethodImplementation_addr);
-    LLDB_LOG(log, "[GNUstepIntrospector]   objc_msgSend: 0x{0:x}", m_objc_msgSend_addr);
-    LLDB_LOG(log, "[GNUstepIntrospector]   objc_copyClassList: 0x{0:x}", m_objc_copyClassList_addr);
-    LLDB_LOG(log, "[GNUstepIntrospector]   class_getName: 0x{0:x}", m_class_getName_addr);
-    LLDB_LOG(log, "[GNUstepIntrospector]   free: 0x{0:x}", m_free_addr);
-    
-    // Log method introspection functions
-    LLDB_LOG(log, "[GNUstepIntrospector]   objc_getMetaClass: 0x{0:x}", m_objc_getMetaClass_addr);
-    LLDB_LOG(log, "[GNUstepIntrospector]   objc_getClass: 0x{0:x}", m_objc_getClass_addr);
-    LLDB_LOG(log, "[GNUstepIntrospector]   class_copyMethodList: 0x{0:x}", m_class_copyMethodList_addr);
-    LLDB_LOG(log, "[GNUstepIntrospector]   method_getName: 0x{0:x}", m_method_getName_addr);
-    LLDB_LOG(log, "[GNUstepIntrospector]   method_getTypeEncoding: 0x{0:x}", m_method_getTypeEncoding_addr);
-    LLDB_LOG(log, "[GNUstepIntrospector]   sel_getName: 0x{0:x}", m_sel_getName_addr);
-  }
-
-  // We consider it successful if we got at least the core functions and the method introspection functions
-  bool success = (m_object_getClass_addr != LLDB_INVALID_ADDRESS &&
-                  m_class_getSuperclass_addr != LLDB_INVALID_ADDRESS &&
-                  m_class_getName_addr != LLDB_INVALID_ADDRESS &&
-                  m_objc_getMetaClass_addr != LLDB_INVALID_ADDRESS &&
-                  m_class_copyMethodList_addr != LLDB_INVALID_ADDRESS &&
-                  m_method_getName_addr != LLDB_INVALID_ADDRESS &&
-                  m_method_getTypeEncoding_addr != LLDB_INVALID_ADDRESS);
-
-  if (success) {
-    LLDB_LOG(log, "[GNUstepIntrospector] Runtime symbol loading successful - core functions available");
-  } else {
-    LLDB_LOG(log, "[GNUstepIntrospector] Runtime symbol loading incomplete - missing core functions");
-  }
-
-  return success;
+  // Return success if we got the core functions needed for introspection
+  return (m_object_getClass_addr != LLDB_INVALID_ADDRESS &&
+          m_class_getSuperclass_addr != LLDB_INVALID_ADDRESS &&
+          m_class_getName_addr != LLDB_INVALID_ADDRESS &&
+          m_objc_getMetaClass_addr != LLDB_INVALID_ADDRESS &&
+          m_class_copyMethodList_addr != LLDB_INVALID_ADDRESS &&
+          m_method_getName_addr != LLDB_INVALID_ADDRESS &&
+          m_method_getTypeEncoding_addr != LLDB_INVALID_ADDRESS);
 }
 
 lldb::addr_t GNUstepObjCRuntimeIntrospector::GetRuntimeFunctionAddress(const char *function_name) {

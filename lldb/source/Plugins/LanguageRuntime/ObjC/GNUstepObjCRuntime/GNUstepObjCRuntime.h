@@ -84,6 +84,7 @@ public:
   void UpdateISAToDescriptorMapIfNeeded() override;
   
   // ClassDescriptor support
+  ClassDescriptorSP GetClassDescriptorFromClassName(ConstString class_name) override;
   ClassDescriptorSP GetClassDescriptorFromISA(ObjCISA isa) override;
   ClassDescriptorSP GetClassDescriptor(ValueObject &valobj) override;
   
@@ -112,6 +113,9 @@ public:
   void DidAttach(ArchSpec &arch_spec);
 
 private:
+  // Helper method to call runtime functions with string arguments
+  lldb::addr_t CallRuntimeFunction(const char *function_name, const char *string_arg);
+
   std::unique_ptr<GNUstepObjCRuntimeIntrospector> m_introspector_up;
   std::unique_ptr<GNUstepRuntimeV2API> m_runtime_api_up;
   std::unique_ptr<DeclVendor> m_decl_vendor_up;
