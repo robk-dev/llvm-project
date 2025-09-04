@@ -66,8 +66,7 @@ void GNUstepObjCRuntime::Initialize() {
   Log *log = GetLog(LLDBLog::Process | LLDBLog::Types);
   LLDB_LOG(log, "GNUstepObjCRuntime::Initialize() called");
   
-  // CRITICAL FIX: DO NOT register formatters during static initialization!
-  // This was causing infinite recursion during module loading.
+  // Avoid registering formatters during static initialization as this can cause infinite recursion during module loading.
   // Formatters will be registered lazily when the runtime is actually created.
   
   LLDB_LOG(log, "GNUstepObjCRuntime: Plugin registered, formatters will be registered when runtime is created");
@@ -112,9 +111,8 @@ GNUstepObjCRuntime::CreateInstance(Process *process,
     return nullptr;
   }
 
-  // CRITICAL FIX: Check for GNUstep/ObjC markers before creating instance
-  // This prevents the plugin from claiming non-GNUstep programs
-  // We do a lightweight check here and defer heavy initialization to ModulesDidLoad
+  // Check for GNUstep/ObjC markers before creating instance to prevent the plugin from claiming non-GNUstep programs.
+  // We do a lightweight check here and defer heavy initialization to ModulesDidLoad.
   
   Target &target = process->GetTarget();
   bool found_objc_markers = false;
@@ -332,6 +330,14 @@ llvm::Error GNUstepObjCRuntime::GetObjectDescription(
   Log *log = GetLog(LLDBLog::Process | LLDBLog::Types);
   LLDB_LOG(log, "GNUstepObjCRuntime::GetObjectDescription(Value&) called");
   
+  // TASK 4: Add reentrancy guard to prevent recursive calls
+  ReentrancyGuard guard(m_in_object_description);
+  if (!guard.IsAcquired()) {
+    LLDB_LOG(log, "GNUstepObjCRuntime: Reentrancy detected in GetObjectDescription, returning minimal info");
+    str.Printf("<object description recursion detected>");
+    return llvm::Error::success();
+  }
+  
   if (!exe_scope)
     return llvm::createStringError(llvm::inconvertibleErrorCode(), "no execution context scope");
     
@@ -360,7 +366,7 @@ llvm::Error GNUstepObjCRuntime::GetObjectDescription(
 
   LLDB_LOG(log, "GNUstepObjCRuntime: Attempting to get description for object at 0x{0:x}", object_ptr);
 
-  // CRITICAL FIX: Handle tagged pointers BEFORE expression evaluation
+  // Handle tagged pointers BEFORE expression evaluation
   // Tagged pointers are immediate values that cannot be handled by expression evaluation
   if (m_introspector_up && m_introspector_up->IsTaggedPointer(object_ptr)) {
     LLDB_LOG(log, "GNUstepObjCRuntime: Object 0x{0:x} is a tagged pointer", object_ptr);
@@ -413,13 +419,28 @@ llvm::Error GNUstepObjCRuntime::GetObjectDescription(
   }
 
   // Progressive restoration of expression evaluation with proper error handling and timeouts
-  LLDB_LOG(log, "GNUstepObjCRuntime: Attempting safe expression evaluation with timeouts");
+  LLDB_LOG(log, "GNUstepObjCRuntime: Attempting safe description call with FunctionCaller approach");
 
-  // Try expression evaluation first - it's more reliable than introspector for regular objects
+  // Try using FunctionCaller for objc_msgSend instead of expression evaluation
   std::string class_name;
 
-  // Try expression evaluation for -description method with safety measures
+  // TODO: Replace with FunctionCaller-based objc_msgSend call for -description method
+  // This is more complex than C function calls because it requires:
+  // 1. Setting up objc_msgSend with proper calling convention
+  // 2. Resolving the -description selector
+  // 3. Handling the returned NSString object
+  // 4. Calling -UTF8String on the NSString
+  // For now, keeping the expression evaluation as a transitional approach
+  // but documenting the intention to replace with FunctionCaller
+  
   if (exe_ctx.GetFramePtr()) {
+    // Use FunctionCaller to safely call -description and UTF8String methods
+    if (auto desc_result = GetObjectDescriptionViaFunctionCaller(object_ptr, exe_ctx)) {
+      str << desc_result->c_str();
+      return llvm::Error::success();
+    }
+    
+    // Fallback: If FunctionCaller fails, try simple expression evaluation
     EvaluateExpressionOptions options = MakeSafeExprOpts();
     options.SetSuppressPersistentResult(true);
     options.SetKeepInMemory(false);
@@ -443,7 +464,13 @@ llvm::Error GNUstepObjCRuntime::GetObjectDescription(
       // The result is an NSString object, we need to call UTF8String on it to get the C string
       addr_t nsstring_addr = result_sp->GetValueAsUnsigned(0);
       if (nsstring_addr != 0 && nsstring_addr != LLDB_INVALID_ADDRESS) {
-        // Call UTF8String method on the NSString to get char*
+        // Use FunctionCaller for UTF8String method instead of expression evaluation
+        if (auto utf8_result = GetUTF8StringViaFunctionCaller(nsstring_addr, exe_ctx)) {
+          str << utf8_result->c_str();
+          return llvm::Error::success();
+        }
+        
+        // Final fallback: expression evaluation for UTF8String
         char utf8_expr[256];
         snprintf(utf8_expr, sizeof(utf8_expr), "(char*)[(id)0x%" PRIx64 " UTF8String]", nsstring_addr);
         
@@ -473,7 +500,7 @@ llvm::Error GNUstepObjCRuntime::GetObjectDescription(
     }
   }
 
-  // CRITICAL FIX: Try to use our ID dispatcher as a fallback
+  // Try to use our ID dispatcher as a fallback
   // This makes po commands work by using our formatter dispatch system
   LLDB_LOG(log, "GNUstepObjCRuntime: Expression evaluation failed, trying formatter dispatch fallback");
   
@@ -488,7 +515,7 @@ llvm::Error GNUstepObjCRuntime::GetObjectDescription(
     if (void_ptr_type.IsValid()) {
       // Create a Value and then a ValueObject for the object pointer
       Value temp_value;
-      // CRITICAL FIX: Use correct ValueType for tagged vs regular pointers
+      // Use correct ValueType for tagged vs regular pointers
       if (m_introspector_up && m_introspector_up->IsTaggedPointer(object_ptr)) {
         // Tagged pointers are immediate values, not memory addresses
         temp_value.SetValueType(Value::ValueType::Scalar);
@@ -550,6 +577,13 @@ bool GNUstepObjCRuntime::GetDynamicTypeAndAddress(ValueObject &in_value,
   Log *log = GetLog(LLDBLog::Process | LLDBLog::Types);
   LLDB_LOG(log, "GNUstepObjCRuntime::GetDynamicTypeAndAddress called");
   
+  // TASK 4: Add reentrancy guard to prevent recursive calls
+  ReentrancyGuard guard(m_in_dynamic_type_check);
+  if (!guard.IsAcquired()) {
+    LLDB_LOG(log, "GNUstepObjCRuntime: Reentrancy detected in GetDynamicTypeAndAddress, returning false");
+    return false;
+  }
+  
   // Clear the result first (following Apple's pattern)
   class_type_or_name.Clear();
   value_type = Value::ValueType::Scalar;
@@ -596,7 +630,7 @@ bool GNUstepObjCRuntime::GetDynamicTypeAndAddress(ValueObject &in_value,
   
   LLDB_LOG(log, "Got dynamic class name: {0}", class_name);
   
-  // CRITICAL FIX: For tagged pointers, NEVER set LoadAddress - keep as Scalar
+  // For tagged pointers, NEVER set LoadAddress - keep as Scalar
   // This prevents LLDB from trying to dereference tagged pointer values as memory addresses
   if (is_tagged) {
     // Tagged pointers are immediate values, not memory addresses
@@ -614,7 +648,7 @@ bool GNUstepObjCRuntime::GetDynamicTypeAndAddress(ValueObject &in_value,
   // Set the class name in the result
   class_type_or_name.SetName(ConstString(class_name));
   
-  // CRITICAL FIX: Get CompilerType from DeclVendor to enable proper formatter dispatch
+  // Get CompilerType from DeclVendor to enable proper formatter dispatch
   // This is what was missing - LLDB needs CompilerType information to dispatch formatters
   // for synthetic children properly (like dictionary [0].key, [0].value)
   DeclVendor *decl_vendor = GetDeclVendor();
@@ -1560,7 +1594,7 @@ void GNUstepObjCRuntime::EnsureCFStringCreateWithBytes() {
     return;
   }
   
-  // CRITICAL FIX: Ensure we have execution context before trying to install utility function
+  // Ensure we have execution context before trying to install utility function
   if (!m_process || !m_process->IsAlive()) {
     LLDB_LOG(log, "Process not available for CFStringCreateWithBytes installation");
     return;
@@ -2215,6 +2249,13 @@ lldb::addr_t GNUstepObjCRuntime::CallRuntimeFunction(const char *function_name, 
   Log *log = GetLog(LLDBLog::Language | LLDBLog::Types);
   LLDB_LOG(log, "CallRuntimeFunction: {0}(\"{1}\")", function_name, string_arg);
   
+  // TASK 4: Add reentrancy guard to prevent recursive calls
+  ReentrancyGuard guard(m_in_runtime_function_call);
+  if (!guard.IsAcquired()) {
+    LLDB_LOG(log, "CallRuntimeFunction: Reentrancy detected, returning INVALID_ADDRESS");
+    return LLDB_INVALID_ADDRESS;
+  }
+  
   if (!m_process || !m_process->IsAlive()) {
     LLDB_LOG(log, "CallRuntimeFunction: Process not available");
     return LLDB_INVALID_ADDRESS;
@@ -2224,6 +2265,8 @@ lldb::addr_t GNUstepObjCRuntime::CallRuntimeFunction(const char *function_name, 
   lldb::addr_t func_addr = LLDB_INVALID_ADDRESS;
   if (strcmp(function_name, "objc_getClass") == 0) {
     func_addr = m_objc_getClass_addr;
+  } else if (strcmp(function_name, "sel_getUid") == 0) {
+    func_addr = m_sel_getUid_addr;
   } else {
     LLDB_LOG(log, "CallRuntimeFunction: Unknown function {0}", function_name);
     return LLDB_INVALID_ADDRESS;
@@ -2395,7 +2438,7 @@ lldb::addr_t GNUstepObjCRuntime::LookupRuntimeSymbol(ConstString name) {
 
   // NSString constant rewrite dependency:
   if (s == "CFStringCreateWithBytes") {
-    // CRITICAL FIX: Ensure fallback is installed if the symbol didn't exist in Foundation/CoreFoundation
+    // Ensure fallback is installed if the symbol didn't exist in Foundation/CoreFoundation
     LLDB_LOG(log, "[LookupRuntimeSymbol] CFStringCreateWithBytes requested, ensuring installation");
     EnsureCFStringCreateWithBytes();
     LLDB_LOG(log, "[LookupRuntimeSymbol] CFStringCreateWithBytes address: 0x{0:x}", m_cfstring_create_addr);
@@ -2433,6 +2476,81 @@ lldb::addr_t GNUstepObjCRuntime::LookupRuntimeSymbol(ConstString name) {
 
   LLDB_LOG(log, "GNUstepObjCRuntime::LookupRuntimeSymbol: No match found for {0}", name.GetCString());
   return LLDB_INVALID_ADDRESS;
+}
+
+// Helper function to get object description via FunctionCaller
+std::optional<std::string> GNUstepObjCRuntime::GetObjectDescriptionViaFunctionCaller(
+    lldb::addr_t object_ptr, ExecutionContext &exe_ctx) {
+  
+  Log *log = GetLog(LLDBLog::Language);
+  LLDB_LOG(log, "GNUstepObjCRuntime: GetObjectDescriptionViaFunctionCaller called for object 0x{0:x}", object_ptr);
+  
+  // TASK 6: Check cache first
+  m_object_description_cache.InvalidateIfStale();
+  auto cache_iter = m_object_description_cache.descriptions.find(object_ptr);
+  if (cache_iter != m_object_description_cache.descriptions.end()) {
+    LLDB_LOG(log, "GNUstepObjCRuntime: Using cached description for 0x{0:x}: {1}", object_ptr, cache_iter->second);
+    return cache_iter->second;
+  }
+  
+  // Ensure we have the necessary runtime symbols
+  if (m_objc_msgSend_addr == LLDB_INVALID_ADDRESS || m_sel_getUid_addr == LLDB_INVALID_ADDRESS) {
+    LLDB_LOG(log, "GNUstepObjCRuntime: Missing runtime symbols for FunctionCaller description");
+    return std::nullopt;
+  }
+  
+  ThreadSP thread_sp = exe_ctx.GetThreadSP();
+  if (!thread_sp) {
+    LLDB_LOG(log, "GNUstepObjCRuntime: No thread available for FunctionCaller description");
+    return std::nullopt;
+  }
+  
+  // Get type system for function call setup
+  auto ts = ScratchTypeSystemClang::GetForTarget(m_process->GetTarget());
+  if (!ts) {
+    LLDB_LOG(log, "GNUstepObjCRuntime: No type system available for FunctionCaller");
+    return std::nullopt;
+  }
+  
+  try {
+    // Step 1: Get selector for "description" using our CallRuntimeFunction
+    lldb::addr_t desc_selector = CallRuntimeFunction("sel_getUid", "description");
+    
+    if (desc_selector == LLDB_INVALID_ADDRESS) {
+      LLDB_LOG(log, "GNUstepObjCRuntime: Failed to get description selector via CallRuntimeFunction");
+      return std::nullopt;
+    }
+    
+    LLDB_LOG(log, "GNUstepObjCRuntime: Got description selector: 0x{0:x}", desc_selector);
+    
+    // Step 2: For now, fall back to expression evaluation as implementing
+    // the full FunctionCaller approach for objc_msgSend requires complex ABI handling
+    LLDB_LOG(log, "GNUstepObjCRuntime: FunctionCaller for objc_msgSend not yet fully implemented, using expression evaluation fallback");
+    return std::nullopt;
+    
+  } catch (const std::exception &e) {
+    LLDB_LOG(log, "GNUstepObjCRuntime: Exception in FunctionCaller description: {0}", e.what());
+    return std::nullopt;
+  }
+}
+
+// Helper function to get UTF8String via FunctionCaller
+std::optional<std::string> GNUstepObjCRuntime::GetUTF8StringViaFunctionCaller(
+    lldb::addr_t nsstring_ptr, ExecutionContext &exe_ctx) {
+  
+  Log *log = GetLog(LLDBLog::Language);
+  LLDB_LOG(log, "GNUstepObjCRuntime: GetUTF8StringViaFunctionCaller called for NSString 0x{0:x}", nsstring_ptr);
+  
+  try {
+    // For now, fall back to simple implementation as FunctionCaller for NSString methods
+    // requires complex ABI handling and proper type system integration
+    LLDB_LOG(log, "GNUstepObjCRuntime: FunctionCaller for NSString UTF8String not yet fully implemented");
+    return std::nullopt;
+    
+  } catch (const std::exception &e) {
+    LLDB_LOG(log, "GNUstepObjCRuntime: Exception in UTF8String FunctionCaller: {0}", e.what());
+    return std::nullopt;
+  }
 }
 
 LLDB_PLUGIN_DEFINE(GNUstepObjCRuntime)

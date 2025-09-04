@@ -14,6 +14,7 @@
 #include "lldb/Expression/FunctionCaller.h"
 #include <memory>
 #include <unordered_map>
+#include <atomic>
 
 namespace lldb_private {
 
@@ -90,14 +91,38 @@ public:
   // Check if an address represents a valid object
   bool IsValidObjectPointer(lldb::addr_t obj_addr);
   
-  // Helper method to call functions in the target process (public interface for DeclVendor)
+  // Helper to call functions in the target process (public interface for DeclVendor)
   lldb::addr_t CallRuntimeFunction(const std::string &function_name,
                                    const std::vector<lldb::addr_t> &args);
+
+  /// RAII guard for preventing reentrancy in runtime calls
+  class ReentrancyGuard {
+  public:
+    explicit ReentrancyGuard(std::atomic<bool> &flag) : m_flag(flag) {
+      bool expected = false;
+      m_acquired = m_flag.compare_exchange_strong(expected, true);
+    }
+    
+    ~ReentrancyGuard() {
+      if (m_acquired) {
+        m_flag.store(false);
+      }
+    }
+    
+    bool IsAcquired() const { return m_acquired; }
+    
+  private:
+    std::atomic<bool> &m_flag;
+    bool m_acquired;
+  };
 
 private:
   Process *m_process;
   uint32_t m_address_size;
   lldb::ByteOrder m_byte_order;
+  
+  // Reentrancy protection
+  mutable std::atomic<bool> m_in_function_call{false};
   
   // Runtime function addresses for direct calling (performance optimization)
   lldb::addr_t m_object_getClass_addr = LLDB_INVALID_ADDRESS;

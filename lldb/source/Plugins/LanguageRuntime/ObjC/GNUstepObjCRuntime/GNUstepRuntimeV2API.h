@@ -233,6 +233,9 @@ public:
   /// Get runtime version information
   std::string GetRuntimeVersion() const;
   
+  /// Free memory allocated by runtime functions
+  bool CallFreeFunction(lldb::addr_t ptr);
+
 private:
   GNUstepRuntimeV2API(Process *process);
   

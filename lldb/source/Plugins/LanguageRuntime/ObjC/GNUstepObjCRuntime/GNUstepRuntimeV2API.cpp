@@ -10,6 +10,8 @@
 
 #include "lldb/Core/Module.h"
 #include "lldb/Core/Section.h"
+#include "lldb/Expression/DiagnosticManager.h"
+#include "lldb/Expression/FunctionCaller.h"
 #include "lldb/Symbol/ObjectFile.h"
 #include "lldb/Symbol/Symbol.h"
 #include "lldb/Symbol/SymbolFile.h"
@@ -29,6 +31,7 @@
 #include "lldb/Utility/Status.h"
 #include "lldb/Utility/StreamString.h"
 #include "lldb/ValueObject/ValueObject.h"
+#include "Plugins/TypeSystem/Clang/TypeSystemClang.h"
 
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/raw_ostream.h"
@@ -285,58 +288,131 @@ GNUstepRuntimeV2API::GetAllClasses() {
     return CreateError("objc_copyClassList not available");
   }
   
-  // Call objc_copyClassList in target process
+  // Use FunctionCaller instead of EvaluateExpression for objc_copyClassList
   ExecutionContext exe_ctx(m_process);
   ThreadSP thread_sp = exe_ctx.GetThreadSP();
   if (!thread_sp) {
     return CreateError("No thread available for function call");
   }
   
-  // Prepare function call
+  Log *log = GetLog(LLDBLog::Language);
+  LLDB_LOG(log, "[{0}] Calling objc_copyClassList via FunctionCaller", LLDB_LOG_TAG);
+  
+  // Step 1: Allocate memory for the count parameter
+  Status error;
+  addr_t count_addr = m_process->AllocateMemory(sizeof(unsigned int), 
+                                                ePermissionsReadable | ePermissionsWritable, 
+                                                error);
+  if (error.Fail() || count_addr == LLDB_INVALID_ADDRESS) {
+    return CreateError("Failed to allocate memory for count parameter");
+  }
+  
+  // Initialize count to 0
+  unsigned int zero = 0;
+  size_t bytes_written = m_process->WriteMemory(count_addr, &zero, sizeof(zero), error);
+  if (bytes_written != sizeof(zero) || error.Fail()) {
+    m_process->DeallocateMemory(count_addr);
+    return CreateError("Failed to initialize count parameter");
+  }
+  
+  // Step 2: Call objc_copyClassList(&count) using FunctionCaller
+  addr_t objc_copyClassList_addr = ResolveRuntimeSymbol("objc_copyClassList");
+  if (objc_copyClassList_addr == LLDB_INVALID_ADDRESS) {
+    m_process->DeallocateMemory(count_addr);
+    return CreateError("Could not resolve objc_copyClassList symbol");
+  }
+  
+  // Create function caller for objc_copyClassList
+  CompilerType void_ptr_type;
+  CompilerType uint_ptr_type;
+  if (auto ts = ScratchTypeSystemClang::GetForTarget(m_process->GetTarget())) {
+    void_ptr_type = ts->GetBasicType(eBasicTypeVoid).GetPointerType();
+    uint_ptr_type = ts->GetBasicType(eBasicTypeUnsignedInt).GetPointerType();
+  } else {
+    m_process->DeallocateMemory(count_addr);
+    return CreateError("Could not get type system");
+  }
+  
+  // Build function prototype: Class *objc_copyClassList(unsigned int *outCount)
+  std::vector<CompilerType> arg_types = { uint_ptr_type };
+  CompilerType return_type = void_ptr_type;
+  
+  Value count_arg;
+  count_arg.SetValueType(Value::ValueType::LoadAddress);
+  count_arg.GetScalar() = count_addr;
+  count_arg.SetCompilerType(uint_ptr_type);
+  
+  ValueList args;
+  args.PushValue(count_arg);
+  
+  Address function_address;
+  function_address.SetLoadAddress(objc_copyClassList_addr, &m_process->GetTarget());
+  
+  Status fc_error;
+  std::unique_ptr<FunctionCaller> function_caller_up(
+      m_process->GetTarget().GetFunctionCallerForLanguage(
+          eLanguageTypeC, return_type, function_address, args, "objc_copyClassList", fc_error));
+          
+  if (!function_caller_up || fc_error.Fail()) {
+    m_process->DeallocateMemory(count_addr);
+    return CreateError("Could not create function caller: %s", fc_error.AsCString());
+  }
+  
+  // Execute the function call
+  DiagnosticManager diagnostics;
+  addr_t wrapper_struct_addr = LLDB_INVALID_ADDRESS;
+  
+  ValueList mutable_args(args);
+  if (!function_caller_up->WriteFunctionArguments(exe_ctx, wrapper_struct_addr, 
+                                                   mutable_args, diagnostics)) {
+    m_process->DeallocateMemory(count_addr);
+    return CreateError("Failed to write function arguments");
+  }
+  
   EvaluateExpressionOptions options;
   options.SetUnwindOnError(true);
   options.SetIgnoreBreakpoints(true);
   options.SetTryAllThreads(false);
   options.SetTimeout(std::chrono::seconds(5));
+  options.SetStopOthers(true);
+  options.SetIsForUtilityExpr(true);
   
-  // Execute: Class *objc_copyClassList(unsigned int *outCount)
-  // Make a SINGLE call to get both count and class list pointer
-  const char *expr = R"(
-    unsigned int count = 0;
-    void **classes = (void **)objc_copyClassList(&count);
-    struct { void *ptr; unsigned int cnt; } result = { classes, count };
-    result;
-  )";
-  
-  ValueObjectSP result_sp;
-  ExpressionResults expr_result = m_process->GetTarget().EvaluateExpression(
-      expr, exe_ctx.GetFrameSP().get(), result_sp, options);
-  
-  if (expr_result != eExpressionCompleted || !result_sp) {
-    return CreateError("Failed to enumerate classes");
+  Value result_value;
+  ExpressionResults results = function_caller_up->ExecuteFunction(
+      exe_ctx, &wrapper_struct_addr, options, diagnostics, result_value);
+      
+  // Clean up arguments
+  if (wrapper_struct_addr != LLDB_INVALID_ADDRESS) {
+    function_caller_up->DeallocateFunctionResults(exe_ctx, wrapper_struct_addr);
   }
   
-  // Extract both pointer and count from the result structure
-  ValueObjectSP ptr_child = result_sp->GetChildAtIndex(0);
-  ValueObjectSP count_child = result_sp->GetChildAtIndex(1);
-  
-  if (!ptr_child || !count_child) {
-    return CreateError("Failed to extract class list result");
+  if (results != eExpressionCompleted) {
+    m_process->DeallocateMemory(count_addr);
+    return CreateError("objc_copyClassList function call failed");
   }
   
-  addr_t class_list_addr = ptr_child->GetValueAsUnsigned(0);
-  unsigned int count = count_child->GetValueAsUnsigned(0);
+  // Get the returned class list pointer
+  addr_t class_list_addr = result_value.GetScalar().ULongLong(LLDB_INVALID_ADDRESS);
   
-  if (count == 0 || class_list_addr == 0) {
-    // If no classes or null pointer, still need to free if we got a non-null pointer
-    if (class_list_addr != 0) {
-      const char *free_expr = R"(
-        free((void *)0x%llx);
-      )";
-      char free_cmd[256];
-      snprintf(free_cmd, sizeof(free_cmd), free_expr, (unsigned long long)class_list_addr);
-      m_process->GetTarget().EvaluateExpression(
-          free_cmd, exe_ctx.GetFrameSP().get(), result_sp, options);
+  // Read the count that was written by objc_copyClassList
+  unsigned int count = 0;
+  size_t bytes_read = m_process->ReadMemory(count_addr, &count, sizeof(count), error);
+  m_process->DeallocateMemory(count_addr);  // Clean up count memory
+  
+  if (bytes_read != sizeof(count) || error.Fail()) {
+    if (class_list_addr != LLDB_INVALID_ADDRESS) {
+      // Free the class list if we got one
+      CallFreeFunction(class_list_addr);
+    }
+    return CreateError("Failed to read count result");
+  }
+  
+  LLDB_LOG(log, "[{0}] objc_copyClassList returned {1} classes at 0x{2:x}", 
+           LLDB_LOG_TAG, count, class_list_addr);
+  
+  if (count == 0 || class_list_addr == LLDB_INVALID_ADDRESS) {
+    if (class_list_addr != LLDB_INVALID_ADDRESS) {
+      CallFreeFunction(class_list_addr);
     }
     return std::vector<Class>();
   }
@@ -356,14 +432,9 @@ GNUstepRuntimeV2API::GetAllClasses() {
     }
   }
   
-  // Free the allocated list using the specific address we already have
-  char free_cmd[256];
-  snprintf(free_cmd, sizeof(free_cmd), "free((void *)0x%llx);", (unsigned long long)class_list_addr);
+  // Free the allocated class list using FunctionCaller
+  CallFreeFunction(class_list_addr);
   
-  m_process->GetTarget().EvaluateExpression(
-      free_cmd, exe_ctx.GetFrameSP().get(), result_sp, options);
-  
-  Log *log = GetLog(LLDBLog::Language);
   LLDB_LOG(log, "[{0}] Found {1} classes", LLDB_LOG_TAG, classes.size());
   
   return classes;
@@ -627,12 +698,7 @@ GNUstepRuntimeV2API::FindClassPointerViaRuntime(const std::string &class_name) {
   if (!thread_sp) {
     return CreateError("No thread available for runtime function call");
   }
-  
-  // Create argument list for objc_getClass(const char *name)
-  ValueList args;
-  Value class_name_arg;
-  class_name_arg.SetValueType(Value::ValueType::Scalar);
-  
+
   // Write class name string to target memory
   Status error;
   lldb::addr_t class_name_addr = m_process->AllocateMemory(
@@ -648,32 +714,83 @@ GNUstepRuntimeV2API::FindClassPointerViaRuntime(const std::string &class_name) {
     return CreateError("Failed to write class name to target memory");
   }
   
+  // Call objc_getClass via FunctionCaller
+  lldb::addr_t objc_getClass_addr = ResolveRuntimeSymbol("objc_getClass");
+  if (objc_getClass_addr == LLDB_INVALID_ADDRESS) {
+    m_process->DeallocateMemory(class_name_addr);
+    return CreateError("Could not resolve objc_getClass symbol");
+  }
+  
+  // Create function caller for objc_getClass
+  CompilerType void_ptr_type;
+  CompilerType char_ptr_type;
+  auto ts = ScratchTypeSystemClang::GetForTarget(m_process->GetTarget());
+  if (ts) {
+    void_ptr_type = ts->GetBasicType(eBasicTypeVoid).GetPointerType();
+    char_ptr_type = ts->GetBasicType(eBasicTypeChar).GetPointerType();
+  } else {
+    m_process->DeallocateMemory(class_name_addr);
+    return CreateError("Could not get type system");
+  }
+  
+  // Build function prototype: Class objc_getClass(const char *name)
+  CompilerType return_type = void_ptr_type;
+  
+  Value class_name_arg;
+  class_name_arg.SetValueType(Value::ValueType::LoadAddress);
   class_name_arg.GetScalar() = class_name_addr;
+  class_name_arg.SetCompilerType(char_ptr_type);
+  
+  ValueList args;
   args.PushValue(class_name_arg);
   
-  // Call objc_getClass directly
+  Address function_address;
+  function_address.SetLoadAddress(objc_getClass_addr, &m_process->GetTarget());
+  
+  Status fc_error;
+  std::unique_ptr<FunctionCaller> function_caller_up(
+      m_process->GetTarget().GetFunctionCallerForLanguage(
+          eLanguageTypeC, return_type, function_address, args, "objc_getClass", fc_error));
+          
+  if (!function_caller_up || fc_error.Fail()) {
+    m_process->DeallocateMemory(class_name_addr);
+    return CreateError("Could not create function caller for objc_getClass: %s", fc_error.AsCString());
+  }
+  
+  // Execute the function call
+  DiagnosticManager diagnostics;
+  addr_t wrapper_struct_addr = LLDB_INVALID_ADDRESS;
+  
+  ValueList mutable_args(args);
+  if (!function_caller_up->WriteFunctionArguments(exe_ctx, wrapper_struct_addr, 
+                                                   mutable_args, diagnostics)) {
+    m_process->DeallocateMemory(class_name_addr);
+    return CreateError("Failed to write function arguments for objc_getClass");
+  }
+  
   EvaluateExpressionOptions options;
   options.SetUnwindOnError(true);
   options.SetIgnoreBreakpoints(true);
-  options.SetTimeout(std::chrono::seconds(2));
+  options.SetTryAllThreads(false);
+  options.SetTimeout(std::chrono::seconds(5));
+  options.SetStopOthers(true);
+  options.SetIsForUtilityExpr(true);
   
-  lldb::addr_t class_addr = LLDB_INVALID_ADDRESS;
-  
-  // Simplified approach: Use minimal expression evaluation
-  // Complex direct function calls may have compatibility issues across LLDB versions
-  char expr[256];
-  snprintf(expr, sizeof(expr), "(void*)objc_getClass(\"%s\")", class_name.c_str());
-  
-  ValueObjectSP result;
-  ExpressionResults expr_result = m_process->GetTarget().EvaluateExpression(
-      expr, exe_ctx.GetFrameSP().get(), result, options);
-  
-  // Clean up allocated memory
+  Value result_value;
+  ExpressionResults results = function_caller_up->ExecuteFunction(
+      exe_ctx, &wrapper_struct_addr, options, diagnostics, result_value);
+      
+  // Clean up arguments and allocated memory
+  if (wrapper_struct_addr != LLDB_INVALID_ADDRESS) {
+    function_caller_up->DeallocateFunctionResults(exe_ctx, wrapper_struct_addr);
+  }
   m_process->DeallocateMemory(class_name_addr);
   
-  if (expr_result == eExpressionCompleted && result) {
-    class_addr = result->GetValueAsUnsigned(0);
+  if (results != eExpressionCompleted) {
+    return CreateError("objc_getClass function call failed");
   }
+  
+  lldb::addr_t class_addr = result_value.GetScalar().ULongLong(LLDB_INVALID_ADDRESS);
   
   if (class_addr != 0) {
     LLDB_LOG(log, "[{0}] Found class {1} at address 0x{2:x}", 
@@ -1087,4 +1204,99 @@ GNUstepRuntimeV2API::GetAllFoundationClasses() {
   // Foundation classes will be discovered dynamically during expression evaluation
   std::vector<ClassInfo> foundation_classes;
   return foundation_classes;
+}
+
+bool GNUstepRuntimeV2API::CallFreeFunction(lldb::addr_t ptr) {
+  if (ptr == LLDB_INVALID_ADDRESS || ptr == 0) {
+    return true; // Nothing to free
+  }
+  
+  Log *log = GetLog(LLDBLog::Language);
+  LLDB_LOG(log, "[{0}] Calling free(0x{1:x}) via FunctionCaller", LLDB_LOG_TAG, ptr);
+  
+  // Use FunctionCaller to call free() instead of EvaluateExpression
+  ExecutionContext exe_ctx(m_process);
+  ThreadSP thread_sp = exe_ctx.GetThreadSP();
+  if (!thread_sp) {
+    LLDB_LOG(log, "[{0}] No thread available for free() call", LLDB_LOG_TAG);
+    return false;
+  }
+  
+  addr_t free_addr = ResolveRuntimeSymbol("free");
+  if (free_addr == LLDB_INVALID_ADDRESS) {
+    LLDB_LOG(log, "[{0}] Could not resolve free symbol", LLDB_LOG_TAG);
+    return false;
+  }
+  
+  // Create function caller for free(void *ptr)
+  CompilerType void_ptr_type;
+  CompilerType void_type;
+  auto ts = ScratchTypeSystemClang::GetForTarget(m_process->GetTarget());
+  if (ts) {
+    void_ptr_type = ts->GetBasicType(eBasicTypeVoid).GetPointerType();
+    void_type = ts->GetBasicType(eBasicTypeVoid);
+  } else {
+    LLDB_LOG(log, "[{0}] Could not get type system for free()", LLDB_LOG_TAG);
+    return false;
+  }
+  
+  // Build function prototype: void free(void *ptr)
+  CompilerType return_type = void_type;
+  
+  Value ptr_arg;
+  ptr_arg.SetValueType(Value::ValueType::Scalar);
+  ptr_arg.GetScalar() = ptr;
+  ptr_arg.SetCompilerType(void_ptr_type);
+  
+  ValueList args;
+  args.PushValue(ptr_arg);
+  
+  Address function_address;
+  function_address.SetLoadAddress(free_addr, &m_process->GetTarget());
+  
+  Status fc_error;
+  std::unique_ptr<FunctionCaller> function_caller_up(
+      m_process->GetTarget().GetFunctionCallerForLanguage(
+          eLanguageTypeC, return_type, function_address, args, "free", fc_error));
+          
+  if (!function_caller_up || fc_error.Fail()) {
+    LLDB_LOG(log, "[{0}] Could not create function caller for free(): {1}", LLDB_LOG_TAG, fc_error.AsCString());
+    return false;
+  }
+  
+  // Execute the function call
+  DiagnosticManager diagnostics;
+  addr_t wrapper_struct_addr = LLDB_INVALID_ADDRESS;
+  
+  ValueList mutable_args(args);
+  if (!function_caller_up->WriteFunctionArguments(exe_ctx, wrapper_struct_addr, 
+                                                   mutable_args, diagnostics)) {
+    LLDB_LOG(log, "[{0}] Failed to write function arguments for free()", LLDB_LOG_TAG);
+    return false;
+  }
+  
+  EvaluateExpressionOptions options;
+  options.SetUnwindOnError(true);
+  options.SetIgnoreBreakpoints(true);
+  options.SetTryAllThreads(false);
+  options.SetTimeout(std::chrono::seconds(2));
+  options.SetStopOthers(true);
+  options.SetIsForUtilityExpr(true);
+  
+  Value result_value;
+  ExpressionResults results = function_caller_up->ExecuteFunction(
+      exe_ctx, &wrapper_struct_addr, options, diagnostics, result_value);
+      
+  // Clean up arguments
+  if (wrapper_struct_addr != LLDB_INVALID_ADDRESS) {
+    function_caller_up->DeallocateFunctionResults(exe_ctx, wrapper_struct_addr);
+  }
+  
+  if (results != eExpressionCompleted) {
+    LLDB_LOG(log, "[{0}] free() function call failed", LLDB_LOG_TAG);
+    return false;
+  }
+  
+  LLDB_LOG(log, "[{0}] Successfully called free(0x{1:x})", LLDB_LOG_TAG, ptr);
+  return true;
 }

@@ -19,7 +19,7 @@
     ],
     "files.associations": {
         "*.m": "objective-c",
-        "*.h": "objective-c",
+        "*.h": "cpp",
         "array": "cpp",
         "string_view": "cpp",
         "initializer_list": "cpp",
