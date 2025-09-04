@@ -9,6 +9,7 @@
 #include "GNUstepObjCRuntime.h"
 #include "GNUstepObjCDeclVendor.h"
 #include "GNUstepClassDescriptor.h"
+#include "GNUstepObjCRuntimeUtilities.h"
 #include "formatters/GNUstepFormattersRegistry.h"
 #include "formatters/GNUstepIdDispatcher.h"
 #include "lldb/Core/PluginManager.h"
@@ -45,31 +46,12 @@
 using namespace lldb;
 using namespace lldb_private;
 using namespace lldb_private::formatters;
-
-// Utility function to create safe expression evaluation options
-// Especially important for Windows to avoid first-chance exception issues
-static EvaluateExpressionOptions MakeSafeExprOpts() {
-  EvaluateExpressionOptions opts;
-  opts.SetUnwindOnError(true);
-  opts.SetIgnoreBreakpoints(true);
-  opts.SetTryAllThreads(false);
-  opts.SetTimeout(std::chrono::microseconds(2500000));  // 2.5 seconds
-  opts.SetTrapExceptions(false);       // Critical on Windows
-  return opts;
-}
+using namespace lldb_private::gnustep_objc_runtime_utilities;
 
 void GNUstepObjCRuntime::Initialize() {
   PluginManager::RegisterPlugin(
       "gnu-objc-v2", "GNUstep Objective-C V2 Runtime",
       CreateInstance, nullptr);
-  
-  Log *log = GetLog(LLDBLog::Process | LLDBLog::Types);
-  LLDB_LOG(log, "GNUstepObjCRuntime::Initialize() called");
-  
-  // Avoid registering formatters during static initialization as this can cause infinite recursion during module loading.
-  // Formatters will be registered lazily when the runtime is actually created.
-  
-  LLDB_LOG(log, "GNUstepObjCRuntime: Plugin registered, formatters will be registered when runtime is created");
 }
 
 void GNUstepObjCRuntime::Terminate() {
@@ -81,120 +63,53 @@ void GNUstepObjCRuntime::Terminate() {
 LanguageRuntime *
 GNUstepObjCRuntime::CreateInstance(Process *process,
                                      lldb::LanguageType language) {
-  Log *log = GetLog(LLDBLog::Process | LLDBLog::Types);
-  LLDB_LOG(log, "GNUstepObjCRuntime::CreateInstance() called for language {0}", language);
-  
-  if (!process) {
-    LLDB_LOG(log, "GNUstepObjCRuntime: No process provided, returning nullptr");
-    return nullptr;
-  }
-  
-  // Handle direct Objective-C languages first
-  if (language == eLanguageTypeObjC || language == eLanguageTypeObjC_plus_plus) {
-    LLDB_LOG(log, "GNUstepObjCRuntime: Direct ObjC language ({0}), proceeding with marker check", (int)language);
-  }
-  // Handle C language only if ObjC context already exists
-  else if (language == eLanguageTypeC) {
-    // Check if an ObjC runtime already exists for this process
-    bool has_objc_context = (process->GetLanguageRuntime(eLanguageTypeObjC) != nullptr ||
-                            process->GetLanguageRuntime(eLanguageTypeObjC_plus_plus) != nullptr);
-    
-    if (!has_objc_context) {
-      LLDB_LOG(log, "GNUstepObjCRuntime: C language without ObjC context, returning nullptr");
+  // Apple-style simplified detection: support ObjC languages and detect markers efficiently
+  if (language != eLanguageTypeObjC && language != eLanguageTypeObjC_plus_plus) {
+    if (language == eLanguageTypeC) {
+      // Only support C if ObjC runtime already exists
+      if (!process->GetLanguageRuntime(eLanguageTypeObjC) && 
+          !process->GetLanguageRuntime(eLanguageTypeObjC_plus_plus))
+        return nullptr;
+    } else {
       return nullptr;
     }
-    
-    LLDB_LOG(log, "GNUstepObjCRuntime: C language with existing ObjC context, proceeding");
-  }
-  else {
-    LLDB_LOG(log, "GNUstepObjCRuntime: Unsupported language ({0}), returning nullptr", (int)language);
-    return nullptr;
   }
 
-  // Check for GNUstep/ObjC markers before creating instance to prevent the plugin from claiming non-GNUstep programs.
-  // We do a lightweight check here and defer heavy initialization to ModulesDidLoad.
-  
-  Target &target = process->GetTarget();
+  // Quick ObjC marker check - look for key sections/symbols
+  ModuleSP exe_module = process->GetTarget().GetExecutableModule();
+  if (!exe_module)
+    return nullptr;
+    
   bool found_objc_markers = false;
   
-  // Check the executable module for ObjC sections or symbols
-  ModuleSP exe_module = target.GetExecutableModule();
-  if (exe_module) {
-    LLDB_LOG(log, "GNUstepObjCRuntime: Checking executable module: {0}", 
-             exe_module->GetFileSpec().GetFilename().GetCString());
-    
-    // Look for .objc_ or .objcrt sections which indicate Objective-C code
-    SectionList *section_list = exe_module->GetSectionList();
-    if (section_list) {
-      LLDB_LOG(log, "GNUstepObjCRuntime: Found {0} sections in executable", 
-               section_list->GetSize());
-      
-      for (size_t idx = 0; idx < section_list->GetSize(); ++idx) {
-        SectionSP section_sp = section_list->GetSectionAtIndex(idx);
-        if (section_sp) {
-          ConstString section_name = section_sp->GetName();
-          if (section_name) {
-            const char *name = section_name.GetCString();
-            
-            // Check for various GNUstep/libobjc2 section patterns
-            if (strstr(name, ".objc_") != nullptr ||      // Traditional .objc_class, .objc_method, etc.
-                strstr(name, ".objcrt") != nullptr ||     // GNUstep .objcrt section (Windows/PE)
-                strstr(name, "__objc_") != nullptr ||     // Some platforms use __objc_ prefix
-                strcmp(name, ".objc") == 0) {             // Simple .objc section
-              found_objc_markers = true;
-              LLDB_LOG(log, "GNUstepObjCRuntime: Found ObjC section: {0}", name);
-              break;
-            }
+  // Check for ObjC sections first (most reliable)
+  if (SectionList *sections = exe_module->GetSectionList()) {
+    for (size_t i = 0; i < sections->GetSize() && !found_objc_markers; ++i) {
+      if (SectionSP section = sections->GetSectionAtIndex(i)) {
+        if (ConstString name = section->GetName()) {
+          const char *section_name = name.GetCString();
+          if (strstr(section_name, ".objc") || strstr(section_name, "__objc_")) {
+            found_objc_markers = true;
           }
-        }
-      }
-    }
-    
-    // If no sections found, check for objc symbols as fallback
-    if (!found_objc_markers) {
-      Symtab *symtab = exe_module->GetSymtab();
-      if (symtab) {
-        // Check for various ObjC symbol patterns
-        std::vector<uint32_t> symbol_indexes;
-        
-        // Check for _objc_ symbols (traditional)
-        symtab->FindAllSymbolsWithNameAndType(ConstString("_objc_"), 
-                                               eSymbolTypeAny, symbol_indexes);
-        
-        // Check for .objc_ symbols (PE/Windows style)
-        if (symbol_indexes.empty()) {
-          symtab->FindAllSymbolsWithNameAndType(ConstString(".objc_"), 
-                                                 eSymbolTypeAny, symbol_indexes);
-        }
-        
-        // Check for objc_msgSend and other core runtime symbols
-        if (symbol_indexes.empty()) {
-          const char* objc_symbols[] = {
-            "objc_msgSend", "objc_autoreleasePoolPush", "objc_autoreleasePoolPop",
-            "__objc_load", ".objc_init", ".objc_selector_", nullptr
-          };
-          
-          for (int i = 0; objc_symbols[i] != nullptr && symbol_indexes.empty(); i++) {
-            symtab->FindAllSymbolsWithNameAndType(ConstString(objc_symbols[i]), 
-                                                   eSymbolTypeAny, symbol_indexes);
-          }
-        }
-        
-        if (!symbol_indexes.empty()) {
-          found_objc_markers = true;
-          LLDB_LOG(log, "GNUstepObjCRuntime: Found {0} objc symbols", symbol_indexes.size());
         }
       }
     }
   }
   
-  // Only create instance if we found ObjC markers
+  // Fallback: check for core runtime symbols
   if (!found_objc_markers) {
-    LLDB_LOG(log, "GNUstepObjCRuntime: No ObjC markers found, not creating instance");
-    return nullptr;
+    if (Symtab *symtab = exe_module->GetSymtab()) {
+      const char* core_symbols[] = {"objc_msgSend", "_objc_", ".objc_", nullptr};
+      for (int i = 0; core_symbols[i] && !found_objc_markers; i++) {
+        std::vector<uint32_t> matches;
+        symtab->FindAllSymbolsWithNameAndType(ConstString(core_symbols[i]), eSymbolTypeAny, matches);
+        found_objc_markers = !matches.empty();
+      }
+    }
   }
-
-  LLDB_LOG(log, "GNUstepObjCRuntime: ObjC markers found, creating runtime instance");
+  
+  if (!found_objc_markers)
+    return nullptr;
   std::unique_ptr<GNUstepObjCRuntime> runtime_sp(new GNUstepObjCRuntime(process));
   if (runtime_sp) {
     runtime_sp->ArmEarlyInstall();
@@ -207,16 +122,9 @@ GNUstepObjCRuntime::CreateInstance(Process *process,
 
 GNUstepObjCRuntime::GNUstepObjCRuntime(Process *process)
     : ObjCLanguageRuntime(process), m_formatters_registered(false), m_gnustep_library_loaded(false) {
-  Log *log = GetLog(LLDBLog::Process | LLDBLog::Types);
-  LLDB_LOG(log, "GNUstepObjCRuntime constructor called");
-  
-  // Initialize the introspector - this is essential for object introspection
+  // Initialize the introspector for object introspection
   m_introspector_up = std::make_unique<GNUstepObjCRuntimeIntrospector>(process);
-  
-  // CRITICAL: Do absolutely NOTHING during construction that could trigger module loading
-  // Just store the process and defer all initialization to ModulesDidLoad
-  
-  LLDB_LOG(log, "GNUstepObjCRuntime: Constructor completed safely, deferring all initialization");
+  // Defer all heavy initialization to ModulesDidLoad
 }
 
 GNUstepObjCRuntime::~GNUstepObjCRuntime() {
@@ -224,63 +132,43 @@ GNUstepObjCRuntime::~GNUstepObjCRuntime() {
 }
 
 void GNUstepObjCRuntime::ArmEarlyInstall() {
-  Log *log = GetLog(LLDBLog::Language | LLDBLog::Types);
-  LLDB_LOG(log, "[GNUstep] ArmEarlyInstall: Attempting early expression hooks installation");
-  
-  // Try now if libobjc is already present
   if (!m_expression_hooks_installed) {
-    // Try to resolve symbols quietly first
     ResolveAndCacheRuntimeSymbols();
-    
-    // If we found any core symbols, try to install hooks
     if (m_objc_msgSend_addr != LLDB_INVALID_ADDRESS ||
         m_objc_getClass_addr != LLDB_INVALID_ADDRESS) {
       m_gnustep_library_loaded = true;
-      LLDB_LOG(log, "[GNUstep] ArmEarlyInstall: Found runtime symbols, installing hooks now");
       InstallExpressionEvaluationHooks();
-    } else {
-      LLDB_LOG(log, "[GNUstep] ArmEarlyInstall: No runtime symbols yet, will retry on module load");
     }
   }
 }
 
 void GNUstepObjCRuntime::ModulesDidLoad(const ModuleList &module_list) {
-  Log *log = GetLog(LLDBLog::Language | LLDBLog::Types);
-  LLDB_LOG(log, "[GNUstep] ModulesDidLoad: {0} modules loaded", module_list.GetSize());
-  
   // Invalidate object description cache when modules load
-  // New modules may change object layouts, so cached descriptions may become stale
   m_object_description_cache.descriptions.clear();
   m_object_description_cache.last_invalidation = std::chrono::steady_clock::now();
   
-  if (m_expression_hooks_installed) {
+  if (m_expression_hooks_installed)
     return;
-  }
   
-  // Check if any of the new modules are libobjc2 or related
+  // Check for libobjc2 modules
   bool found_objc_module = false;
   for (size_t i = 0; i < module_list.GetSize(); ++i) {
     ModuleSP module_sp = module_list.GetModuleAtIndex(i);
     if (!module_sp) continue;
     
     const char *module_name = module_sp->GetFileSpec().GetFilename().GetCString();
-    if (!module_name) continue;
-    
-    if (strstr(module_name, "libobjc") || strstr(module_name, "objc2") ||
-        (strstr(module_name, "objc") && strstr(module_name, ".dll"))) {
+    if (module_name && (strstr(module_name, "libobjc") || strstr(module_name, "objc2") ||
+        (strstr(module_name, "objc") && strstr(module_name, ".dll")))) {
       found_objc_module = true;
       m_gnustep_library_loaded = true;
-      LLDB_LOG(log, "[GNUstep] ModulesDidLoad: Found ObjC runtime module: {0}", module_name);
       break;
     }
   }
   
   if (found_objc_module) {
-    // If libobjc landed, we can finally resolve everything
     ResolveAndCacheRuntimeSymbols();
     if (m_objc_msgSend_addr != LLDB_INVALID_ADDRESS ||
         m_objc_getClass_addr != LLDB_INVALID_ADDRESS) {
-      LLDB_LOG(log, "[GNUstep] ModulesDidLoad: Runtime symbols now available, installing hooks");
       InstallExpressionEvaluationHooks();
     }
   }
@@ -339,7 +227,7 @@ llvm::Error GNUstepObjCRuntime::GetObjectDescription(
   LLDB_LOG(log, "GNUstepObjCRuntime::GetObjectDescription(Value&) called");
   
   // Add reentrancy guard to prevent recursive calls
-  ReentrancyGuard guard(m_in_object_description);
+  SimpleReentrancyGuard guard(m_in_object_description);
   if (!guard.IsAcquired()) {
     LLDB_LOG(log, "GNUstepObjCRuntime: Reentrancy detected in GetObjectDescription, returning minimal info");
     str.Printf("<object description recursion detected>");
@@ -476,7 +364,7 @@ llvm::Error GNUstepObjCRuntime::GetObjectDescription(
     }
     
     // Fallback: If FunctionCaller fails, try simple expression evaluation
-    EvaluateExpressionOptions options = MakeSafeExprOpts();
+    EvaluateExpressionOptions options = MakeSafeExpressionOptions();
     options.SetSuppressPersistentResult(true);
     options.SetKeepInMemory(false);
     options.SetUseDynamic(lldb::eDynamicCanRunTarget);
@@ -621,13 +509,13 @@ bool GNUstepObjCRuntime::GetDynamicTypeAndAddress(ValueObject &in_value,
   LLDB_LOG(log, "GNUstepObjCRuntime::GetDynamicTypeAndAddress called");
   
   // Add reentrancy guard to prevent recursive calls
-  ReentrancyGuard guard(m_in_dynamic_type_check);
+  SimpleReentrancyGuard guard(m_in_dynamic_type_check);
   if (!guard.IsAcquired()) {
     LLDB_LOG(log, "GNUstepObjCRuntime: Reentrancy detected in GetDynamicTypeAndAddress, returning false");
     return false;
   }
   
-  // Clear the result first (following Apple's pattern)
+  // Clear the result first
   class_type_or_name.Clear();
   value_type = Value::ValueType::Scalar;
   
@@ -730,7 +618,7 @@ bool GNUstepObjCRuntime::GetDynamicTypeAndAddress(ValueObject &in_value,
     LLDB_LOG(log, "GNUstepObjCRuntime: No DeclVendor available for CompilerType lookup");
   }
   
-  // Return true only if we have meaningful type information (following Apple's pattern)
+  // Return true only if we have meaningful type information
   bool success = !class_type_or_name.IsEmpty();
   LLDB_LOG(log, "Dynamic type resolution: {0} at 0x{1:x} - success: {2}", 
            class_name, object_addr, success);
@@ -1022,10 +910,17 @@ GNUstepObjCRuntime::CreateObjectChecker(std::string name, ExecutionContext &exe_
   Log *log = GetLog(LLDBLog::Process | LLDBLog::Types);
   LLDB_LOG(log, "GNUstepObjCRuntime::CreateObjectChecker called with name: {0}", name);
   
-  // Create a working object checker following Apple's exact pattern
-  // Uses Objective-C syntax to avoid runtime function linkage issues
-  LLDB_LOG(log, "GNUstepObjCRuntime::CreateObjectChecker: Creating object checker using Apple's pattern with Objective-C syntax");
-  
+  // Generate the code for the object checker function
+  // This function checks if an Objective-C object is valid and optionally
+  // whether it responds to a given selector.
+  // If the object is invalid or doesn't respond to the selector, it causes
+  // a controlled crash by dereferencing a null pointer, which can be caught
+  // by LLDB to handle conditional breakpoints.
+  // The function signature is:
+  // void <name>(void *obj, void *selector);
+  // where 'obj' is the Objective-C object pointer and 'selector' is the SELectors.
+  // If 'obj' is nil (0), it is considered valid. If 'selector' is nil (0),
+  // the function only checks if 'obj' is valid.
   char check_function_code[2048];
   
   // Check if debugger-specific functions are available (Apple LLDB extensions)
@@ -1452,7 +1347,7 @@ void GNUstepObjCRuntime::InstallSubscriptMethodMapping() {
     (BOOL)[(Class)objc_getClass("NSDictionary") respondsToSelector:@selector(objectForKey:)]
   )";
   
-  EvaluateExpressionOptions options = MakeSafeExprOpts();
+  EvaluateExpressionOptions options = MakeSafeExpressionOptions();
   
   ValueObjectSP result_sp;
   Status error;
@@ -1515,17 +1410,6 @@ void GNUstepObjCRuntime::InstallExpressionEvaluationHooks() {
           
           // Research Agent Plan: Unconditionally declare prototypes for comprehensive IR support
           InjectRuntimeFunctionDecls(*ts);
-          
-          // Also inject minimal Foundation interfaces so utility functions can compile
-          if (m_decl_vendor_up) {
-            LLDB_LOG(log, "Injecting minimal Foundation interfaces into scratch AST for language: {0}", 
-                     (lang == eLanguageTypeC) ? "C" : 
-                     (lang == eLanguageTypeObjC) ? "ObjC" : "ObjC++");
-            auto *gnustep_vendor = static_cast<GNUstepObjCDeclVendor *>(m_decl_vendor_up.get());
-            if (gnustep_vendor) {
-              gnustep_vendor->EnsureMinimalFoundationInterfaces(*ts);
-            }
-          }
         }
       }
     }
@@ -2293,7 +2177,7 @@ lldb::addr_t GNUstepObjCRuntime::CallRuntimeFunction(const char *function_name, 
   LLDB_LOG(log, "CallRuntimeFunction: {0}(\"{1}\")", function_name, string_arg);
   
   // Add reentrancy guard to prevent recursive calls
-  ReentrancyGuard guard(m_in_runtime_function_call);
+  SimpleReentrancyGuard guard(m_in_runtime_function_call);
   if (!guard.IsAcquired()) {
     LLDB_LOG(log, "CallRuntimeFunction: Reentrancy detected, returning INVALID_ADDRESS");
     return LLDB_INVALID_ADDRESS;
@@ -2342,20 +2226,10 @@ lldb::addr_t GNUstepObjCRuntime::CallRuntimeFunction(const char *function_name, 
     return LLDB_INVALID_ADDRESS;
   }
   
-  // Allocate memory for the string argument in the target process
-  Status error;
-  size_t string_len = strlen(string_arg) + 1;
-  lldb::addr_t string_addr = m_process->AllocateMemory(string_len, lldb::ePermissionsReadable, error);
-  if (string_addr == LLDB_INVALID_ADDRESS || error.Fail()) {
-    LLDB_LOG(log, "CallRuntimeFunction: Failed to allocate memory for string: {0}", error.AsCString());
-    return LLDB_INVALID_ADDRESS;
-  }
-  
-  // Write the string to target memory
-  size_t bytes_written = m_process->WriteMemory(string_addr, string_arg, string_len, error);
-  if (bytes_written != string_len || error.Fail()) {
-    LLDB_LOG(log, "CallRuntimeFunction: Failed to write string to memory: {0}", error.AsCString());
-    m_process->DeallocateMemory(string_addr);
+  // Allocate string in target memory using RAII helper
+  TargetStringAllocator string_alloc(m_process, string_arg);
+  if (!string_alloc.IsValid()) {
+    LLDB_LOG(log, "CallRuntimeFunction: Failed to allocate memory for string: {0}", string_alloc.GetError().AsCString());
     return LLDB_INVALID_ADDRESS;
   }
   
@@ -2367,14 +2241,13 @@ lldb::addr_t GNUstepObjCRuntime::CallRuntimeFunction(const char *function_name, 
   ValueList arg_values;
   Value string_value;
   string_value.SetValueType(Value::ValueType::LoadAddress);
-  string_value.GetScalar() = string_addr;
+  string_value.GetScalar() = string_alloc.GetAddress();
   arg_values.PushValue(string_value);
   
   // Get the ABI for function calling conventions
   ABISP abi_sp = m_process->GetABI();
   if (!abi_sp) {
     LLDB_LOG(log, "CallRuntimeFunction: No ABI available");
-    m_process->DeallocateMemory(string_addr);
     return LLDB_INVALID_ADDRESS;
   }
   
@@ -2382,7 +2255,6 @@ lldb::addr_t GNUstepObjCRuntime::CallRuntimeFunction(const char *function_name, 
   TypeSystemClangSP ts = ScratchTypeSystemClang::GetForTarget(m_process->GetTarget());
   if (!ts) {
     LLDB_LOG(log, "CallRuntimeFunction: No type system available");
-    m_process->DeallocateMemory(string_addr);
     return LLDB_INVALID_ADDRESS;
   }
   
@@ -2403,16 +2275,12 @@ lldb::addr_t GNUstepObjCRuntime::CallRuntimeFunction(const char *function_name, 
   
   if (!call_plan_sp || !call_plan_sp->ValidatePlan(nullptr)) {
     LLDB_LOG(log, "CallRuntimeFunction: Failed to create valid call plan");
-    m_process->DeallocateMemory(string_addr);
     return LLDB_INVALID_ADDRESS;
   }
   
   // Execute the function call
   DiagnosticManager diagnostics;
   ExpressionResults result = m_process->RunThreadPlan(exe_ctx, call_plan_sp, EvaluateExpressionOptions(), diagnostics);
-  
-  // Clean up the allocated string memory
-  m_process->DeallocateMemory(string_addr);
   
   if (result != eExpressionCompleted) {
     LLDB_LOG(log, "CallRuntimeFunction: Function call failed with result {0}: {1}", 

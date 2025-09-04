@@ -18,6 +18,7 @@
 #include "GNUstepObjCRuntimeIntrospector.h"
 #include "GNUstepObjCDeclVendor.h"
 #include "GNUstepRuntimeV2API.h"
+#include "GNUstepObjCRuntimeUtilities.h"
 
 #include <unordered_map>
 #include <chrono>
@@ -116,29 +117,6 @@ public:
   void DidAttach(ArchSpec &arch_spec);
 
 private:
-  // Reentrancy guard for recursive function calls
-  class ReentrancyGuard {
-  public:
-    explicit ReentrancyGuard(bool &flag) : m_flag(flag), m_acquired(false) {
-      if (!m_flag) {
-        m_flag = true;
-        m_acquired = true;
-      }
-    }
-    
-    ~ReentrancyGuard() {
-      if (m_acquired) {
-        m_flag = false;
-      }
-    }
-    
-    bool IsAcquired() const { return m_acquired; }
-    
-  private:
-    bool &m_flag;
-    bool m_acquired;
-  };
-
   // Helper method to call runtime functions with string arguments
   lldb::addr_t CallRuntimeFunction(const char *function_name, const char *string_arg);
   

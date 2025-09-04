@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "GNUstepObjCRuntimeIntrospector.h"
+#include "GNUstepObjCRuntimeUtilities.h"
 #include "lldb/Target/Process.h"
 #include "lldb/Target/Target.h"
 #include "lldb/Target/Thread.h"
@@ -31,21 +32,7 @@
 
 using namespace lldb;
 using namespace lldb_private;
-
-// Utility function to create safe expression evaluation options
-// Especially important for Windows to avoid first-chance exception issues
-static EvaluateExpressionOptions MakeSafeExprOpts() {
-  EvaluateExpressionOptions opts;
-  opts.SetUnwindOnError(true);
-  opts.SetIgnoreBreakpoints(true);
-  opts.SetTryAllThreads(false);
-  opts.SetTimeout(std::chrono::microseconds(2500000));  // 2.5 seconds
-  opts.SetTrapExceptions(false);       // Critical on Windows
-  opts.SetOneThreadTimeout(std::chrono::milliseconds(250));
-  opts.SetStopOthers(true);
-  opts.SetIsForUtilityExpr(true);
-  return opts;
-}
+using namespace lldb_private::gnustep_objc_runtime_utilities;
 
 GNUstepObjCRuntimeIntrospector::GNUstepObjCRuntimeIntrospector(Process *process)
     : m_process(process) {
@@ -228,27 +215,14 @@ lldb::addr_t GNUstepObjCRuntimeIntrospector::FindClass(const std::string &class_
   // This is more reliable than trying to parse the class table ourselves
   std::vector<lldb::addr_t> args;
   
-  // First, we need to create a string in the target process memory
-  Status error;
-  lldb::addr_t string_addr = m_process->AllocateMemory(class_name.length() + 1, 
-                                                       lldb::ePermissionsReadable, error);
-  if (error.Fail() || string_addr == LLDB_INVALID_ADDRESS) {
+  // Allocate string in target memory using RAII helper
+  TargetStringAllocator string_alloc(m_process, class_name);
+  if (!string_alloc.IsValid()) {
     return LLDB_INVALID_ADDRESS;
   }
 
-  // Write the class name to target memory
-  size_t bytes_written = m_process->WriteMemory(string_addr, class_name.c_str(), 
-                                               class_name.length() + 1, error);
-  if (error.Fail() || bytes_written != class_name.length() + 1) {
-    m_process->DeallocateMemory(string_addr);
-    return LLDB_INVALID_ADDRESS;
-  }
-
-  args.push_back(string_addr);
+  args.push_back(string_alloc.GetAddress());
   lldb::addr_t class_addr = CallRuntimeFunction("objc_lookup_class", args);
-
-  // Clean up the allocated string
-  m_process->DeallocateMemory(string_addr);
 
   return class_addr;
 }
@@ -388,21 +362,22 @@ lldb::addr_t GNUstepObjCRuntimeIntrospector::CallRuntimeFunctionImpl(
     const ValueList &args,
     ExecutionContext &exe_ctx,
     Status &error) const {
+  using namespace gnustep_objc_runtime_utilities;
     
-  Log *log = GetLog(LLDBLog::Language);
-  LLDB_LOG(log, "[GNUstep] CallRuntimeFunctionImpl: Starting function call for {0}", function_name);
+  GNUStepLogger::ScopedLogger logger("CallRuntimeFunctionImpl", "[GNUstep]");
+  logger.LogMessage("Starting function call for {0}", function_name);
     
   // Get or create the function caller
   std::unique_ptr<FunctionCaller> &caller = 
       GetOrCreateFunctionCaller(function_name, return_type, args, 
                                 exe_ctx, error);
   if (!caller || error.Fail()) {
-    LLDB_LOG(log, "[GNUstep] CallRuntimeFunctionImpl: Failed to get/create function caller for {0}: {1}",
-             function_name, error.Fail() ? error.AsCString() : "null caller");
+    logger.LogMessage("Failed to get/create function caller for {0}: {1}",
+                     function_name, error.Fail() ? error.AsCString() : "null caller");
     return LLDB_INVALID_ADDRESS;
   }
   
-  LLDB_LOG(log, "[GNUstep] CallRuntimeFunctionImpl: Got function caller for {0}", function_name);
+  logger.LogMessage("Got function caller for {0}", function_name);
   
   // Prepare for execution
   DiagnosticManager diagnostics;
@@ -421,7 +396,7 @@ lldb::addr_t GNUstepObjCRuntimeIntrospector::CallRuntimeFunctionImpl(
   }
   
   // Setup execution options
-  EvaluateExpressionOptions options = MakeSafeExprOpts();
+  EvaluateExpressionOptions options = MakeSafeExpressionOptions(true);
   options.SetStopOthers(true);
   options.SetIsForUtilityExpr(true);
   
@@ -599,47 +574,6 @@ GNUstepObjCRuntimeIntrospector::GetOrCreateFunctionCaller(
   }
 }
 
-// Implementation of SetupExecutionContext
-bool GNUstepObjCRuntimeIntrospector::SetupExecutionContext(
-    ExecutionContext &exe_ctx) const {
-    
-  if (!m_process) {
-    return false;
-  }
-  
-  // Get a thread suitable for expression execution
-  ThreadSP thread_sp = m_process->GetThreadList()
-      .GetExpressionExecutionThread();
-  if (!thread_sp) {
-    // Fallback to selected thread
-    thread_sp = m_process->GetThreadList().GetSelectedThread();
-  }
-  
-  if (!thread_sp) {
-    return false;
-  }
-  
-  // Ensure thread is stopped and safe for function calls
-  if (!thread_sp->SafeToCallFunctions()) {
-    return false;
-  }
-  
-  // Build execution context
-  thread_sp->CalculateExecutionContext(exe_ctx);
-  
-  // Ensure we have a frame
-  if (!exe_ctx.GetFramePtr()) {
-    StackFrameSP frame_sp = thread_sp->GetSelectedFrame(
-        DoNoSelectMostRelevantFrame);
-    if (!frame_sp) {
-      frame_sp = thread_sp->GetStackFrameAtIndex(0);
-    }
-    exe_ctx.SetFrameSP(frame_sp);
-  }
-  
-  return exe_ctx.HasThreadScope() && exe_ctx.HasProcessScope();
-}
-
 // Implementation of GetObjCModule
 lldb::ModuleSP GNUstepObjCRuntimeIntrospector::GetObjCModule() const {
   if (!m_process) {
@@ -756,46 +690,26 @@ lldb::addr_t GNUstepObjCRuntimeIntrospector::GetRuntimeFunctionAddress(const cha
     const char *module_name = module_sp->GetFileSpec().GetFilename().GetCString();
     if (!module_name) continue;
 
-    // Check if this is a GNUstep runtime module
+    // Check if this is a GNUstep runtime module (prefer these)
     if (strstr(module_name, "libobjc.so") || 
         strstr(module_name, "libobjc2") ||
         strstr(module_name, "libgnustep-base.so")) {
-
-      const Symbol *symbol = module_sp->FindFirstSymbolWithNameAndType(
-          ConstString(function_name), eSymbolTypeCode);
-
-      if (symbol) {
-        lldb::addr_t addr = symbol->GetAddress().GetLoadAddress(&target);
-        if (addr != LLDB_INVALID_ADDRESS) {
-          Log *log = GetLog(LLDBLog::Language);
-          LLDB_LOG(log, "[GNUstepIntrospector] Resolved {0} to 0x{1:x} in {2}",
-                   function_name, addr, module_name);
-          return addr;
-        }
+      
+      SymbolResolver resolver(target);
+      if (const Symbol *symbol = resolver.FindSymbolWithFallback(
+              ConstString(function_name), eSymbolTypeCode, module_sp)) {
+        return symbol->GetAddress().GetLoadAddress(&target);
       }
     }
   }
-
-  // Fallback: try to find in any module (for system functions like 'free')
-  SymbolContextList sc_list;
-  target.GetImages().FindSymbolsWithNameAndType(
-      ConstString(function_name), eSymbolTypeCode, sc_list);
-
-  if (sc_list.GetSize() > 0) {
-    SymbolContext sc;
-    if (sc_list.GetContextAtIndex(0, sc) && sc.symbol) {
-      lldb::addr_t addr = sc.symbol->GetAddress().GetLoadAddress(&target);
-      if (addr != LLDB_INVALID_ADDRESS) {
-        Log *log = GetLog(LLDBLog::Language);
-        LLDB_LOG(log, "[GNUstepIntrospector] Resolved {0} to 0x{1:x} (fallback search)",
-                 function_name, addr);
-        return addr;
-      }
-    }
+  // Fallback: use symbol resolver for global search
+  SymbolResolver resolver(target);
+  if (const Symbol *symbol = resolver.FindSymbolWithFallback(
+          ConstString(function_name), eSymbolTypeCode)) {
+    return symbol->GetAddress().GetLoadAddress(&target);
   }
 
-  Log *log = GetLog(LLDBLog::Language);
-  LLDB_LOG(log, "[GNUstepIntrospector] Failed to resolve symbol: {0}", function_name);
+  // SymbolResolver already logs failure, just return
   return LLDB_INVALID_ADDRESS;
 }
 
@@ -876,35 +790,17 @@ lldb::addr_t GNUstepObjCRuntimeIntrospector::GetClassPointer(const std::string &
   Log *log = GetLog(LLDBLog::Language);
   LLDB_LOG(log, "[GNUstepIntrospector] GetClassPointer: Looking for class '{0}'", class_name);
   
-  // CRITICAL FIX: Allocate class name string in target process memory
-  Status error;
-  lldb::addr_t string_addr = m_process->AllocateMemory(
-      class_name.length() + 1, 
-      lldb::ePermissionsReadable, 
-      error);
-  
-  if (string_addr == LLDB_INVALID_ADDRESS || error.Fail()) {
+  // Allocate class name string in target process memory using RAII helper
+  TargetStringAllocator string_alloc(m_process, class_name);
+  if (!string_alloc.IsValid()) {
     LLDB_LOG(log, "[GNUstepIntrospector] GetClassPointer: Failed to allocate memory for class name '{0}': {1}", 
-             class_name, error.AsCString());
-    return LLDB_INVALID_ADDRESS;
-  }
-  
-  // Write the class name to target memory
-  size_t bytes_written = m_process->WriteMemory(string_addr, class_name.c_str(), 
-                                               class_name.length() + 1, error);
-  if (bytes_written != class_name.length() + 1 || error.Fail()) {
-    LLDB_LOG(log, "[GNUstepIntrospector] GetClassPointer: Failed to write class name to target memory: {0}", 
-             error.AsCString());
-    m_process->DeallocateMemory(string_addr);
+             class_name, string_alloc.GetError().AsCString());
     return LLDB_INVALID_ADDRESS;
   }
   
   // Call objc_getClass(class_name) with properly allocated string
-  std::vector<lldb::addr_t> args = { string_addr };
+  std::vector<lldb::addr_t> args = { string_alloc.GetAddress() };
   lldb::addr_t result = CallRuntimeFunction("objc_getClass", args);
-  
-  // Clean up allocated memory
-  m_process->DeallocateMemory(string_addr);
   
   LLDB_LOG(log, "[GNUstepIntrospector] GetClassPointer: objc_getClass('{0}') = 0x{1:x}", 
            class_name, result);
@@ -925,35 +821,17 @@ lldb::addr_t GNUstepObjCRuntimeIntrospector::GetMetaClassPointer(const std::stri
   Log *log = GetLog(LLDBLog::Language);
   LLDB_LOG(log, "[GNUstepIntrospector] GetMetaClassPointer: Looking for metaclass '{0}'", class_name);
   
-  // CRITICAL FIX: Allocate class name string in target process memory
-  Status error;
-  lldb::addr_t string_addr = m_process->AllocateMemory(
-      class_name.length() + 1, 
-      lldb::ePermissionsReadable, 
-      error);
-  
-  if (string_addr == LLDB_INVALID_ADDRESS || error.Fail()) {
+  // Allocate class name string in target process memory using RAII helper
+  TargetStringAllocator string_alloc(m_process, class_name);
+  if (!string_alloc.IsValid()) {
     LLDB_LOG(log, "[GNUstepIntrospector] GetMetaClassPointer: Failed to allocate memory for class name '{0}': {1}", 
-             class_name, error.AsCString());
-    return LLDB_INVALID_ADDRESS;
-  }
-  
-  // Write the class name to target memory
-  size_t bytes_written = m_process->WriteMemory(string_addr, class_name.c_str(), 
-                                               class_name.length() + 1, error);
-  if (bytes_written != class_name.length() + 1 || error.Fail()) {
-    LLDB_LOG(log, "[GNUstepIntrospector] GetMetaClassPointer: Failed to write class name to target memory: {0}", 
-             error.AsCString());
-    m_process->DeallocateMemory(string_addr);
+             class_name, string_alloc.GetError().AsCString());
     return LLDB_INVALID_ADDRESS;
   }
   
   // Call objc_getMetaClass(class_name) with properly allocated string
-  std::vector<lldb::addr_t> args = { string_addr };
+  std::vector<lldb::addr_t> args = { string_alloc.GetAddress() };
   lldb::addr_t result = CallRuntimeFunction("objc_getMetaClass", args);
-  
-  // Clean up allocated memory
-  m_process->DeallocateMemory(string_addr);
   
   LLDB_LOG(log, "[GNUstepIntrospector] GetMetaClassPointer: objc_getMetaClass('{0}') = 0x{1:x}", 
            class_name, result);
@@ -1111,31 +989,58 @@ lldb::addr_t GNUstepObjCRuntimeIntrospector::CallRuntimeFunction(
     return LLDB_INVALID_ADDRESS;
   }
   
-  Log *log = GetLog(LLDBLog::Language);
-  LLDB_LOG(log, "[GNUstepIntrospector] CallRuntimeFunction: {0} with {1} args", function_name, args.size());
-  
-  if (!m_process) {
-    LLDB_LOG(log, "[GNUstepIntrospector] No process available");
+  if (!m_process || function_name.empty()) {
     return LLDB_INVALID_ADDRESS;
   }
   
-  // Get function address
-  lldb::addr_t function_addr = GetRuntimeFunctionAddress(function_name.c_str());
-  if (function_addr == LLDB_INVALID_ADDRESS) {
-    LLDB_LOG(log, "[GNUstepIntrospector] Could not resolve function: {0}", function_name);
+  // Setup execution context
+  ExecutionContext exe_ctx;
+  if (!SetupRuntimeExecutionContext(m_process, exe_ctx)) {
     return LLDB_INVALID_ADDRESS;
   }
   
-  // This is a simplified implementation that should call via FunctionCaller
-  // For now, return LLDB_INVALID_ADDRESS to indicate the method signature exists
-  // but implementation is needed based on the specific function being called
+  // Get scratch type system for argument and return types
+  TypeSystemClangSP scratch_ts_sp = 
+      ScratchTypeSystemClang::GetForTarget(exe_ctx.GetTargetRef());
+  if (!scratch_ts_sp) {
+    return LLDB_INVALID_ADDRESS;
+  }
   
-  LLDB_LOG(log, "[GNUstepIntrospector] CallRuntimeFunction: Function {0} resolved to 0x{1:x}, but implementation needs completion", 
-           function_name, function_addr);
+  // Build argument list
+  ValueList arg_values;
+  for (lldb::addr_t arg : args) {
+    Value arg_value;
+
+    CompilerType type;
+    if (function_name == "objc_lookup_class" || 
+        function_name == "objc_getClass" || 
+        function_name == "objc_getMetaClass") {
+      // const char * - these functions expect string arguments
+      type = scratch_ts_sp->GetCStringType(true);
+    } else {
+      // void *
+      type = scratch_ts_sp->GetBasicType(eBasicTypeVoid).GetPointerType();
+    }
+
+    arg_value.SetCompilerType(type);
+    arg_value.SetValueType(Value::ValueType::Scalar); // ALWAYS target scalar
+    arg_value.GetScalar() = arg;
+
+    arg_values.PushValue(arg_value);
+  }
   
-  // TODO: Implement actual FunctionCaller invocation here
-  // This method signature exists to allow compilation but needs proper implementation
-  // based on the function name and argument types
+  // Return type is typically a pointer
+  CompilerType return_type = 
+      scratch_ts_sp->GetBasicType(eBasicTypeVoid).GetPointerType();
   
-  return LLDB_INVALID_ADDRESS;
+  // Call the implementation
+  Status error;
+  lldb::addr_t result = CallRuntimeFunctionImpl(
+      function_name.c_str(), return_type, arg_values, exe_ctx, error);
+      
+  if (error.Fail()) {
+    return LLDB_INVALID_ADDRESS;
+  }
+  
+  return result;
 }
