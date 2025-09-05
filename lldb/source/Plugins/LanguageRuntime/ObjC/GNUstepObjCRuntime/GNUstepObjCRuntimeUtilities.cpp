@@ -7,16 +7,23 @@
 //===----------------------------------------------------------------------===//
 
 #include "GNUstepObjCRuntimeUtilities.h"
+#include "Plugins/TypeSystem/Clang/TypeSystemClang.h"
 #include "lldb/Core/Module.h"
 #include "lldb/Core/ModuleList.h"
+#include "lldb/Core/Value.h"
+#include "lldb/Expression/DiagnosticManager.h"
 #include "lldb/Symbol/Symbol.h"
 #include "lldb/Symbol/SymbolContext.h"
+#include "lldb/Target/ABI.h"
+#include "lldb/Target/ExecutionContext.h"
 #include "lldb/Target/StackFrame.h"
 #include "lldb/Target/Target.h"
 #include "lldb/Target/Thread.h"
 #include "lldb/Target/ThreadList.h"
+#include "lldb/Target/ThreadPlanCallFunction.h"
 #include "lldb/Utility/LLDBLog.h"
 #include "lldb/Utility/Log.h"
+#include "lldb/ValueObject/ValueObject.h"
 #include <chrono>
 
 
@@ -339,6 +346,256 @@ void SymbolResolver::FindSymbolsAcrossModules(const ConstString &symbol_name,
     LLDB_LOG(log, "[GNUstepSymbolResolver] Found {0} instances of {1}",
              sc_list.GetSize(), symbol_name.GetCString());
   }
+}
+
+/// RuntimeFunctionCaller implementation - consolidates 3 different implementations
+RuntimeFunctionCaller::RuntimeFunctionCaller(Process *process)
+    : m_process(process), m_symbol_cache(process) {}
+
+lldb::addr_t RuntimeFunctionCaller::GetRuntimeFunctionAddress(const char *function_name) {
+  return m_symbol_cache.GetSymbolAddress(function_name);
+}
+
+lldb::ModuleSP RuntimeFunctionCaller::FindObjCModule() const {
+  if (!m_process) {
+    return lldb::ModuleSP();
+  }
+
+  Target &target = m_process->GetTarget();
+  const ModuleList &modules = target.GetImages();
+
+  for (uint32_t idx = 0; idx < modules.GetSize(); idx++) {
+    ModuleSP module_sp = modules.GetModuleAtIndex(idx);
+    if (module_sp) {
+      const char *module_name =
+          module_sp->GetFileSpec().GetFilename().GetCString();
+      if (module_name && (strstr(module_name, "libobjc.so") ||
+                          strstr(module_name, "libobjc2") ||
+                          (strstr(module_name, "libobjc-") && strstr(module_name, ".dll")) ||
+                          (strstr(module_name, "libobjc2") && strstr(module_name, ".dll")))) {
+        return module_sp;
+      }
+    }
+  }
+  return lldb::ModuleSP();
+}
+
+lldb::ModuleSP RuntimeFunctionCaller::FindFoundationModule() const {
+  if (!m_process) {
+    return lldb::ModuleSP();
+  }
+
+  Target &target = m_process->GetTarget();
+  const ModuleList &modules = target.GetImages();
+
+  for (uint32_t idx = 0; idx < modules.GetSize(); idx++) {
+    ModuleSP module_sp = modules.GetModuleAtIndex(idx);
+    if (module_sp) {
+      const char *module_name =
+          module_sp->GetFileSpec().GetFilename().GetCString();
+      if (module_name && (strstr(module_name, "libgnustep-base.so") ||
+                          (strstr(module_name, "gnustep-base") && strstr(module_name, ".dll")))) {
+        return module_sp;
+      }
+    }
+  }
+  return lldb::ModuleSP();
+}
+
+lldb::addr_t RuntimeFunctionCaller::CallRuntimeFunction(const char *function_name, const char *string_arg) {
+  GNUStepLogger::ScopedLogger logger("CallRuntimeFunction", "[GNUstepUtilities]");
+  logger.LogMessage("Calling {0}(\"{1}\")", function_name, string_arg);
+
+  // Apply reentrancy guard
+  ReentrancyGuard guard(m_in_function_call);
+  if (!guard.IsAcquired()) {
+    logger.LogMessage("Reentrancy detected, blocking call");
+    return LLDB_INVALID_ADDRESS;
+  }
+
+  if (!m_process || !function_name || !string_arg) {
+    return LLDB_INVALID_ADDRESS;
+  }
+
+  // Setup execution context
+  ExecutionContext exe_ctx;
+  if (!SetupRuntimeExecutionContext(m_process, exe_ctx)) {
+    logger.LogMessage("Failed to setup execution context");
+    return LLDB_INVALID_ADDRESS;
+  }
+
+  // Get type system for building argument types
+  TypeSystemClangSP scratch_ts_sp =
+      ScratchTypeSystemClang::GetForTarget(exe_ctx.GetTargetRef());
+  if (!scratch_ts_sp) {
+    logger.LogMessage("Failed to get type system");
+    return LLDB_INVALID_ADDRESS;
+  }
+
+  // Allocate string in target memory
+  TargetStringAllocator string_alloc(m_process, string_arg);
+  if (!string_alloc.IsValid()) {
+    logger.LogMessage("Failed to allocate string: {0}", string_alloc.GetError().AsCString());
+    return LLDB_INVALID_ADDRESS;
+  }
+
+  // Build argument list
+  ValueList arg_values;
+  Value string_value;
+  string_value.SetValueType(Value::ValueType::LoadAddress);
+  string_value.SetCompilerType(scratch_ts_sp->GetCStringType(true));
+  string_value.GetScalar() = string_alloc.GetAddress();
+  arg_values.PushValue(string_value);
+
+  // Return type is a void pointer (Class)
+  CompilerType return_type = scratch_ts_sp->GetBasicType(eBasicTypeVoid).GetPointerType();
+
+  // Call the implementation
+  Status error;
+  lldb::addr_t result = CallRuntimeFunctionImpl(function_name, return_type, arg_values, exe_ctx, error);
+
+  if (error.Fail()) {
+    logger.LogMessage("Call failed: {0}", error.AsCString());
+    return LLDB_INVALID_ADDRESS;
+  }
+
+  logger.LogMessage("Call succeeded, returned 0x{0:x}", result);
+  return result;
+}
+
+lldb::addr_t RuntimeFunctionCaller::CallRuntimeFunction(const std::string &function_name, 
+                                                        const std::vector<lldb::addr_t> &args) {
+  GNUStepLogger::ScopedLogger logger("CallRuntimeFunction", "[GNUstepUtilities]");
+  logger.LogMessage("Calling {0} with {1} args", function_name, args.size());
+
+  // Apply reentrancy guard
+  ReentrancyGuard guard(m_in_function_call);
+  if (!guard.IsAcquired()) {
+    logger.LogMessage("Reentrancy detected, blocking call");
+    return LLDB_INVALID_ADDRESS;
+  }
+
+  if (!m_process || function_name.empty()) {
+    return LLDB_INVALID_ADDRESS;
+  }
+
+  // Setup execution context
+  ExecutionContext exe_ctx;
+  if (!SetupRuntimeExecutionContext(m_process, exe_ctx)) {
+    logger.LogMessage("Failed to setup execution context");
+    return LLDB_INVALID_ADDRESS;
+  }
+
+  // Get type system for building argument types
+  TypeSystemClangSP scratch_ts_sp =
+      ScratchTypeSystemClang::GetForTarget(exe_ctx.GetTargetRef());
+  if (!scratch_ts_sp) {
+    logger.LogMessage("Failed to get type system");
+    return LLDB_INVALID_ADDRESS;
+  }
+
+  // Build argument list
+  ValueList arg_values;
+  for (lldb::addr_t arg : args) {
+    Value arg_value;
+    CompilerType type;
+    
+    // Choose appropriate type based on function
+    if (function_name == "objc_lookup_class" || function_name == "objc_getClass" ||
+        function_name == "objc_getMetaClass") {
+      type = scratch_ts_sp->GetCStringType(true);
+    } else {
+      type = scratch_ts_sp->GetBasicType(eBasicTypeVoid).GetPointerType();
+    }
+
+    arg_value.SetCompilerType(type);
+    arg_value.SetValueType(Value::ValueType::Scalar);
+    arg_value.GetScalar() = arg;
+    arg_values.PushValue(arg_value);
+  }
+
+  // Return type is typically a pointer
+  CompilerType return_type = scratch_ts_sp->GetBasicType(eBasicTypeVoid).GetPointerType();
+
+  // Call the implementation
+  Status error;
+  lldb::addr_t result = CallRuntimeFunctionImpl(function_name.c_str(), return_type, arg_values, exe_ctx, error);
+
+  if (error.Fail()) {
+    logger.LogMessage("Call failed: {0}", error.AsCString());
+    return LLDB_INVALID_ADDRESS;
+  }
+
+  logger.LogMessage("Call succeeded, returned 0x{0:x}", result);
+  return result;
+}
+
+lldb::addr_t RuntimeFunctionCaller::CallRuntimeFunctionImpl(const char *function_name,
+                                                            const CompilerType &return_type,
+                                                            ValueList &args,
+                                                            ExecutionContext &exe_ctx,
+                                                            Status &error) {
+  // Resolve function address
+  lldb::addr_t func_addr = GetRuntimeFunctionAddress(function_name);
+  if (func_addr == LLDB_INVALID_ADDRESS) {
+    error = Status::FromErrorStringWithFormat("Could not resolve function '%s'", function_name);
+    return LLDB_INVALID_ADDRESS;
+  }
+
+  // Set up function address
+  Address function_address;
+  function_address.SetLoadAddress(func_addr, &m_process->GetTarget());
+
+  // Get ABI for function calling conventions
+  ABISP abi_sp = m_process->GetABI();
+  if (!abi_sp) {
+    error = Status::FromErrorString("No ABI available");
+    return LLDB_INVALID_ADDRESS;
+  }
+
+  // Convert ValueList to ArrayRef<addr_t> 
+  std::vector<addr_t> arg_addrs;
+  for (size_t i = 0; i < args.GetSize(); ++i) {
+    Value *val = args.GetValueAtIndex(i);
+    if (val) {
+      arg_addrs.push_back(val->GetScalar().ULongLong());
+    }
+  }
+
+  Thread *thread = exe_ctx.GetThreadPtr();
+  if (!thread) {
+    error = Status::FromErrorString("No thread available for execution");
+    return LLDB_INVALID_ADDRESS;
+  }
+
+  // Create the call plan
+  EvaluateExpressionOptions options = MakeSafeExpressionOptions(true);
+  ThreadPlanSP call_plan_sp(new ThreadPlanCallFunction(
+      *thread, function_address, return_type, llvm::ArrayRef<addr_t>(arg_addrs), options));
+
+  if (!call_plan_sp || !call_plan_sp->ValidatePlan(nullptr)) {
+    error = Status::FromErrorString("Failed to create valid call plan");
+    return LLDB_INVALID_ADDRESS;
+  }
+
+  // Execute the function call
+  DiagnosticManager diagnostics;
+  ExpressionResults result = m_process->RunThreadPlan(exe_ctx, call_plan_sp, options, diagnostics);
+
+  if (result != eExpressionCompleted) {
+    error = Status::FromErrorStringWithFormat("Function execution failed: %s",
+                                              diagnostics.GetString().c_str());
+    return LLDB_INVALID_ADDRESS;
+  }
+
+  // Get the return value
+  ValueObjectSP return_value_sp = call_plan_sp->GetReturnValueObject();
+  if (!return_value_sp) {
+    error = Status::FromErrorString("No return value available");
+    return LLDB_INVALID_ADDRESS;
+  }
+
+  return return_value_sp->GetValueAsUnsigned(LLDB_INVALID_ADDRESS);
 }
 
 } // namespace gnustep_objc_runtime_utilities

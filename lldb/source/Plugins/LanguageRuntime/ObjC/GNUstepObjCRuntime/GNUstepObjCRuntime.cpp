@@ -115,6 +115,11 @@ GNUstepObjCRuntime::CreateInstance(Process *process,
 
 GNUstepObjCRuntime::GNUstepObjCRuntime(Process *process)
     : ObjCLanguageRuntime(process), m_formatters_registered(false), m_gnustep_library_loaded(false) {
+  // Initialize the consolidated runtime function caller
+  if (process) {
+    m_runtime_caller = std::make_unique<RuntimeFunctionCaller>(process);
+  }
+  
   // Initialize the introspector for object introspection
   m_introspector_up = std::make_unique<GNUstepObjCRuntimeIntrospector>(process);
   // Defer all heavy initialization to ModulesDidLoad
@@ -2024,132 +2029,12 @@ std::map<std::string, lldb::addr_t> GNUstepObjCRuntime::GetObjCRuntimeAddresses(
 }
 
 lldb::addr_t GNUstepObjCRuntime::CallRuntimeFunction(const char *function_name, const char *string_arg) {
-  Log *log = GetLog(LLDBLog::Language | LLDBLog::Types);
-  LLDB_LOG(log, "CallRuntimeFunction: {0}(\"{1}\")", function_name, string_arg);
-  
-  // Add reentrancy guard to prevent recursive calls
-  SimpleReentrancyGuard guard(m_in_runtime_function_call);
-  if (!guard.IsAcquired()) {
-    LLDB_LOG(log, "CallRuntimeFunction: Reentrancy detected, returning INVALID_ADDRESS");
+  if (!m_runtime_caller) {
     return LLDB_INVALID_ADDRESS;
   }
-  
-  if (!m_process || !m_process->IsAlive()) {
-    LLDB_LOG(log, "CallRuntimeFunction: Process not available");
-    return LLDB_INVALID_ADDRESS;
-  }
-  
-  // Get the function address
-  lldb::addr_t func_addr = LLDB_INVALID_ADDRESS;
-  if (strcmp(function_name, "objc_getClass") == 0) {
-    func_addr = m_objc_getClass_addr;
-  } else if (strcmp(function_name, "sel_getUid") == 0) {
-    func_addr = m_sel_getUid_addr;
-  } else {
-    LLDB_LOG(log, "CallRuntimeFunction: Unknown function {0}", function_name);
-    return LLDB_INVALID_ADDRESS;
-  }
-  
-  if (func_addr == LLDB_INVALID_ADDRESS) {
-    LLDB_LOG(log, "CallRuntimeFunction: Function {0} not resolved", function_name);
-    return LLDB_INVALID_ADDRESS;
-  }
-  
-  // Make sure we have execution context with a valid thread
-  ExecutionContext exe_ctx(m_process);
-  
-  // Try to get a suitable thread for execution
-  Thread *thread = exe_ctx.GetThreadPtr();
-  if (!thread) {
-    // If no thread in execution context, try to get a stopped thread from the process
-    ThreadSP thread_sp = m_process->GetThreadList().GetSelectedThread();
-    if (!thread_sp) {
-      thread_sp = m_process->GetThreadList().GetThreadAtIndex(0);
-    }
-    if (thread_sp) {
-      exe_ctx.SetThreadSP(thread_sp);
-      thread = thread_sp.get();
-    }
-  }
-  
-  if (!thread) {
-    LLDB_LOG(log, "CallRuntimeFunction: No thread available");
-    return LLDB_INVALID_ADDRESS;
-  }
-  
-  // Allocate string in target memory using RAII helper
-  TargetStringAllocator string_alloc(m_process, string_arg);
-  if (!string_alloc.IsValid()) {
-    LLDB_LOG(log, "CallRuntimeFunction: Failed to allocate memory for string: {0}", string_alloc.GetError().AsCString());
-    return LLDB_INVALID_ADDRESS;
-  }
-  
-  // Set up the function address
-  Address function_address;
-  function_address.SetLoadAddress(func_addr, &m_process->GetTarget());
-  
-  // Set up arguments for objc_getClass(const char*)
-  ValueList arg_values;
-  Value string_value;
-  string_value.SetValueType(Value::ValueType::LoadAddress);
-  string_value.GetScalar() = string_alloc.GetAddress();
-  arg_values.PushValue(string_value);
-  
-  // Get the ABI for function calling conventions
-  ABISP abi_sp = m_process->GetABI();
-  if (!abi_sp) {
-    LLDB_LOG(log, "CallRuntimeFunction: No ABI available");
-    return LLDB_INVALID_ADDRESS;
-  }
-  
-  // Create a simple return type (void* / Class)
-  TypeSystemClangSP ts = ScratchTypeSystemClang::GetForTarget(m_process->GetTarget());
-  if (!ts) {
-    LLDB_LOG(log, "CallRuntimeFunction: No type system available");
-    return LLDB_INVALID_ADDRESS;
-  }
-  
-  CompilerType return_type = ts->GetBasicType(eBasicTypeVoid).GetPointerType();
-  
-  // Convert ValueList to ArrayRef<addr_t>
-  std::vector<addr_t> args;
-  for (size_t i = 0; i < arg_values.GetSize(); ++i) {
-    Value *val = arg_values.GetValueAtIndex(i);
-    if (val) {
-      args.push_back(val->GetScalar().ULongLong());
-    }
-  }
-  
-  // Create the call plan
-  ThreadPlanSP call_plan_sp(new ThreadPlanCallFunction(
-      *thread, function_address, return_type, llvm::ArrayRef<addr_t>(args), EvaluateExpressionOptions()));
-  
-  if (!call_plan_sp || !call_plan_sp->ValidatePlan(nullptr)) {
-    LLDB_LOG(log, "CallRuntimeFunction: Failed to create valid call plan");
-    return LLDB_INVALID_ADDRESS;
-  }
-  
-  // Execute the function call
-  DiagnosticManager diagnostics;
-  ExpressionResults result = m_process->RunThreadPlan(exe_ctx, call_plan_sp, EvaluateExpressionOptions(), diagnostics);
-  
-  if (result != eExpressionCompleted) {
-    LLDB_LOG(log, "CallRuntimeFunction: Function call failed with result {0}: {1}", 
-             (int)result, diagnostics.GetString().c_str());
-    return LLDB_INVALID_ADDRESS;
-  }
-  
-  // Get the return value
-  ValueObjectSP return_value_sp = call_plan_sp->GetReturnValueObject();
-  if (!return_value_sp) {
-    LLDB_LOG(log, "CallRuntimeFunction: No return value available");
-    return LLDB_INVALID_ADDRESS;
-  }
-  
-  lldb::addr_t return_addr = return_value_sp->GetValueAsUnsigned(LLDB_INVALID_ADDRESS);
-  
-  LLDB_LOG(log, "CallRuntimeFunction: {0}(\"{1}\") returned 0x{2:x}", function_name, string_arg, return_addr);
-  return return_addr;
+
+  // Delegate to the consolidated runtime function caller
+  return m_runtime_caller->CallRuntimeFunction(function_name, string_arg);
 }
 
 lldb::addr_t GNUstepObjCRuntime::LookupRuntimeSymbol(ConstString name) {

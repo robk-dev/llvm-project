@@ -276,6 +276,39 @@ private:
   Target &m_target;
 };
 
+/// Consolidated runtime function caller - replaces 3 different implementations
+class RuntimeFunctionCaller {
+public:
+  explicit RuntimeFunctionCaller(Process *process);
+  ~RuntimeFunctionCaller() = default;
+
+  /// Call a runtime function with a single string argument (objc_getClass, sel_getUid)
+  lldb::addr_t CallRuntimeFunction(const char *function_name, const char *string_arg);
+  
+  /// Call a runtime function with multiple arguments
+  lldb::addr_t CallRuntimeFunction(const std::string &function_name, 
+                                   const std::vector<lldb::addr_t> &args);
+
+  /// Get or resolve a runtime function address with caching
+  lldb::addr_t GetRuntimeFunctionAddress(const char *function_name);
+
+  /// Find GNUstep runtime modules (libobjc2, libgnustep-base)
+  lldb::ModuleSP FindObjCModule() const;
+  lldb::ModuleSP FindFoundationModule() const;
+
+private:
+  Process *m_process;
+  RuntimeSymbolCache m_symbol_cache;
+  mutable std::atomic<bool> m_in_function_call{false};
+
+  /// Core implementation for calling runtime functions
+  lldb::addr_t CallRuntimeFunctionImpl(const char *function_name,
+                                       const CompilerType &return_type,
+                                       ValueList &args,
+                                       ExecutionContext &exe_ctx,
+                                       Status &error);
+};
+
 } // namespace gnustep_objc_runtime_utilities
 } // namespace lldb_private
 

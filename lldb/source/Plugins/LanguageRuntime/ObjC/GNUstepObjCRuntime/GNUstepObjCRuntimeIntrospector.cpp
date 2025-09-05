@@ -52,6 +52,9 @@ GNUstepObjCRuntimeIntrospector::GNUstepObjCRuntimeIntrospector(Process *process)
   if (m_process) {
     m_address_size = m_process->GetAddressByteSize();
     m_byte_order = m_process->GetByteOrder();
+    
+    // Create the consolidated runtime function caller
+    m_runtime_caller = std::make_unique<RuntimeFunctionCaller>(m_process);
 
     // Note: Don't load runtime symbols here as libraries may not be loaded yet
     // LoadRuntimeSymbols() will be called on-demand when symbols are first
@@ -228,24 +231,8 @@ GNUstepObjCRuntimeIntrospector::GetClassNameFromISA(lldb::addr_t isa_addr) {
 
 lldb::addr_t
 GNUstepObjCRuntimeIntrospector::FindClass(const std::string &class_name) {
-  if (!m_process || class_name.empty()) {
-    return LLDB_INVALID_ADDRESS;
-  }
-
-  // Try to call objc_lookup_class function in the target
-  // This is more reliable than trying to parse the class table ourselves
-  std::vector<lldb::addr_t> args;
-
-  // Allocate string in target memory using RAII helper
-  TargetStringAllocator string_alloc(m_process, class_name);
-  if (!string_alloc.IsValid()) {
-    return LLDB_INVALID_ADDRESS;
-  }
-
-  args.push_back(string_alloc.GetAddress());
-  lldb::addr_t class_addr = CallRuntimeFunction("objc_lookup_class", args);
-
-  return class_addr;
+  // Consolidated implementation: use GetClassPointer which has better error handling
+  return GetClassPointer(class_name);
 }
 
 bool GNUstepObjCRuntimeIntrospector::IsValidGNUstepRuntime() {
@@ -598,62 +585,20 @@ GNUstepObjCRuntimeIntrospector::GetOrCreateFunctionCaller(
 
 // Implementation of GetObjCModule
 lldb::ModuleSP GNUstepObjCRuntimeIntrospector::GetObjCModule() const {
-  if (!m_process) {
+  if (!m_runtime_caller) {
     return ModuleSP();
   }
 
-  Target &target = m_process->GetTarget();
-  const ModuleList &modules = target.GetImages();
-
-  for (uint32_t idx = 0; idx < modules.GetSize(); idx++) {
-    ModuleSP module_sp = modules.GetModuleAtIndex(idx);
-    if (module_sp) {
-      const char *module_name =
-          module_sp->GetFileSpec().GetFilename().GetCString();
-      if (module_name && (strstr(module_name, "libobjc.so") ||
-                          strstr(module_name, "libobjc2"))) {
-        return module_sp;
-      }
-
-      // Windows DLL variants
-      if (module_name &&
-          ((strstr(module_name, "libobjc-") && strstr(module_name, ".dll")) ||
-           (strstr(module_name, "libobjc2") && strstr(module_name, ".dll")))) {
-        return module_sp;
-      }
-    }
-  }
-
-  return ModuleSP();
+  return m_runtime_caller->FindObjCModule();
 }
 
 // Implementation of GetFoundationModule
 lldb::ModuleSP GNUstepObjCRuntimeIntrospector::GetFoundationModule() const {
-  if (!m_process) {
+  if (!m_runtime_caller) {
     return ModuleSP();
   }
 
-  Target &target = m_process->GetTarget();
-  const ModuleList &modules = target.GetImages();
-
-  for (uint32_t idx = 0; idx < modules.GetSize(); idx++) {
-    ModuleSP module_sp = modules.GetModuleAtIndex(idx);
-    if (module_sp) {
-      const char *module_name =
-          module_sp->GetFileSpec().GetFilename().GetCString();
-      if (module_name && strstr(module_name, "libgnustep-base.so")) {
-        return module_sp;
-      }
-
-      // Windows DLL variants
-      if (module_name && strstr(module_name, "gnustep-base") &&
-          strstr(module_name, ".dll")) {
-        return module_sp;
-      }
-    }
-  }
-
-  return ModuleSP();
+  return m_runtime_caller->FindFoundationModule();
 }
 
 void GNUstepObjCRuntimeIntrospector::EnsureRuntimeSymbolsLoaded() {
@@ -702,46 +647,12 @@ bool GNUstepObjCRuntimeIntrospector::LoadRuntimeSymbols() {
 
 lldb::addr_t GNUstepObjCRuntimeIntrospector::GetRuntimeFunctionAddress(
     const char *function_name) {
-  if (!m_process || !function_name) {
+  if (!m_runtime_caller) {
     return LLDB_INVALID_ADDRESS;
   }
 
-  Target &target = m_process->GetTarget();
-  const ModuleList &modules = target.GetImages();
-
-  // libobjc-4.6.dll
-  // gnustep-base-1_24.dll
-  // First try to find in libobjc2/libobjc.so (primary runtime)
-  for (uint32_t idx = 0; idx < modules.GetSize(); idx++) {
-    ModuleSP module_sp = modules.GetModuleAtIndex(idx);
-    if (!module_sp)
-      continue;
-
-    const char *module_name =
-        module_sp->GetFileSpec().GetFilename().GetCString();
-    if (!module_name)
-      continue;
-
-    // Check if this is a GNUstep runtime module (prefer these)
-    if (strstr(module_name, "libobjc.so") || strstr(module_name, "libobjc2") ||
-        strstr(module_name, "libgnustep-base.so")) {
-
-      SymbolResolver resolver(target);
-      if (const Symbol *symbol = resolver.FindSymbolWithFallback(
-              ConstString(function_name), eSymbolTypeCode, module_sp)) {
-        return symbol->GetAddress().GetLoadAddress(&target);
-      }
-    }
-  }
-  // Fallback: use symbol resolver for global search
-  SymbolResolver resolver(target);
-  if (const Symbol *symbol = resolver.FindSymbolWithFallback(
-          ConstString(function_name), eSymbolTypeCode)) {
-    return symbol->GetAddress().GetLoadAddress(&target);
-  }
-
-  // SymbolResolver already logs failure, just return
-  return LLDB_INVALID_ADDRESS;
+  // Delegate to the consolidated runtime function caller
+  return m_runtime_caller->GetRuntimeFunctionAddress(function_name);
 }
 
 lldb::addr_t
@@ -1056,72 +967,13 @@ GNUstepObjCRuntimeIntrospector::GetClassMethods(lldb::addr_t class_ptr) {
 
 lldb::addr_t GNUstepObjCRuntimeIntrospector::CallRuntimeFunction(
     const std::string &function_name, const std::vector<lldb::addr_t> &args) {
-
-  // Apply reentrancy guard to prevent nested calls
-  ReentrancyGuard guard(m_in_function_call);
-  if (!guard.IsAcquired()) {
-    Log *log = GetLog(LLDBLog::Language);
-    LLDB_LOG(log,
-             "[GNUstepIntrospector] Reentrancy detected in "
-             "CallRuntimeFunction({0}), blocking to prevent recursion",
-             function_name);
+  
+  if (!m_runtime_caller) {
     return LLDB_INVALID_ADDRESS;
   }
 
-  if (!m_process || function_name.empty()) {
-    return LLDB_INVALID_ADDRESS;
-  }
-
-  // Setup execution context
-  ExecutionContext exe_ctx;
-  if (!SetupRuntimeExecutionContext(m_process, exe_ctx)) {
-    return LLDB_INVALID_ADDRESS;
-  }
-
-  // Get scratch type system for argument and return types
-  TypeSystemClangSP scratch_ts_sp =
-      ScratchTypeSystemClang::GetForTarget(exe_ctx.GetTargetRef());
-  if (!scratch_ts_sp) {
-    return LLDB_INVALID_ADDRESS;
-  }
-
-  // Build argument list
-  ValueList arg_values;
-  for (lldb::addr_t arg : args) {
-    Value arg_value;
-
-    CompilerType type;
-    if (function_name == "objc_lookup_class" ||
-        function_name == "objc_getClass" ||
-        function_name == "objc_getMetaClass") {
-      // const char * - these functions expect string arguments
-      type = scratch_ts_sp->GetCStringType(true);
-    } else {
-      // void *
-      type = scratch_ts_sp->GetBasicType(eBasicTypeVoid).GetPointerType();
-    }
-
-    arg_value.SetCompilerType(type);
-    arg_value.SetValueType(Value::ValueType::Scalar); // ALWAYS target scalar
-    arg_value.GetScalar() = arg;
-
-    arg_values.PushValue(arg_value);
-  }
-
-  // Return type is typically a pointer
-  CompilerType return_type =
-      scratch_ts_sp->GetBasicType(eBasicTypeVoid).GetPointerType();
-
-  // Call the implementation
-  Status error;
-  lldb::addr_t result = CallRuntimeFunctionImpl(
-      function_name.c_str(), return_type, arg_values, exe_ctx, error);
-
-  if (error.Fail()) {
-    return LLDB_INVALID_ADDRESS;
-  }
-
-  return result;
+  // Delegate to the consolidated runtime function caller
+  return m_runtime_caller->CallRuntimeFunction(function_name, args);
 }
 
 // Runtime class enumeration methods for dynamic formatter registration

@@ -114,7 +114,7 @@ public:
   void DidAttach(ArchSpec &arch_spec);
 
 private:
-  // Helper method to call runtime functions with string arguments
+  // Helper method to call runtime functions with string arguments (delegates to utilities)
   lldb::addr_t CallRuntimeFunction(const char *function_name,
                                    const char *string_arg);
 
@@ -137,7 +137,8 @@ private:
   // Reentrancy protection flags
   bool m_in_object_description = false;
   bool m_in_dynamic_type_check = false;
-  bool m_in_runtime_function_call = false;
+  // Consolidated runtime function caller
+  std::unique_ptr<gnustep_objc_runtime_utilities::RuntimeFunctionCaller> m_runtime_caller;
 
   // Caching for performance
   struct ObjectDescriptionCache {

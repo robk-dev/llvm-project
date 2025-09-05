@@ -99,8 +99,7 @@ public:
   // Check if an address represents a valid object
   bool IsValidObjectPointer(lldb::addr_t obj_addr);
 
-  // Helper to call functions in the target process (public interface for
-  // DeclVendor)
+  // Helper to call functions in the target process (delegates to utilities)
   lldb::addr_t CallRuntimeFunction(const std::string &function_name,
                                    const std::vector<lldb::addr_t> &args);
 
@@ -217,7 +216,6 @@ public:
   llvm::Expected<ClassInfo> GetClassInfoFromPointer(Class cls);
 
   // Find a class by name (enhanced version returning Class pointer)
-  llvm::Expected<Class> FindClassPointer(const std::string &class_name);
 
   // Get class of an object (or metaclass of a class)
   llvm::Expected<Class> GetObjectClass(void *obj);
@@ -248,8 +246,8 @@ private:
   uint32_t m_address_size;
   lldb::ByteOrder m_byte_order;
 
-  // Reentrancy protection
-  mutable std::atomic<bool> m_in_function_call{false};
+  // Consolidated runtime function caller
+  std::unique_ptr<RuntimeFunctionCaller> m_runtime_caller;
 
   // Runtime function addresses for direct calling (performance optimization)
   lldb::addr_t m_object_getClass_addr = LLDB_INVALID_ADDRESS;
