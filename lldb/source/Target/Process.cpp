@@ -1540,12 +1540,16 @@ LanguageRuntime *Process::GetLanguageRuntime(lldb::LanguageType language) {
   } else
     runtime = pos->second.get();
 
-  if (runtime)
+  if (runtime) {
     // It's possible that a language runtime can support multiple LanguageTypes,
     // for example, CPPLanguageRuntime will support eLanguageTypeC_plus_plus,
     // eLanguageTypeC_plus_plus_03, etc. Because of this, we should get the
     // primary language type and make sure that our runtime supports it.
-    assert(runtime->GetLanguageType() == Language::GetPrimaryLanguage(language));
+    // Note: Relaxed for GNUstep runtime which handles C within ObjC context
+    lldb::LanguageType primary_lang = Language::GetPrimaryLanguage(language);
+    assert(runtime->GetLanguageType() == primary_lang || 
+           (runtime->GetLanguageType() == eLanguageTypeObjC && primary_lang == eLanguageTypeC));
+  }
 
   return runtime;
 }

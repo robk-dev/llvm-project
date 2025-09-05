@@ -34,6 +34,9 @@
 #include "NSSet.h"
 #include "NSString.h"
 
+// GNUstep formatters - include headers for ObjCLanguage.cpp registration approach
+#include "Plugins/LanguageRuntime/ObjC/GNUstepObjCRuntime/formatters/GNUstepStringFormatters.h"
+
 using namespace lldb;
 using namespace lldb_private;
 using namespace lldb_private::formatters;
@@ -913,6 +916,36 @@ static void LoadGNUstepFormatters(TypeCategoryImplSP objc_category_sp) {
         lldb_private::formatters::GNUstepArraySummaryProvider,
         "GNUstep NSArray summary provider", "GSInlineArray",
         gnustep_flags);
+
+    // Dynamic Foundation class registration helper
+    auto RegisterFoundationFormatter = [&](const std::vector<std::string>& base_classes,
+                                          bool (*formatter_func)(ValueObject &, Stream &, const TypeSummaryOptions &),
+                                          const char* description) {
+        std::vector<std::string> all_types;
+        
+        // Generate all variants for each base class
+        for (const std::string& base_class : base_classes) {
+            // Base class name
+            all_types.push_back(base_class);
+            // Pointer variants for VS Code debug compatibility
+            all_types.push_back(base_class + " *");
+            all_types.push_back(base_class + "&");
+        }
+        
+        // Register all generated type names
+        for (const std::string& type_name : all_types) {
+            AddCXXSummary(objc_category_sp, formatter_func, description, 
+                         type_name.c_str(), gnustep_flags);
+        }
+    };
+
+    // Register String formatters using dynamic introspection approach
+    RegisterFoundationFormatter(
+        {"GSString", "GSMutableString", "GSCInlineString", "__NSCFString", "NSConstantString",
+         "NSString", "NSMutableString"}, // Base classes
+        lldb_private::formatters::GNUstepNSStringFormatterFunction,
+        "GNUstep NSString summary provider"
+    );
     
     // GNUstep Array Synthetic Providers  
     // Register for GNUstep-specific types AND generic NSArray/NSMutableArray

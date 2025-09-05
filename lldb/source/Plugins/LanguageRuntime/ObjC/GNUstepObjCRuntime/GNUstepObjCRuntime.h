@@ -15,10 +15,8 @@
 #include "lldb/Symbol/DeclVendor.h"
 #include "lldb/lldb-private.h"
 
-#include "GNUstepObjCDeclVendor.h"
 #include "GNUstepObjCRuntimeIntrospector.h"
 #include "GNUstepObjCRuntimeUtilities.h"
-#include "GNUstepRuntimeV2API.h"
 
 #include <chrono>
 #include <unordered_map>
@@ -99,12 +97,9 @@ public:
   // Constructor (public for make_unique)
   GNUstepObjCRuntime(Process *process);
 
-  // Get the runtime API (for GNUstepClassDescriptor)
-  GNUstepRuntimeV2API *GetRuntimeAPI() { return m_runtime_api_up.get(); }
-
-  // Get the runtime introspector (for direct runtime function calls)
-  GNUstepObjCRuntimeIntrospector *GetRuntimeIntrospector() {
-    return m_introspector_up.get();
+  // Get the runtime introspector 
+  GNUstepObjCRuntimeIntrospector *GetRuntimeIntrospector() { 
+    return m_introspector_up.get(); 
   }
 
   // Get cached runtime symbol addresses for IR rewriting
@@ -132,7 +127,6 @@ private:
                                  ExecutionContext &exe_ctx);
 
   std::unique_ptr<GNUstepObjCRuntimeIntrospector> m_introspector_up;
-  std::unique_ptr<GNUstepRuntimeV2API> m_runtime_api_up;
   std::unique_ptr<DeclVendor> m_decl_vendor_up;
   bool m_has_read_objc_library = false;
   bool m_formatters_registered = false;

@@ -1,9 +1,6 @@
 add_lldb_library(lldbPluginGNUstepObjCRuntime PLUGIN
   GNUstepObjCRuntime.cpp
-  GNUstepClassDescriptor.cpp
   GNUstepObjCRuntimeIntrospector.cpp
-  GNUstepObjCDeclVendor.cpp
-  GNUstepRuntimeV2API.cpp
   GNUstepObjCRuntimeUtilities.cpp
   formatters/GNUstepFormattersBase.cpp
   formatters/GNUstepIdDispatcher.cpp

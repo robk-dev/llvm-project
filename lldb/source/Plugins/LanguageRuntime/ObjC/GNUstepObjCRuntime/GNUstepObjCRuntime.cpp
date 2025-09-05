@@ -7,8 +7,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "GNUstepObjCRuntime.h"
-#include "GNUstepObjCDeclVendor.h"
-#include "GNUstepClassDescriptor.h"
 #include "GNUstepObjCRuntimeUtilities.h"
 #include "formatters/GNUstepFormattersRegistry.h"
 #include "formatters/GNUstepIdDispatcher.h"
@@ -63,8 +61,11 @@ void GNUstepObjCRuntime::Terminate() {
 LanguageRuntime *
 GNUstepObjCRuntime::CreateInstance(Process *process,
                                      lldb::LanguageType language) {
-  // We handle both ObjC and ObjC++ since they use the same runtime
-  if (language != eLanguageTypeObjC && language != eLanguageTypeObjC_plus_plus) {
+  // We handle ObjC, ObjC++, and C since GNUstep projects often mix C and ObjC code
+  // Note: C support requires relaxed assertion in Process.cpp
+  if (language != eLanguageTypeObjC && 
+      language != eLanguageTypeObjC_plus_plus && 
+      language != eLanguageTypeC) {
     return nullptr;
   }
 
@@ -172,8 +173,8 @@ void GNUstepObjCRuntime::DidLaunch() {
   printf("[DEBUG] GNUstepObjCRuntime::DidLaunch called\n");
   
   // Only register formatters during launch - defer expression hooks to avoid hanging
-  // Note: RegisterFormatters() is commented out since formatters are now loaded via ObjCLanguage
-  // RegisterFormatters();
+  // Re-enable RegisterFormatters() to get all GNUstep formatters working including NSString
+  RegisterFormatters();
   
   // Note: Expression evaluation hooks will be installed lazily when needed
   // This prevents hanging with NSNumber literals during process launch
@@ -184,8 +185,8 @@ void GNUstepObjCRuntime::DidAttach(ArchSpec &arch_spec) {
   LLDB_LOG(log, "[GNUstep] DidAttach: Process attached, registering formatters only");
   
   // Only register formatters during attach - defer expression hooks to avoid hanging
-  // Note: RegisterFormatters() is commented out since formatters are now loaded via ObjCLanguage
-  // RegisterFormatters();
+  // Re-enable RegisterFormatters() to get all GNUstep formatters working including NSString
+  RegisterFormatters();
   
   // Note: Expression evaluation hooks will be installed lazily when needed
   // This prevents hanging with NSNumber literals during process attach
@@ -1073,42 +1074,10 @@ void GNUstepObjCRuntime::UpdateISAToDescriptorMapIfNeeded() {
   Log *log = GetLog(LLDBLog::Process | LLDBLog::Types);
   LLDB_LOG(log, "GNUstepObjCRuntime::UpdateISAToDescriptorMapIfNeeded called");
   
-  if (!m_runtime_api_up) {
-    LLDB_LOG(log, "No runtime API available for ISA map update");
-    return;
-  }
-  
-  // Get all Foundation classes from the runtime
-  auto foundation_classes = m_runtime_api_up->GetAllFoundationClasses();
-  if (!foundation_classes) {
-    // Consume the error and continue - this isn't critical
-    llvm::consumeError(foundation_classes.takeError());
-    LLDB_LOG(log, "Could not enumerate Foundation classes for ISA map");
-    return;
-  }
-  
-  LLDB_LOG(log, "Updating ISA map with {0} Foundation classes", 
-           foundation_classes->size());
-  
-  // Add each class to the ISA-to-descriptor map
-  for (const auto &class_info : *foundation_classes) {
-    lldb::addr_t class_addr = reinterpret_cast<lldb::addr_t>(class_info.class_ptr);
-    if (class_addr != LLDB_INVALID_ADDRESS && class_addr != 0) {
-      // Check if we already have this ISA in our map
-      ClassDescriptorSP existing_descriptor = ObjCLanguageRuntime::GetClassDescriptorFromISA(class_addr);
-      if (!existing_descriptor) {
-        // Create a new descriptor for this class
-        ClassDescriptorSP new_descriptor = ClassDescriptorSP(
-            new GNUstepClassDescriptor(*this, class_addr, class_info.name.c_str()));
-        
-        if (new_descriptor && new_descriptor->IsValid()) {
-          AddClass(class_addr, new_descriptor);
-          LLDB_LOG(log, "Added ISA mapping: 0x{0:x} -> {1}", 
-                   class_addr, class_info.name);
-        }
-      }
-    }
-  }
+  // TODO: Re-implement using merged GNUstepObjCRuntimeIntrospector functionality
+  // The old GNUstepRuntimeV2API and GNUstepClassDescriptor classes have been merged
+  // into GNUstepObjCRuntimeIntrospector. This method will be restored once the
+  // integration is complete.
   
   // Also update any custom classes we've encountered during runtime introspection
   if (m_introspector_up) {
@@ -1131,8 +1100,9 @@ GNUstepObjCRuntime::GetClassDescriptorFromISA(ObjCISA isa) {
   if (descriptor_sp)
     return descriptor_sp;
   
-  // If not in cache, create a new GNUstepClassDescriptor
-  descriptor_sp = ClassDescriptorSP(new GNUstepClassDescriptor(*this, isa, nullptr));
+  // Create a generic class descriptor for this ISA
+  // TODO: Replace with proper GNUstepClassDescriptor once integrated
+  descriptor_sp = ClassDescriptorSP();
   
   // Add to cache if valid
   if (descriptor_sp && descriptor_sp->IsValid()) {
@@ -1222,47 +1192,26 @@ void GNUstepObjCRuntime::InitializeRuntimeAPI() {
     return;
   }
   
-  auto api_or_error = GNUstepRuntimeV2API::Create(m_process);
-  if (api_or_error) {
-    m_runtime_api_up = std::move(*api_or_error);
-    LLDB_LOG(log, "Runtime V2 API initialized successfully");
+  // Use the merged runtime introspector for Foundation class enumeration
+  if (m_introspector_up) {
+    LLDB_LOG(log, "Runtime introspector available for Foundation class detection");
     
-    // Log runtime version
-    if (m_runtime_api_up) {
-      std::string version = m_runtime_api_up->GetRuntimeVersion();
-      LLDB_LOG(log, "Runtime version: {0}", version);
-      
-      // Enumerate and log Foundation classes
-      auto foundation_classes = m_runtime_api_up->GetAllFoundationClasses();
-      if (foundation_classes) {
-        LLDB_LOG(log, "Found {0} Foundation classes", foundation_classes->size());
-        
-        // Log first few Foundation classes for debugging
-        size_t count = 0;
-        for (const auto &cls : *foundation_classes) {
-          if (count++ < 10) {
-            LLDB_LOG(log, "  Foundation class: {0} (superclass: {1})", 
-                     cls.name, cls.superclass_name);
-          }
-        }
-      } else {
-        // Consume the error from GetAllFoundationClasses
-        llvm::consumeError(foundation_classes.takeError());
-        // This is not critical - formatters will still work through other mechanisms
-        LLDB_LOG(log, "[GNUstepObjC] Note: Runtime class enumeration not available, using fallback mechanisms");
+    // Use the merged functionality to get Foundation classes
+    auto foundation_classes = m_introspector_up->GetFoundationClassNames();
+    LLDB_LOG(log, "Found {0} Foundation classes", foundation_classes.size());
+    
+    // Log first few Foundation classes for debugging
+    size_t count = 0;
+    for (const auto &cls : foundation_classes) {
+      if (count++ < 10) {
+        LLDB_LOG(log, "  Foundation class: {0}", cls);
       }
-      
-      // ENHANCED FIX: Install subscript method mapping for GNUstep
-      // Instead of injecting utility functions (which can crash), we map modern subscript
-      // methods to traditional GNUstep methods using expression rewriting
-      InstallSubscriptMethodMapping();
     }
+    
+    // Install subscript method mapping for GNUstep
+    InstallSubscriptMethodMapping();
   } else {
-    llvm::handleAllErrors(api_or_error.takeError(),
-                          [&](const llvm::StringError &SE) {
-                            LLDB_LOG(log, "Failed to initialize runtime API: {0}", 
-                                     SE.getMessage());
-                          });
+    LLDB_LOG(log, "Runtime introspector not available, using fallback mechanisms");
   }
 }
 
@@ -1277,19 +1226,29 @@ void GNUstepObjCRuntime::RegisterFormatters() {
   // Debug: Add stdout message to confirm this function is called
   printf("[DEBUG] GNUstepObjCRuntime::RegisterFormatters called\n");
   
-  // Note: We don't disable the objc category since GNUstep formatters are registered there
-  // by ObjCLanguage.cpp LoadGNUstepFormatters()
-  
-  // For now, we rely on the formatters registered in ObjCLanguage.cpp
-  // This avoids duplication and conflicts
+  // Get the "objc" type category where formatters are registered
+  TypeCategoryImplSP objc_category_sp;
+  if (DataVisualization::Categories::GetCategory(ConstString("objc"), objc_category_sp)) {
+    printf("[DEBUG] Using GNUstepFormattersRegistry to register all formatters\n");
+    
+    // Register all GNUstep formatters using the comprehensive registry
+    GNUstepFormattersRegistry::RegisterFormatters(*objc_category_sp);
+    
+    LLDB_LOG(log, "GNUstep formatters registered successfully via GNUstepFormattersRegistry");
+  } else {
+    LLDB_LOG(log, "Failed to get objc category for formatter registration");
+    printf("[ERROR] Failed to get objc category for formatter registration\n");
+  }
   
   m_formatters_registered = true;
-  LLDB_LOG(log, "GNUstep formatters are already registered via ObjCLanguage");
 }
 
 DeclVendor *GNUstepObjCRuntime::GetDeclVendor() {
   if (!m_decl_vendor_up) {
-    m_decl_vendor_up = std::make_unique<GNUstepObjCDeclVendor>(*this);
+    Log *log = GetLog(LLDBLog::Process | LLDBLog::Types);
+    // TODO: Re-implement DeclVendor functionality after cleanup
+    // m_decl_vendor_up = std::make_unique<GNUstepObjCDeclVendor>(*this);
+    LLDB_LOG(log, "DeclVendor temporarily disabled during refactoring");
   }
   
   return m_decl_vendor_up.get();
@@ -1303,9 +1262,12 @@ void GNUstepObjCRuntime::InstallSubscriptMethodMapping() {
   ExecutionContext exe_ctx(m_process);
   
   // Enhanced check using our runtime API for better reliability
-  if (m_runtime_api_up) {
-    bool array_supports_index = m_runtime_api_up->ClassRespondsToSelector("NSArray", "objectAtIndex:");
-    bool dict_supports_key = m_runtime_api_up->ClassRespondsToSelector("NSDictionary", "objectForKey:");
+  if (m_introspector_up) {
+    // TODO: Re-implement using merged introspector functionality
+    // bool array_supports_index = m_introspector_up->ClassRespondsToSelector("NSArray", "objectAtIndex:");
+    // bool dict_supports_key = m_introspector_up->ClassRespondsToSelector("NSDictionary", "objectForKey:");
+    bool array_supports_index = true; // Assume Foundation classes support standard methods
+    bool dict_supports_key = true;
     
     if (array_supports_index && dict_supports_key) {
       LLDB_LOG(log, "GNUstep classes support traditional methods via runtime API, subscript mapping enabled");

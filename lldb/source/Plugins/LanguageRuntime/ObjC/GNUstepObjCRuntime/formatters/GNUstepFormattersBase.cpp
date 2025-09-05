@@ -8,7 +8,6 @@
 
 #include "GNUstepFormattersBase.h"
 #include "../GNUstepObjCRuntimeIntrospector.h"
-#include "../GNUstepRuntimeV2API.h"
 #include "lldb/ValueObject/ValueObjectConstResult.h"
 #include "lldb/Symbol/CompilerType.h"
 #include "lldb/Target/ExecutionContext.h"
