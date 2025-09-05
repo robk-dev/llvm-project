@@ -63,16 +63,9 @@ void GNUstepObjCRuntime::Terminate() {
 LanguageRuntime *
 GNUstepObjCRuntime::CreateInstance(Process *process,
                                      lldb::LanguageType language) {
-  // Apple-style simplified detection: support ObjC languages and detect markers efficiently
+  // We handle both ObjC and ObjC++ since they use the same runtime
   if (language != eLanguageTypeObjC && language != eLanguageTypeObjC_plus_plus) {
-    if (language == eLanguageTypeC) {
-      // Only support C if ObjC runtime already exists
-      if (!process->GetLanguageRuntime(eLanguageTypeObjC) && 
-          !process->GetLanguageRuntime(eLanguageTypeObjC_plus_plus))
-        return nullptr;
-    } else {
-      return nullptr;
-    }
+    return nullptr;
   }
 
   // Quick ObjC marker check - look for key sections/symbols
@@ -110,13 +103,9 @@ GNUstepObjCRuntime::CreateInstance(Process *process,
   
   if (!found_objc_markers)
     return nullptr;
+  
   std::unique_ptr<GNUstepObjCRuntime> runtime_sp(new GNUstepObjCRuntime(process));
-  if (runtime_sp) {
-    runtime_sp->ArmEarlyInstall();
-    
-    // Install expression evaluation hooks for IR rewriting support
-    runtime_sp->InstallExpressionEvaluationHooks();
-  }
+  // Don't install hooks here - let them be installed after process launch
   return runtime_sp.release();
 }
 
@@ -176,20 +165,24 @@ void GNUstepObjCRuntime::ModulesDidLoad(const ModuleList &module_list) {
 
 void GNUstepObjCRuntime::DidLaunch() {
   Log *log = GetLog(LLDBLog::Language | LLDBLog::Types);
-  LLDB_LOG(log, "[GNUstep] DidLaunch: Process launched, attempting to install expression hooks");
+  LLDB_LOG(log, "[GNUstep] DidLaunch: Process launched, registering formatters only");
   
-  if (!m_expression_hooks_installed && m_gnustep_library_loaded) {
-    InstallExpressionEvaluationHooks();
-  }
+  // Only register formatters during launch - defer expression hooks to avoid hanging
+  RegisterFormatters();
+  
+  // Note: Expression evaluation hooks will be installed lazily when needed
+  // This prevents hanging with NSNumber literals during process launch
 }
 
 void GNUstepObjCRuntime::DidAttach(ArchSpec &arch_spec) {
   Log *log = GetLog(LLDBLog::Language | LLDBLog::Types);
-  LLDB_LOG(log, "[GNUstep] DidAttach: Process attached, attempting to install expression hooks");
+  LLDB_LOG(log, "[GNUstep] DidAttach: Process attached, registering formatters only");
   
-  if (!m_expression_hooks_installed && m_gnustep_library_loaded) {
-    InstallExpressionEvaluationHooks();
-  }
+  // Only register formatters during attach - defer expression hooks to avoid hanging
+  RegisterFormatters();
+  
+  // Note: Expression evaluation hooks will be installed lazily when needed
+  // This prevents hanging with NSNumber literals during process attach
 }
 
 llvm::Error GNUstepObjCRuntime::GetObjectDescription(Stream &str,
@@ -1275,6 +1268,9 @@ void GNUstepObjCRuntime::RegisterFormatters() {
   Log *log = GetLog(LLDBLog::Process | LLDBLog::Types);
   LLDB_LOG(log, "GNUstepObjCRuntime::RegisterFormatters - Registering GNUstep formatters");
   
+  // Debug: Add stdout message to confirm this function is called
+  printf("[DEBUG] GNUstepObjCRuntime::RegisterFormatters called\n");
+  
   // Disable Apple's ObjC formatters to prevent conflicts
   // This is necessary because both Apple and GNUstep register formatters for the same types
   TypeCategoryImplSP objc_category_sp;
@@ -1690,8 +1686,24 @@ void GNUstepObjCRuntime::EnsureArrayDictionaryLiteralSupport() {
   
   Target &target = GetProcess()->GetTarget();
   ExecutionContext exe_ctx(GetProcess());
-  if (!exe_ctx.HasProcessScope()) {
+  
+  // Enhanced safety checks to prevent hanging
+  if (!exe_ctx.HasProcessScope() || !exe_ctx.GetProcessPtr()) {
     LLDB_LOG(log, "No valid execution context for array/dictionary literal installation");
+    return;
+  }
+  
+  Process *process = exe_ctx.GetProcessPtr();
+  if (!process->IsAlive()) {
+    LLDB_LOG(log, "Process not alive, skipping literal support installation");
+    return;
+  }
+  
+  // Don't install utility functions if we don't have basic runtime symbols yet
+  if (m_objc_getClass_addr == LLDB_INVALID_ADDRESS || 
+      m_objc_msgSend_addr == LLDB_INVALID_ADDRESS ||
+      m_sel_getUid_addr == LLDB_INVALID_ADDRESS) {
+    LLDB_LOG(log, "Basic runtime symbols not available, deferring literal support");
     return;
   }
   
@@ -2305,9 +2317,23 @@ lldb::addr_t GNUstepObjCRuntime::LookupRuntimeSymbol(ConstString name) {
   Log *log = GetLog(LLDBLog::Language | LLDBLog::Types);
   LLDB_LOG(log, "GNUstepObjCRuntime::LookupRuntimeSymbol called for: {0}", name.GetCString());
   
-  // Make sure our symbol cache is ready
-  if (!m_expression_hooks_installed)
-    InstallExpressionEvaluationHooks();
+  // Prevent recursive installation when looking up symbols during hook installation
+  static thread_local bool s_installing_hooks = false;
+  
+  // Make sure our symbol cache is ready (lazy installation)
+  if (!m_expression_hooks_installed && !s_installing_hooks) {
+    // Only install hooks if we have a stable execution context
+    ExecutionContext exe_ctx(GetProcess());
+    if (exe_ctx.HasProcessScope() && exe_ctx.GetProcessPtr()->IsAlive()) {
+      s_installing_hooks = true;
+      InstallExpressionEvaluationHooks();
+      s_installing_hooks = false;
+    } else {
+      LLDB_LOG(log, "Deferring expression hooks installation - process not ready");
+      // Don't try symbol resolution during hook installation to prevent recursion
+      // Symbol resolution will happen naturally when hooks are installed later
+    }
+  }
 
   const llvm::StringRef s = name.GetStringRef();
 
@@ -2432,26 +2458,20 @@ std::optional<std::string> GNUstepObjCRuntime::GetObjectDescriptionViaFunctionCa
     return std::nullopt;
   }
   
-  try {
-    // Step 1: Get selector for "description" using our CallRuntimeFunction
-    lldb::addr_t desc_selector = CallRuntimeFunction("sel_getUid", "description");
-    
-    if (desc_selector == LLDB_INVALID_ADDRESS) {
-      LLDB_LOG(log, "GNUstepObjCRuntime: Failed to get description selector via CallRuntimeFunction");
-      return std::nullopt;
-    }
-    
-    LLDB_LOG(log, "GNUstepObjCRuntime: Got description selector: 0x{0:x}", desc_selector);
-    
-    // Step 2: For now, fall back to expression evaluation as implementing
-    // the full FunctionCaller approach for objc_msgSend requires complex ABI handling
-    LLDB_LOG(log, "GNUstepObjCRuntime: FunctionCaller for objc_msgSend not yet fully implemented, using expression evaluation fallback");
-    return std::nullopt;
-    
-  } catch (const std::exception &e) {
-    LLDB_LOG(log, "GNUstepObjCRuntime: Exception in FunctionCaller description: {0}", e.what());
+  // Step 1: Get selector for "description" using our CallRuntimeFunction
+  lldb::addr_t desc_selector = CallRuntimeFunction("sel_getUid", "description");
+  
+  if (desc_selector == LLDB_INVALID_ADDRESS) {
+    LLDB_LOG(log, "GNUstepObjCRuntime: Failed to get description selector via CallRuntimeFunction");
     return std::nullopt;
   }
+  
+  LLDB_LOG(log, "GNUstepObjCRuntime: Got description selector: 0x{0:x}", desc_selector);
+  
+  // Step 2: For now, fall back to expression evaluation as implementing
+  // the full FunctionCaller approach for objc_msgSend requires complex ABI handling
+  LLDB_LOG(log, "GNUstepObjCRuntime: FunctionCaller for objc_msgSend not yet fully implemented, using expression evaluation fallback");
+  return std::nullopt;
 }
 
 // Helper function to get UTF8String via FunctionCaller
@@ -2461,16 +2481,10 @@ std::optional<std::string> GNUstepObjCRuntime::GetUTF8StringViaFunctionCaller(
   Log *log = GetLog(LLDBLog::Language);
   LLDB_LOG(log, "GNUstepObjCRuntime: GetUTF8StringViaFunctionCaller called for NSString 0x{0:x}", nsstring_ptr);
   
-  try {
-    // For now, fall back to simple implementation as FunctionCaller for NSString methods
-    // requires complex ABI handling and proper type system integration
-    LLDB_LOG(log, "GNUstepObjCRuntime: FunctionCaller for NSString UTF8String not yet fully implemented");
-    return std::nullopt;
-    
-  } catch (const std::exception &e) {
-    LLDB_LOG(log, "GNUstepObjCRuntime: Exception in UTF8String FunctionCaller: {0}", e.what());
-    return std::nullopt;
-  }
+  // For now, fall back to simple implementation as FunctionCaller for NSString methods
+  // requires complex ABI handling and proper type system integration
+  LLDB_LOG(log, "GNUstepObjCRuntime: FunctionCaller for NSString UTF8String not yet fully implemented");
+  return std::nullopt;
 }
 
 LLDB_PLUGIN_DEFINE(GNUstepObjCRuntime)

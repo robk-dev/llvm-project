@@ -13,8 +13,8 @@ if [ -f "$HELPERS_DIR/common.sh" ]; then
 else
     # Fallback if common.sh doesn't exist
     SCRIPT_DIR="$(dirname "$HELPERS_DIR")"           # .../scripts2
-    WORKSPACE_ROOT="$(dirname "$SCRIPT_DIR")"        # repo root containing examples/, gnustep-install/
-    PROJECT_ROOT="$WORKSPACE_ROOT"
+    WORKSPACE_ROOT="$(dirname "$SCRIPT_DIR")"        # lldb root containing examples/, gnustep-install/
+    PROJECT_ROOT="$(dirname "$WORKSPACE_ROOT")"      # llvm-project root containing lldb/, gnustep-install/
     
     # Color codes
     RED='\033[0;31m'
@@ -35,11 +35,11 @@ else
 fi
 
 # GNUstep build configuration - updated for local workspace
-GNUSTEP_BUILD_DIR="${GNUSTEP_BUILD_DIR:-$WORKSPACE_ROOT/gnustep-build}"
-GNUSTEP_INSTALL_DIR="${GNUSTEP_INSTALL_DIR:-$WORKSPACE_ROOT/gnustep-install}"
-LIBOBJC2_BUILD_DIR="${LIBOBJC2_BUILD_DIR:-$WORKSPACE_ROOT/gnustep-build/libobjc2}"
-LIBS_BASE_SOURCE_DIR="$WORKSPACE_ROOT/libs-base"
-LIBOBJC2_SOURCE_DIR="$WORKSPACE_ROOT/libobjc2"
+GNUSTEP_BUILD_DIR="${GNUSTEP_BUILD_DIR:-$PROJECT_ROOT/gnustep-build}"
+GNUSTEP_INSTALL_DIR="${GNUSTEP_INSTALL_DIR:-$PROJECT_ROOT/gnustep-install}"
+LIBOBJC2_BUILD_DIR="${LIBOBJC2_BUILD_DIR:-$PROJECT_ROOT/gnustep-build/libobjc2}"
+LIBS_BASE_SOURCE_DIR="$PROJECT_ROOT/libs-base"
+LIBOBJC2_SOURCE_DIR="$PROJECT_ROOT/libobjc2"
 
 # Build settings for debugging and symbol generation WITHOUT NEW STRING ABI
 # Use gnustep-2.1 runtime to match examples and avoid ABI mismatches
@@ -212,13 +212,13 @@ build_gnustep_base_with_debug() {
         fi
 
         print_progress "gnustep-make not found in workspace; building and installing into $GNUSTEP_INSTALL_DIR ..."
-        local TOOLS_MAKE_DIR="$WORKSPACE_ROOT/gnustep-build/tools-make"
-        local TOOLS_MAKE_SRC="$WORKSPACE_ROOT/tools-make"
+        local TOOLS_MAKE_DIR="$PROJECT_ROOT/gnustep-build/tools-make"
+        local TOOLS_MAKE_SRC="$PROJECT_ROOT/tools-make"
 
         # Clone or update tools-make (gnustep-make)
         if [ ! -d "$TOOLS_MAKE_SRC" ]; then
             print_progress "Cloning gnustep/tools-make ..."
-            cd "$WORKSPACE_ROOT"
+            cd "$PROJECT_ROOT"
             git clone https://github.com/gnustep/tools-make.git
         else
             cd "$TOOLS_MAKE_SRC"
@@ -255,7 +255,7 @@ build_gnustep_base_with_debug() {
     # Clone or update libs-base from official GNUstep repository
     if [ ! -d "$LIBS_BASE_SOURCE_DIR" ]; then
         print_progress "Cloning libs-base from official GNUstep repository..."
-        cd "$WORKSPACE_ROOT"
+        cd "$PROJECT_ROOT"
         git clone https://github.com/gnustep/libs-base.git
     else
         cd "$LIBS_BASE_SOURCE_DIR"
@@ -395,7 +395,7 @@ verify_gnustep_symbol_generation() {
     
     # Update examples Makefile to use our new libraries
     print_progress "Updating examples Makefile..."
-    cd "$WORKSPACE_ROOT/examples"
+    cd "$PROJECT_ROOT/examples"
     
     # Create updated Makefile with proper library paths
     cat > Makefile << 'EOF'
@@ -531,9 +531,9 @@ export OBJCFLAGS="$GNUSTEP_OBJCFLAGS"
 export LDFLAGS="$GNUSTEP_LDFLAGS"
 
 # LLDB path (if custom build exists)
-if [ -f "$LLVM_BUILD_DIR/build/bin/lldb" ]; then
-    export PATH="$LLVM_BUILD_DIR/build/bin:\$PATH"
-    echo "✅ Using custom LLDB: $LLVM_BUILD_DIR/build/bin/lldb"
+if [ -f "$LLVM_BUILD_DIR/bin/lldb" ]; then
+    export PATH="$LLVM_BUILD_DIR/bin:\$PATH"
+    echo "✅ Using custom LLDB: $LLVM_BUILD_DIR/bin/lldb"
 else
     echo "⚠️  Custom LLDB not found, using system LLDB"
 fi

@@ -10,22 +10,24 @@ set -euo pipefail  # Exit on error, undefined variables, and pipe failures
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE_ROOT="$(dirname "$SCRIPT_DIR")"
 PROJECT_ROOT="$(dirname "$WORKSPACE_ROOT")"
+echo "SCRIPT DIR:     $SCRIPT_DIR"
+echo "Workspace Root: $WORKSPACE_ROOT"
+echo "Project Root:   $PROJECT_ROOT"
+
 LLVM_BUILD_DIR="${LLVM_BUILD_DIR:-$PROJECT_ROOT/build}"  # Use our existing build directory
+echo "LLVM_BUILD_DIR:   $LLVM_BUILD_DIR"
 LLVM_REPO="https://github.com/llvm/llvm-project.git"
 LLVM_BRANCH="llvmorg-20.1.8"
 BUILD_TYPE="RelWithDebInfo"
-
-# Patch location - now relative to workspace
-PATCH_DIR="$WORKSPACE_ROOT/llvm_patch/GNUstepObjCRuntime"
 
 # Calculate safe parallel jobs (will be defined in common.sh functions)
 PARALLEL_JOBS=${PARALLEL_JOBS:-$(nproc)}
 
 # GNUstep install directory (for workspace builds)
-GNUSTEP_INSTALL_DIR="${WORKSPACE_ROOT}/gnustep-install"
+GNUSTEP_INSTALL_DIR="${PROJECT_ROOT}/gnustep-install"
 
 # Export variables for use in helper scripts
-export SCRIPT_DIR WORKSPACE_ROOT PROJECT_ROOT LLVM_BUILD_DIR LLVM_REPO LLVM_BRANCH BUILD_TYPE PATCH_DIR PARALLEL_JOBS GNUSTEP_INSTALL_DIR
+export SCRIPT_DIR WORKSPACE_ROOT PROJECT_ROOT LLVM_BUILD_DIR LLVM_REPO LLVM_BRANCH BUILD_TYPE PARALLEL_JOBS GNUSTEP_INSTALL_DIR
 
 # Source helper modules
 source "$SCRIPT_DIR/helpers/common.sh"
@@ -66,7 +68,7 @@ show_final_instructions() {
     echo -e "${YELLOW}Quick Start:${NC}"
     echo "  1. Source environment: source $LLVM_BUILD_DIR/setup_environment.sh"
     echo "  2. Build test program: cd $LLVM_BUILD_DIR/examples && make"
-    echo "  3. Debug with LLDB: $LLVM_BUILD_DIR/build/bin/lldb ./test_custom_class"
+    echo "  3. Debug with LLDB: $LLVM_BUILD_DIR/bin/lldb ./test_custom_class"
     echo ""
     echo -e "${YELLOW}VS Code Setup:${NC}"
     echo "  1. Copy settings from: $LLVM_BUILD_DIR/vscode_settings.json"
@@ -89,9 +91,9 @@ show_final_instructions() {
     fi
     echo ""
     echo -e "${YELLOW}Location Summary:${NC}"
-    echo "  LLDB binary:    $LLVM_BUILD_DIR/build/bin/lldb"
-    echo "  lldb-server:    $LLVM_BUILD_DIR/build/bin/lldb-server"
-    echo "  Clang compiler: $LLVM_BUILD_DIR/build/bin/clang"
+    echo "  LLDB binary:    $LLVM_BUILD_DIR/bin/lldb"
+    echo "  lldb-server:    $LLVM_BUILD_DIR/bin/lldb-server"
+    echo "  Clang compiler: $LLVM_BUILD_DIR/bin/clang"
     echo "  Examples:       $LLVM_BUILD_DIR/examples/"
     echo "  Verification:   $LLVM_BUILD_DIR/verify_gnustep_patch.sh"
     echo ""
@@ -101,7 +103,7 @@ show_final_instructions() {
     echo "  ✓ Optimized build configuration ($BUILD_TYPE)"
     echo ""
     echo -e "${YELLOW}For subsequent builds:${NC}"
-    echo "  cd $LLVM_BUILD_DIR/build && ninja lldb lldb-server  # Much faster with ccache!"
+    echo "  cd $LLVM_BUILD_DIR && ninja lldb lldb-server  # Much faster with ccache!"
     echo ""
     echo -e "${YELLOW}For incremental rebuilds with patch changes:${NC}"
     echo "  $SCRIPT_DIR/setup.sh --skip-deps --skip-download  # Skip download, just apply patch and rebuild"
@@ -205,23 +207,23 @@ main() {
         echo -e "${CYAN}🚀 Developer Mode: Quick patch & rebuild${NC}"
         
         # Set environment variables for build
-        export LD_LIBRARY_PATH="$LLVM_BUILD_DIR/build/lib"
-        export PATH="$LLVM_BUILD_DIR/build/bin:$PATH"
+        export LD_LIBRARY_PATH="$LLVM_BUILD_DIR/lib"
+        export PATH="$LLVM_BUILD_DIR/bin:$PATH"
                 
         # Check if build directory exists
-        if [ ! -d "$LLVM_BUILD_DIR/build" ]; then
+        if [ ! -d "$LLVM_BUILD_DIR" ]; then
             print_error "Build directory not found. Run full build first with: $0"
         fi
 
         # Quick rebuild
         echo -n "Building LLDB... "
-        cd "$LLVM_BUILD_DIR/build"
+        cd "$LLVM_BUILD_DIR"
         if ninja lldb lldb-server >/dev/null 2>&1; then
             echo -e "${GREEN}✓${NC}"
-            echo -e "${GREEN}Build complete!${NC} LLDB: $LLVM_BUILD_DIR/build/bin/lldb"
+            echo -e "${GREEN}Build complete!${NC} LLDB: $LLVM_BUILD_DIR/bin/lldb"
             echo -e "${CYAN}Environment variables set:${NC}"
-            echo "  export LD_LIBRARY_PATH=\"$LLVM_BUILD_DIR/build/lib\""
-            echo "  export PATH=\"$LLVM_BUILD_DIR/build/bin:\$PATH\""
+            echo "  export LD_LIBRARY_PATH=\"$LLVM_BUILD_DIR/lib\""
+            echo "  export PATH=\"$LLVM_BUILD_DIR/bin:\$PATH\""
         else
             echo -e "${RED}✗${NC}"
             echo "Build failed. Running with full output:"
@@ -246,21 +248,17 @@ main() {
         install_dependencies
     fi
     
-    if ! $SKIP_DOWNLOAD; then
-        download_llvm
-    else
-        print_section "Step 3: Skipping LLVM Download (using existing)"
-        if [ ! -d "$LLVM_BUILD_DIR/llvm-project" ]; then
-            print_error "LLVM project not found at $LLVM_BUILD_DIR/llvm-project"
-            print_error "Please run without --skip-download first to download LLVM"
-        fi
-        
-        cd "$LLVM_BUILD_DIR/llvm-project"
-        COMMIT_HASH=$(git rev-parse --short HEAD)
-        COMMIT_DATE=$(git log -1 --format=%ci)
-        print_success "Using existing LLVM: $COMMIT_HASH ($COMMIT_DATE)"
+
+    if [ ! -d "$LLVM_BUILD_DIR" ]; then
+        print_progress "Creating build directory at $LLVM_BUILD_DIR"
+        mkdir -p "$LLVM_BUILD_DIR"
     fi
-    
+        
+    cd "$LLVM_BUILD_DIR"
+    COMMIT_HASH=$(git rev-parse --short HEAD)
+    COMMIT_DATE=$(git log -1 --format=%ci)
+    print_success "Using existing LLVM: $COMMIT_HASH ($COMMIT_DATE)"
+
     verify_llvm_version
     configure_build
     build_lldb

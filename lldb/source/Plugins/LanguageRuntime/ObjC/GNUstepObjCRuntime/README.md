@@ -98,8 +98,8 @@ If you encounter "unable to locate lldb-server" errors:
 2. **Use correct paths in LLDB MCP:**
    ```bash
    # Specify both paths explicitly
-   python lldb_mcp.py --lldb-path /home/robk/llvm-build/bin/lldb \
-                      --lldb-server-path /home/robk/llvm-build/bin/lldb-server
+   python lldb_mcp.py --lldb-path /home/robk/llvm-project/build/bin/lldb \
+                      --lldb-server-path /home/robk/llvm-project/build/bin/lldb-server
    ```
 
 3. **Check PATH environment:**

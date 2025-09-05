@@ -54,8 +54,8 @@ public:
   /// Get tagged pointer information (GNUstep doesn't use tagged pointers
   /// in the same way as Apple's runtime)
   bool GetTaggedPointerInfo(uint64_t *info_bits = nullptr,
-                           uint64_t *value_bits = nullptr,
-                           uint64_t *payload = nullptr) override {
+                            uint64_t *value_bits = nullptr,
+                            uint64_t *payload = nullptr) override {
     return false;
   }
 
@@ -102,36 +102,37 @@ protected:
 private:
   /// Constructor - should only be called by GNUstepObjCRuntime
   GNUstepClassDescriptor(GNUstepObjCRuntime &runtime,
-                        ObjCLanguageRuntime::ObjCISA class_ptr,
-                        const char *class_name);
+                         ObjCLanguageRuntime::ObjCISA class_ptr,
+                         const char *class_name);
 
   /// Constructor with pre-loaded ClassInfo
   GNUstepClassDescriptor(GNUstepObjCRuntime &runtime,
-                        const GNUstepRuntimeV2API::ClassInfo &class_info);
+                         const GNUstepRuntimeV2API::ClassInfo &class_info);
 
   // Runtime and API references
   GNUstepObjCRuntime &m_runtime;
   mutable GNUstepRuntimeV2API *m_runtime_api;
-  
+
   // Basic class information
   mutable ObjCLanguageRuntime::ObjCISA m_class_ptr;
   mutable ConstString m_class_name;
-  
+
   // Cached class info from runtime
   mutable std::unique_ptr<GNUstepRuntimeV2API::ClassInfo> m_class_info;
   mutable bool m_class_info_loaded;
-  
+
   // Cached ivar descriptors
   mutable std::vector<iVarDescriptor> m_ivar_descriptors;
   mutable bool m_ivars_loaded;
-  
+
   // Thread safety
   mutable std::recursive_mutex m_mutex;
 };
 
 /// Tagged pointer descriptor for GNUstep (if needed in future)
 /// Currently GNUstep doesn't use tagged pointers like Apple's runtime
-class GNUstepClassDescriptorTagged : public ObjCLanguageRuntime::ClassDescriptor {
+class GNUstepClassDescriptorTagged
+    : public ObjCLanguageRuntime::ClassDescriptor {
 public:
   GNUstepClassDescriptorTagged(ConstString class_name, uint64_t payload)
       : m_class_name(class_name), m_payload(payload), m_valid(true) {}
@@ -155,8 +156,8 @@ public:
   bool IsCFType() override { return false; }
 
   bool GetTaggedPointerInfo(uint64_t *info_bits = nullptr,
-                           uint64_t *value_bits = nullptr,
-                           uint64_t *payload = nullptr) override {
+                            uint64_t *value_bits = nullptr,
+                            uint64_t *payload = nullptr) override {
     if (payload)
       *payload = m_payload;
     return true;

@@ -24,9 +24,9 @@
 #include "clang/AST/DeclObjC.h"
 #include "clang/AST/Expr.h"
 #include "clang/AST/ExprObjC.h"
+#include "clang/AST/ExternalASTSource.h"
 #include "clang/AST/Stmt.h"
 #include "clang/AST/StmtObjC.h"
-#include "clang/AST/ExternalASTSource.h"
 
 #include <optional>
 #include <vector>
@@ -45,7 +45,9 @@ public:
       const clang::DeclContext *original_dc) override {
 
     Log *log(GetLog(LLDBLog::Expressions));
-    LLDB_LOGF(log, "[GNUstepObjCExternalASTSource::FindExternalVisibleDeclsByName] Looking for '%s' in %s context (%p)",
+    LLDB_LOGF(log,
+              "[GNUstepObjCExternalASTSource::FindExternalVisibleDeclsByName] "
+              "Looking for '%s' in %s context (%p)",
               name.getAsString().c_str(), decl_ctx->getDeclKindName(),
               static_cast<const void *>(decl_ctx));
 
@@ -74,14 +76,18 @@ public:
 
   void CompleteType(clang::TagDecl *tag_decl) override {
     Log *log(GetLog(LLDBLog::Expressions));
-    LLDB_LOGF(log, "[GNUstepObjCExternalASTSource::CompleteType] Completing (TagDecl*)%p named %s on (ASTContext*)%p",
+    LLDB_LOGF(log,
+              "[GNUstepObjCExternalASTSource::CompleteType] Completing "
+              "(TagDecl*)%p named %s on (ASTContext*)%p",
               static_cast<void *>(tag_decl), tag_decl->getName().str().c_str(),
               static_cast<void *>(&tag_decl->getASTContext()));
   }
 
   void CompleteType(clang::ObjCInterfaceDecl *interface_decl) override {
     Log *log(GetLog(LLDBLog::Expressions));
-    LLDB_LOGF(log, "[GNUstepObjCExternalASTSource::CompleteType] Completing (ObjCInterfaceDecl*)%p named %s on (ASTContext*)%p",
+    LLDB_LOGF(log,
+              "[GNUstepObjCExternalASTSource::CompleteType] Completing "
+              "(ObjCInterfaceDecl*)%p named %s on (ASTContext*)%p",
               static_cast<void *>(interface_decl),
               interface_decl->getName().str().c_str(),
               static_cast<void *>(&interface_decl->getASTContext()));
@@ -113,11 +119,11 @@ private:
 GNUstepObjCDeclVendor::GNUstepObjCDeclVendor(ObjCLanguageRuntime &runtime)
     : ClangDeclVendor(eGNUstepObjCDeclVendor), m_runtime(runtime),
       m_type_realizer_sp(m_runtime.GetEncodingToType()) {
-  
+
   m_ast_ctx = std::make_shared<TypeSystemClang>(
       "GNUstepObjCDeclVendor AST",
       runtime.GetProcess()->GetTarget().GetArchitecture().GetTriple());
-  
+
   m_external_source = new GNUstepObjCExternalASTSource(*this);
   llvm::IntrusiveRefCntPtr<clang::ExternalASTSource> external_source_owning_ptr(
       m_external_source);
@@ -324,8 +330,7 @@ public:
     }
 
     clang::Selector sel = ast_ctx.Selectors.getSelector(
-        is_zero_argument ? 0 : selector_components.size(),
-        identifier_infos);
+        is_zero_argument ? 0 : selector_components.size(), identifier_infos);
 
     clang::QualType ret_type =
         ClangUtil::GetQualType(type_realizer_sp->RealizeType(
@@ -349,8 +354,7 @@ public:
               clang_ast_ctxt, m_type_vector[ai].c_str(), for_expression));
 
       if (arg_type.isNull())
-        return nullptr; // well, we just wasted a bunch of time.  Wish we could
-                        // delete the stuff we'd just made!
+        return nullptr;
 
       parm_vars.push_back(clang::ParmVarDecl::Create(
           ast_ctx, ret, clang::SourceLocation(), clang::SourceLocation(),
@@ -377,27 +381,8 @@ private:
   bool m_is_valid = false;
 };
 
-void GNUstepObjCDeclVendor::AddFoundationClassMethods(
-    clang::ObjCInterfaceDecl *interface_decl, const std::string &class_name) {
-  // All methods are now discovered dynamically via ClassDescriptor.Describe()
-  // No hardcoded methods needed
-}
-
-clang::ObjCMethodDecl *GNUstepObjCDeclVendor::CreateMethodDecl(
-    clang::ObjCInterfaceDecl *interface_decl, const char *name, const char *types,
-    bool is_instance) {
-  
-  if (!interface_decl || !name || !types)
-    return nullptr;
-  
-  ObjCRuntimeMethodType method_type(types);
-  if (!method_type)
-    return nullptr;
-  
-  return method_type.BuildMethod(*m_ast_ctx, interface_decl, name, is_instance, m_type_realizer_sp);
-}
-
-bool GNUstepObjCDeclVendor::FinishDecl(clang::ObjCInterfaceDecl *interface_decl) {
+bool GNUstepObjCDeclVendor::FinishDecl(
+    clang::ObjCInterfaceDecl *interface_decl) {
   if (!interface_decl)
     return false;
 
@@ -422,8 +407,9 @@ bool GNUstepObjCDeclVendor::FinishDecl(clang::ObjCInterfaceDecl *interface_decl)
   if (!descriptor)
     return false;
 
-  // Use Apple's approach: let the ClassDescriptor populate everything
-  auto superclass_func = [interface_decl, this](ObjCLanguageRuntime::ObjCISA isa) {
+  // Use the ClassDescriptor to populate everything
+  auto superclass_func = [interface_decl,
+                          this](ObjCLanguageRuntime::ObjCISA isa) {
     clang::ObjCInterfaceDecl *superclass_decl = GetDeclForISA(isa);
     if (!superclass_decl)
       return;
@@ -433,7 +419,8 @@ bool GNUstepObjCDeclVendor::FinishDecl(clang::ObjCInterfaceDecl *interface_decl)
         context.getObjCInterfaceType(superclass_decl)));
   };
 
-  auto instance_method_func = [interface_decl, this](const char *name, const char *types) -> bool {
+  auto instance_method_func =
+      [interface_decl, this](const char *name, const char *types) -> bool {
     if (!name || !types)
       return false;
     ObjCRuntimeMethodType method_type(types);
@@ -444,7 +431,8 @@ bool GNUstepObjCDeclVendor::FinishDecl(clang::ObjCInterfaceDecl *interface_decl)
     return false;
   };
 
-  auto class_method_func = [interface_decl, this](const char *name, const char *types) -> bool {
+  auto class_method_func = [interface_decl, this](const char *name,
+                                                  const char *types) -> bool {
     if (!name || !types)
       return false;
     ObjCRuntimeMethodType method_type(types);
@@ -456,7 +444,8 @@ bool GNUstepObjCDeclVendor::FinishDecl(clang::ObjCInterfaceDecl *interface_decl)
   };
 
   auto ivar_func = [interface_decl, this](const char *name, const char *type,
-                    lldb::addr_t offset_ptr, uint64_t size) -> bool {
+                                          lldb::addr_t offset_ptr,
+                                          uint64_t size) -> bool {
     if (!name || !type)
       return false;
     const bool for_expression = false;
@@ -482,8 +471,8 @@ bool GNUstepObjCDeclVendor::FinishDecl(clang::ObjCInterfaceDecl *interface_decl)
 }
 
 uint32_t GNUstepObjCDeclVendor::FindDecls(ConstString name, bool append,
-                                        uint32_t max_matches,
-                                        std::vector<CompilerDecl> &decls) {
+                                          uint32_t max_matches,
+                                          std::vector<CompilerDecl> &decls) {
 
   Log *log(GetLog(LLDBLog::Expressions));
 
@@ -506,7 +495,8 @@ uint32_t GNUstepObjCDeclVendor::FindDecls(ConstString name, bool append,
 
     if (!lookup_result.empty()) {
       if (clang::ObjCInterfaceDecl *result_iface_decl =
-             llvm::dyn_cast<clang::ObjCInterfaceDecl>(*lookup_result.begin())) {
+              llvm::dyn_cast<clang::ObjCInterfaceDecl>(
+                  *lookup_result.begin())) {
         if (log) {
           clang::QualType result_iface_type =
               ast_ctx.getObjCInterfaceType(result_iface_decl);
@@ -517,7 +507,8 @@ uint32_t GNUstepObjCDeclVendor::FindDecls(ConstString name, bool append,
             isa_value = metadata->GetISAPtr();
 
           LLDB_LOGF(log,
-                    "GNUstepObjCDeclVendor::FindDecls Found %s (isa 0x%" PRIx64 ") in the ASTContext",
+                    "GNUstepObjCDeclVendor::FindDecls Found %s (isa 0x%" PRIx64
+                    ") in the ASTContext",
                     result_iface_type.getAsString().data(), isa_value);
         }
 
@@ -526,13 +517,16 @@ uint32_t GNUstepObjCDeclVendor::FindDecls(ConstString name, bool append,
         break;
       } else {
         if (log)
-          LLDB_LOGF(log, "GNUstepObjCDeclVendor::FindDecls There's something in the ASTContext, but "
+          LLDB_LOGF(log, "GNUstepObjCDeclVendor::FindDecls There's something "
+                         "in the ASTContext, but "
                          "it's not something we know about");
         break;
       }
     } else if (log) {
-      LLDB_LOGF(log, "GNUstepObjCDeclVendor::FindDecls Couldn't find %s in the ASTContext",
-                name.AsCString());
+      LLDB_LOGF(
+          log,
+          "GNUstepObjCDeclVendor::FindDecls Couldn't find %s in the ASTContext",
+          name.AsCString());
     }
 
     // It's not.  If it exists, we have to put it into our ASTContext.
@@ -540,7 +534,9 @@ uint32_t GNUstepObjCDeclVendor::FindDecls(ConstString name, bool append,
 
     if (!isa) {
       if (log)
-        LLDB_LOGF(log, "GNUstepObjCDeclVendor::FindDecls Couldn't find the isa for class %s",
+        LLDB_LOGF(log,
+                  "GNUstepObjCDeclVendor::FindDecls Couldn't find the isa for "
+                  "class %s",
                   name.AsCString());
       break;
     }
@@ -550,7 +546,8 @@ uint32_t GNUstepObjCDeclVendor::FindDecls(ConstString name, bool append,
     if (!iface_decl) {
       if (log)
         LLDB_LOGF(log,
-                  "GNUstepObjCDeclVendor::FindDecls Couldn't get the Objective-C interface for "
+                  "GNUstepObjCDeclVendor::FindDecls Couldn't get the "
+                  "Objective-C interface for "
                   "isa 0x%" PRIx64 " (class %s)",
                   (uint64_t)isa, name.AsCString());
       break;
@@ -559,7 +556,9 @@ uint32_t GNUstepObjCDeclVendor::FindDecls(ConstString name, bool append,
     if (log) {
       clang::QualType new_iface_type = ast_ctx.getObjCInterfaceType(iface_decl);
 
-      LLDB_LOGF(log, "GNUstepObjCDeclVendor::FindDecls Created %s (isa 0x%" PRIx64 ")",
+      LLDB_LOGF(log,
+                "GNUstepObjCDeclVendor::FindDecls Created %s (isa 0x%" PRIx64
+                ")",
                 new_iface_type.getAsString().c_str(), (uint64_t)isa);
     }
 

@@ -10,18 +10,18 @@
 #define LLDB_SOURCE_PLUGINS_LANGUAGERUNTIME_OBJC_GNUSTEPOBJCRUNTIME_H
 
 #include "../ObjCLanguageRuntime.h"
-#include "lldb/lldb-private.h"
 #include "lldb/Core/ModuleList.h"
-#include "lldb/Symbol/DeclVendor.h"
 #include "lldb/Expression/UtilityFunction.h"
+#include "lldb/Symbol/DeclVendor.h"
+#include "lldb/lldb-private.h"
 
-#include "GNUstepObjCRuntimeIntrospector.h"
 #include "GNUstepObjCDeclVendor.h"
-#include "GNUstepRuntimeV2API.h"
+#include "GNUstepObjCRuntimeIntrospector.h"
 #include "GNUstepObjCRuntimeUtilities.h"
+#include "GNUstepRuntimeV2API.h"
 
-#include <unordered_map>
 #include <chrono>
+#include <unordered_map>
 
 #include <map>
 #include <string>
@@ -72,7 +72,7 @@ public:
   bool IsModuleObjCLibrary(const lldb::ModuleSP &module_sp) override;
   bool ReadObjCLibrary(const lldb::ModuleSP &module_sp) override;
   bool HasReadObjCLibrary() override;
-  
+
   // Support for modern ObjC literals and subscripting
   bool CalculateHasNewLiteralsAndIndexing() override;
 
@@ -80,36 +80,38 @@ public:
 
   llvm::Expected<std::unique_ptr<UtilityFunction>>
   CreateObjectChecker(std::string name, ExecutionContext &exe_ctx) override;
-  
+
   // Create utility functions for modern subscript syntax support
   llvm::Expected<std::unique_ptr<UtilityFunction>>
   CreateSubscriptUtilityFunctions(ExecutionContext &exe_ctx);
 
   void UpdateISAToDescriptorMapIfNeeded() override;
-  
+
   // ClassDescriptor support
-  ClassDescriptorSP GetClassDescriptorFromClassName(ConstString class_name) override;
+  ClassDescriptorSP
+  GetClassDescriptorFromClassName(ConstString class_name) override;
   ClassDescriptorSP GetClassDescriptorFromISA(ObjCISA isa) override;
   ClassDescriptorSP GetClassDescriptor(ValueObject &valobj) override;
-  
+
   // LanguageRuntime overrides
   void ModulesDidLoad(const ModuleList &module_list) override;
 
   // Constructor (public for make_unique)
   GNUstepObjCRuntime(Process *process);
-  
+
   // Get the runtime API (for GNUstepClassDescriptor)
   GNUstepRuntimeV2API *GetRuntimeAPI() { return m_runtime_api_up.get(); }
-  
+
   // Get the runtime introspector (for direct runtime function calls)
-  GNUstepObjCRuntimeIntrospector *GetRuntimeIntrospector() { 
-    return m_introspector_up.get(); 
+  GNUstepObjCRuntimeIntrospector *GetRuntimeIntrospector() {
+    return m_introspector_up.get();
   }
-  
+
   // Get cached runtime symbol addresses for IR rewriting
   std::map<std::string, lldb::addr_t> GetObjCRuntimeAddresses();
-  
-  // Override from LanguageRuntime - this is the critical hook that IRForTarget uses
+
+  // Override from LanguageRuntime - this is the critical hook that IRForTarget
+  // uses
   lldb::addr_t LookupRuntimeSymbol(ConstString name) override;
 
   // Process lifecycle hooks to ensure expression evaluation is ready
@@ -118,11 +120,16 @@ public:
 
 private:
   // Helper method to call runtime functions with string arguments
-  lldb::addr_t CallRuntimeFunction(const char *function_name, const char *string_arg);
-  
+  lldb::addr_t CallRuntimeFunction(const char *function_name,
+                                   const char *string_arg);
+
   // FunctionCaller-based object description helpers
-  std::optional<std::string> GetObjectDescriptionViaFunctionCaller(lldb::addr_t object_ptr, ExecutionContext &exe_ctx);
-  std::optional<std::string> GetUTF8StringViaFunctionCaller(lldb::addr_t nsstring_ptr, ExecutionContext &exe_ctx);
+  std::optional<std::string>
+  GetObjectDescriptionViaFunctionCaller(lldb::addr_t object_ptr,
+                                        ExecutionContext &exe_ctx);
+  std::optional<std::string>
+  GetUTF8StringViaFunctionCaller(lldb::addr_t nsstring_ptr,
+                                 ExecutionContext &exe_ctx);
 
   std::unique_ptr<GNUstepObjCRuntimeIntrospector> m_introspector_up;
   std::unique_ptr<GNUstepRuntimeV2API> m_runtime_api_up;
@@ -132,27 +139,29 @@ private:
   bool m_gnustep_library_loaded = false;
   bool m_subscript_mapping_enabled = false;
   bool m_expression_hooks_installed = false;
-  
+
   // Reentrancy protection flags
   bool m_in_object_description = false;
   bool m_in_dynamic_type_check = false;
   bool m_in_runtime_function_call = false;
-  
+
   // Caching for performance
   struct ObjectDescriptionCache {
     std::unordered_map<lldb::addr_t, std::string> descriptions;
-    std::chrono::steady_clock::time_point last_invalidation = std::chrono::steady_clock::now();
-    
+    std::chrono::steady_clock::time_point last_invalidation =
+        std::chrono::steady_clock::now();
+
     void InvalidateIfStale() {
       auto now = std::chrono::steady_clock::now();
-      auto age = std::chrono::duration_cast<std::chrono::seconds>(now - last_invalidation);
+      auto age = std::chrono::duration_cast<std::chrono::seconds>(
+          now - last_invalidation);
       if (age.count() > 30) { // Invalidate after 30 seconds
         descriptions.clear();
         last_invalidation = now;
       }
     }
   } m_object_description_cache;
-  
+
   // Cached runtime symbol addresses for expression evaluation
   lldb::addr_t m_objc_msgSend_addr = LLDB_INVALID_ADDRESS;
   lldb::addr_t m_objc_msgSend_stret_addr = LLDB_INVALID_ADDRESS;
@@ -163,22 +172,22 @@ private:
   lldb::addr_t m_class_getMethodImplementation_addr = LLDB_INVALID_ADDRESS;
   lldb::addr_t m_cfstring_create_addr = LLDB_INVALID_ADDRESS;
   lldb::addr_t m_class_addMethod_addr = LLDB_INVALID_ADDRESS;
-  
+
   // Optional ARC helpers (non-fatal if not found)
   lldb::addr_t m_objc_retain_addr = LLDB_INVALID_ADDRESS;
   lldb::addr_t m_objc_release_addr = LLDB_INVALID_ADDRESS;
   lldb::addr_t m_objc_autoreleaseReturnValue_addr = LLDB_INVALID_ADDRESS;
   lldb::addr_t m_objc_retainAutoreleasedReturnValue_addr = LLDB_INVALID_ADDRESS;
-  
+
   // CFString fallback utility function if needed
   std::unique_ptr<UtilityFunction> m_cfstring_utility_fn;
-  
+
   // Array/Dictionary literal support utility functions
   std::unique_ptr<UtilityFunction> m_array_literal_utility_fn;
   std::unique_ptr<UtilityFunction> m_dict_literal_utility_fn;
   lldb::addr_t m_array_literal_addr = LLDB_INVALID_ADDRESS;
   lldb::addr_t m_dict_literal_addr = LLDB_INVALID_ADDRESS;
-  
+
   // Subscript shim support
   std::unique_ptr<UtilityFunction> m_subscript_utils_fn;
   lldb::addr_t m_imp_array_subscript_addr = LLDB_INVALID_ADDRESS;
@@ -189,19 +198,19 @@ private:
   // Diagnostic utility for field testing
   std::unique_ptr<UtilityFunction> m_diagnostic_utility_fn;
   lldb::addr_t m_diagnostic_function_addr = LLDB_INVALID_ADDRESS;
-  
+
   // Helper method to register formatters
   void RegisterFormatters();
-  
+
   // Initialize runtime API
   void InitializeRuntimeAPI();
-  
+
   // Install subscript method mapping
   void InstallSubscriptMethodMapping();
-  
+
   // Install expression evaluation hooks for subscript forwarding
   void InstallExpressionEvaluationHooks();
-  
+
   // Helper methods for expression evaluation setup
   void ResolveAndCacheRuntimeSymbols();
   void EnsureCFStringCreateWithBytes();

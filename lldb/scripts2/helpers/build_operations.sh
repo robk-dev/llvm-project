@@ -12,11 +12,11 @@ source "$HELPERS_DIR/common.sh"
 build_lldb() {
     print_section "Step 6: Building LLDB (This will take 1-2 hours)"
     
-    cd "$LLVM_BUILD_DIR/build"
+    cd "$LLVM_BUILD_DIR"
     
     print_progress "Starting build with $PARALLEL_JOBS parallel jobs..."
     echo -e "${YELLOW}Note: This is a large build. You can monitor progress with:${NC}"
-    echo -e "${YELLOW}  tail -f $LLVM_BUILD_DIR/build.log${NC}"
+    echo -e "${YELLOW}  tail -f $LLVM_BUILD_DIR.log${NC}"
     echo ""
     
     # Start time tracking
@@ -30,7 +30,7 @@ build_lldb() {
         print_success "LLDB build completed successfully in ${BUILD_TIME} minutes!"
         
         # Show build info
-        LLDB_BINARY="$LLVM_BUILD_DIR/build/bin/lldb"
+        LLDB_BINARY="$LLVM_BUILD_DIR/bin/lldb"
         if [ -f "$LLDB_BINARY" ]; then
             print_success "LLDB binary: $LLDB_BINARY"
             
@@ -47,7 +47,7 @@ build_lldb() {
 build_lldb_server() {
     print_section "Step 6.5: Building lldb-server"
     
-    cd "$LLVM_BUILD_DIR/build"
+    cd "$LLVM_BUILD_DIR"
     
     print_progress "Building lldb-server target..."
     
@@ -62,7 +62,7 @@ build_lldb_server() {
         print_success "lldb-server build completed successfully in ${BUILD_TIME} minutes!"
         
         # Check if binary exists
-        LLDB_SERVER_BINARY="$LLVM_BUILD_DIR/build/bin/lldb-server"
+        LLDB_SERVER_BINARY="$LLVM_BUILD_DIR/bin/lldb-server"
         if [ -f "$LLDB_SERVER_BINARY" ]; then
             print_success "🎯 lldb-server binary: $LLDB_SERVER_BINARY"
             
@@ -77,7 +77,7 @@ build_lldb_server() {
             print_progress "Searching for lldb-server in build directory..."
             
             # Search for the binary
-            FOUND_SERVERS=$(find "$LLVM_BUILD_DIR/build" -name "lldb-server" -type f 2>/dev/null)
+            FOUND_SERVERS=$(find "$LLVM_BUILD_DIR" -name "lldb-server" -type f 2>/dev/null)
             if [ -n "$FOUND_SERVERS" ]; then
                 print_success "Found lldb-server at alternative locations:"
                 echo "$FOUND_SERVERS"
@@ -104,8 +104,8 @@ build_lldb_server() {
 verify_installation() {
     print_section "Step 7: Verifying Installation"
     
-    LLDB_BINARY="$LLVM_BUILD_DIR/build/bin/lldb"
-    LLDB_SERVER_BINARY="$LLVM_BUILD_DIR/build/bin/lldb-server"
+    LLDB_BINARY="$LLVM_BUILD_DIR/bin/lldb"
+    LLDB_SERVER_BINARY="$LLVM_BUILD_DIR/bin/lldb-server"
     
     # Check LLDB
     if [ ! -f "$LLDB_BINARY" ]; then
@@ -136,7 +136,7 @@ verify_installation() {
     print_progress "Checking for GNUstep runtime plugin..."
     # Note: Plugin loads dynamically when debugging ObjC programs
     # Static plugin list check may not show GNUstep plugin
-    GNUSTEP_PLUGIN_DIR="$LLVM_BUILD_DIR/llvm-project/lldb/source/Plugins/LanguageRuntime/ObjC/GNUstepObjCRuntime"
+    GNUSTEP_PLUGIN_DIR="$PROJECT_ROOT/lldb/source/Plugins/LanguageRuntime/ObjC/GNUstepObjCRuntime"
     if [ -d "$GNUSTEP_PLUGIN_DIR" ]; then
         FILE_COUNT=$(ls -1 "$GNUSTEP_PLUGIN_DIR" | wc -l)
         print_success "✅ GNUstepObjCRuntime plugin files present ($FILE_COUNT files)"
@@ -159,8 +159,8 @@ show_build_status() {
     fi
     
     # Check LLVM source
-    if [ -d "$LLVM_BUILD_DIR/llvm-project" ]; then
-        cd "$LLVM_BUILD_DIR/llvm-project"
+    if [ -d "$PROJECT_ROOT" ]; then
+        cd "$PROJECT_ROOT"
         COMMIT_HASH=$(git rev-parse --short HEAD 2>/dev/null)
         COMMIT_DATE=$(git log -1 --format=%ci 2>/dev/null)
         CURRENT_BRANCH=$(git describe --tags --exact-match 2>/dev/null || git rev-parse --abbrev-ref HEAD 2>/dev/null)
@@ -170,13 +170,13 @@ show_build_status() {
     fi
     
     # Check build directory
-    if [ -d "$LLVM_BUILD_DIR/build" ]; then
-        print_success "📁 Build directory exists: $LLVM_BUILD_DIR/build"
+    if [ -d "$LLVM_BUILD_DIR" ]; then
+        print_success "📁 Build directory exists: $LLVM_BUILD_DIR"
         
         # Check for key binaries
-        LLDB_BINARY="$LLVM_BUILD_DIR/build/bin/lldb"
-        LLDB_SERVER_BINARY="$LLVM_BUILD_DIR/build/bin/lldb-server"
-        CLANG_BINARY="$LLVM_BUILD_DIR/build/bin/clang"
+        LLDB_BINARY="$LLVM_BUILD_DIR/bin/lldb"
+        LLDB_SERVER_BINARY="$LLVM_BUILD_DIR/bin/lldb-server"
+        CLANG_BINARY="$LLVM_BUILD_DIR/bin/clang"
         
         if [ -f "$LLDB_BINARY" ]; then
             LLDB_VERSION=$("$LLDB_BINARY" --version 2>/dev/null | head -1)
@@ -199,7 +199,7 @@ show_build_status() {
         fi
         
         # Check GNUstep patch
-        GNUSTEP_PLUGIN_DIR="$LLVM_BUILD_DIR/llvm-project/lldb/source/Plugins/LanguageRuntime/ObjC/GNUstepObjCRuntime"
+        GNUSTEP_PLUGIN_DIR="$PROJECT_ROOT/lldb/source/Plugins/LanguageRuntime/ObjC/GNUstepObjCRuntime"
         if [ -d "$GNUSTEP_PLUGIN_DIR" ]; then
             FILE_COUNT=$(ls -1 "$GNUSTEP_PLUGIN_DIR" | wc -l)
             print_success "✅ GNUstep patch applied ($FILE_COUNT files)"
@@ -208,8 +208,8 @@ show_build_status() {
         fi
         
         # Show disk usage
-        BUILD_SIZE=$(du -sh "$LLVM_BUILD_DIR/build" 2>/dev/null | cut -f1)
-        SOURCE_SIZE=$(du -sh "$LLVM_BUILD_DIR/llvm-project" 2>/dev/null | cut -f1)
+        BUILD_SIZE=$(du -sh "$LLVM_BUILD_DIR" 2>/dev/null | cut -f1)
+        SOURCE_SIZE=$(du -sh "$PROJECT_ROOT" 2>/dev/null | cut -f1)
         print_success "💾 Disk usage: Build=$BUILD_SIZE, Source=$SOURCE_SIZE"
         
     else
@@ -220,8 +220,8 @@ show_build_status() {
     echo ""
     print_section "💡 Performance Tips"
     echo -e "${CYAN}• Use ccache for faster rebuilds: export CCACHE_DIR=~/.ccache${NC}"
-    echo -e "${CYAN}• Incremental builds: cd $LLVM_BUILD_DIR/build && ninja lldb${NC}"
-    echo -e "${CYAN}• Monitor build: tail -f $LLVM_BUILD_DIR/build.log${NC}"
+    echo -e "${CYAN}• Incremental builds: cd $LLVM_BUILD_DIR && ninja lldb${NC}"
+    echo -e "${CYAN}• Monitor build: tail -f $LLVM_BUILD_DIR.log${NC}"
     echo -e "${CYAN}• Memory usage: Use fewer parallel jobs if running out of RAM${NC}"
 }
 
@@ -229,8 +229,8 @@ show_build_status() {
 run_quick_tests() {
     print_section "🧪 Quick Tests"
     
-    LLDB_BINARY="$LLVM_BUILD_DIR/build/bin/lldb"
-    LLDB_SERVER_BINARY="$LLVM_BUILD_DIR/build/bin/lldb-server"
+    LLDB_BINARY="$LLVM_BUILD_DIR/bin/lldb"
+    LLDB_SERVER_BINARY="$LLVM_BUILD_DIR/bin/lldb-server"
     
     if [ ! -f "$LLDB_BINARY" ]; then
         print_error "❌ LLDB binary not found - cannot run tests"

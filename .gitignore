@@ -77,3 +77,4 @@ pythonenv*
 /gnustep-*/
 /.ccache/
 /build/
+/clang_build/

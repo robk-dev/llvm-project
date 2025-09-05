@@ -17,7 +17,7 @@ check_disk_space() {
         print_error "Insufficient disk space. Need at least 50GB, have ${AVAILABLE_SPACE}GB"
     fi
     print_success "Disk space: ${AVAILABLE_SPACE}GB available"
-    
+    \
     print_progress "Checking available RAM..."
     TOTAL_RAM=$(free -g | awk '/^Mem:/{print $2}')
     if [ "$TOTAL_RAM" -lt 16 ]; then

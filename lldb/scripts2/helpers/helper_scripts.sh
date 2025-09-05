@@ -63,10 +63,10 @@ LLVM_BUILD_DIR="$HOME/llvm-build"
 echo "Setting up environment for patched LLDB..."
 
 # Add to PATH
-export PATH="$LLVM_BUILD_DIR/build/bin:$PATH"
+export PATH="$LLVM_BUILD_DIR/bin:$PATH"
 
 # Add library path
-export LD_LIBRARY_PATH="$LLVM_BUILD_DIR/build/lib:$LD_LIBRARY_PATH"
+export LD_LIBRARY_PATH="$LLVM_BUILD_DIR/lib:$LD_LIBRARY_PATH"
 
 # Enable GNUstep new string ABI
 
@@ -78,8 +78,8 @@ echo "  clang   - Clang compiler"
 echo "  clang++ - Clang C++ compiler"
 echo ""
 echo "To make this permanent, add to your ~/.bashrc or ~/.zshrc:"
-echo "  export PATH=\"$LLVM_BUILD_DIR/build/bin:\$PATH\""
-echo "  export LD_LIBRARY_PATH=\"$LLVM_BUILD_DIR/build/lib:\$LD_LIBRARY_PATH\""
+echo "  export PATH=\"$LLVM_BUILD_DIR/bin:\$PATH\""
+echo "  export LD_LIBRARY_PATH=\"$LLVM_BUILD_DIR/lib:\$LD_LIBRARY_PATH\""
 ENV_EOF
     
     chmod +x "$LLVM_BUILD_DIR/setup_environment.sh"
@@ -231,7 +231,7 @@ MAKE_EOF
 # Troubleshoot lldb-server issues
 
 LLVM_BUILD_DIR="$HOME/llvm-build"
-LLDB_SERVER_PATH="$LLVM_BUILD_DIR/build/bin/lldb-server"
+LLDB_SERVER_PATH="$LLVM_BUILD_DIR/bin/lldb-server"
 
 echo "=== lldb-server Troubleshooting ==="
 echo ""
@@ -251,7 +251,7 @@ else
     echo ""
     echo "Searching for lldb-server in build directory..."
     
-    FOUND_SERVERS=$(find "$LLVM_BUILD_DIR/build" -name "lldb-server" -type f 2>/dev/null)
+    FOUND_SERVERS=$(find "$LLVM_BUILD_DIR" -name "lldb-server" -type f 2>/dev/null)
     if [ -n "$FOUND_SERVERS" ]; then
         echo "Found lldb-server at alternative locations:"
         echo "$FOUND_SERVERS"
@@ -259,7 +259,7 @@ else
         echo "❌ lldb-server not found anywhere in build directory"
         echo ""
         echo "To build lldb-server:"
-        echo "  cd $LLVM_BUILD_DIR/build"
+        echo "  cd $LLVM_BUILD_DIR"
         echo "  ninja lldb-server"
     fi
 fi
@@ -267,10 +267,10 @@ fi
 echo ""
 echo "For VS Code CodeLLDB extension, update .vscode/settings.json:"
 echo "{"
-echo "  \"lldb.library\": \"$LLVM_BUILD_DIR/build/lib/liblldb.so\","
+echo "  \"lldb.library\": \"$LLVM_BUILD_DIR/lib/liblldb.so\","
 echo "  \"lldb.adapterEnv\": {"
 echo "    \"LLDB_DEBUGSERVER_PATH\": \"$LLDB_SERVER_PATH\","
-echo "    \"LD_LIBRARY_PATH\": \"$LLVM_BUILD_DIR/build/lib:/usr/local/lib\""
+echo "    \"LD_LIBRARY_PATH\": \"$LLVM_BUILD_DIR/lib:/usr/local/lib\""
 echo "  }"
 echo "}"
 
@@ -294,13 +294,13 @@ update_vscode_settings() {
     fi
     
     # Check if our LLDB paths exist
-    if [ ! -f "$LLVM_BUILD_DIR/build/lib/liblldb.so" ]; then
-        print_warning "liblldb.so not found at $LLVM_BUILD_DIR/build/lib/liblldb.so"
+    if [ ! -f "$LLVM_BUILD_DIR/lib/liblldb.so" ]; then
+        print_warning "liblldb.so not found at $LLVM_BUILD_DIR/lib/liblldb.so"
         return 1
     fi
     
-    if [ ! -f "$LLVM_BUILD_DIR/build/bin/lldb-server" ]; then
-        print_warning "lldb-server not found at $LLVM_BUILD_DIR/build/bin/lldb-server"
+    if [ ! -f "$LLVM_BUILD_DIR/bin/lldb-server" ]; then
+        print_warning "lldb-server not found at $LLVM_BUILD_DIR/bin/lldb-server"
         return 1
     fi
     
@@ -310,13 +310,13 @@ update_vscode_settings() {
     print_progress "Updating LLDB paths in VS Code settings..."
     
     # Update the paths using sed (more reliable than trying to parse JSON in bash)
-    sed -i "s|\"lldb.library\": \"[^\"]*\"|\"lldb.library\": \"$LLVM_BUILD_DIR/build/lib/liblldb.so\"|g" "$VSCODE_SETTINGS"
-    sed -i "s|\"LLDB_DEBUGSERVER_PATH\": \"[^\"]*\"|\"LLDB_DEBUGSERVER_PATH\": \"$LLVM_BUILD_DIR/build/bin/lldb-server\"|g" "$VSCODE_SETTINGS"
-    sed -i "s|\"LD_LIBRARY_PATH\": \"[^\"]*\"|\"LD_LIBRARY_PATH\": \"$LLVM_BUILD_DIR/build/lib:/usr/local/lib\"|g" "$VSCODE_SETTINGS"
+    sed -i "s|\"lldb.library\": \"[^\"]*\"|\"lldb.library\": \"$LLVM_BUILD_DIR/lib/liblldb.so\"|g" "$VSCODE_SETTINGS"
+    sed -i "s|\"LLDB_DEBUGSERVER_PATH\": \"[^\"]*\"|\"LLDB_DEBUGSERVER_PATH\": \"$LLVM_BUILD_DIR/bin/lldb-server\"|g" "$VSCODE_SETTINGS"
+    sed -i "s|\"LD_LIBRARY_PATH\": \"[^\"]*\"|\"LD_LIBRARY_PATH\": \"$LLVM_BUILD_DIR/lib:/usr/local/lib\"|g" "$VSCODE_SETTINGS"
     
     print_success "VS Code settings updated successfully"
-    print_success "LLDB library: $LLVM_BUILD_DIR/build/lib/liblldb.so"
-    print_success "LLDB server: $LLVM_BUILD_DIR/build/bin/lldb-server"
+    print_success "LLDB library: $LLVM_BUILD_DIR/lib/liblldb.so"
+    print_success "LLDB server: $LLVM_BUILD_DIR/bin/lldb-server"
     
     echo ""
     echo -e "${YELLOW}VS Code CodeLLDB extension should now work with your custom LLDB build!${NC}"

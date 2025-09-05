@@ -64,30 +64,86 @@ Available Examples:
 
 ## Build Commands
 
-### Initial CMake Configuration (if needed)
+### Two-Stage Build Process (Recommended for WSL)
+
+Due to compatibility issues with system compilers, we use a two-stage build process:
+
+#### Automated Two-Stage Build
 ```bash
+# Use the WSL-specific setup script
+bash /home/robk/code/llvm-project/lldb/scripts-wsl/setup.sh
+
+# For incremental rebuilds after changes
+bash /home/robk/code/llvm-project/lldb/scripts-wsl/setup.sh --skip-stage1
+```
+
+#### Manual Two-Stage Build
+```bash
+# Stage 1: Build clang/lld with system compiler
+mkdir -p build-stage1 && cd build-stage1
 cmake -G Ninja ../llvm \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DLLVM_ENABLE_PROJECTS="clang;lld" \
+    -DLLVM_TARGETS_TO_BUILD="X86" \
+    -DBUILD_SHARED_LIBS=OFF \
+    -DLLVM_CCACHE_BUILD=ON
+ninja clang lld llvm-tblgen clang-tblgen -j$(nproc)
+
+# Stage 2: Build LLDB with stage1 clang
+cd ../build
+cmake -G Ninja ../llvm \
+    -DCMAKE_C_COMPILER=../build-stage1/bin/clang \
+    -DCMAKE_CXX_COMPILER=../build-stage1/bin/clang++ \
     -DCMAKE_BUILD_TYPE=RelWithDebInfo \
     -DLLVM_ENABLE_PROJECTS="clang;lldb;lld" \
     -DLLVM_ENABLE_ASSERTIONS=ON \
     -DLLDB_INCLUDE_TESTS=ON \
+    -DBUILD_SHARED_LIBS=ON \
     -DLLVM_CCACHE_BUILD=ON \
+    -DLLDB_ENABLE_PYTHON=ON \
+    -DPython3_EXECUTABLE=/usr/bin/python3 \
+    -DPython3_INCLUDE_DIRS=/usr/include/python3.10 \
+    -DPython3_LIBRARIES=/usr/lib/x86_64-linux-gnu/libpython3.10.so \
     -DCMAKE_INSTALL_PREFIX=/usr/local/llvm-reldeb
+ninja lldb lldb-server -j$(nproc)
 ```
 
-### Building LLDB with GNUstep Plugin
+### Quick Rebuild (After Code Changes)
 ```bash
-# Quick build (LLDB and required components only)
-cd /home/robk/code/llvm-project/build && ninja lldb lldb-server -j$(nproc)
+# Quick rebuild of LLDB and plugin only
+cd /home/robk/code/llvm-project/build && ninja lldb lldb-server lldbPluginGNUstepObjCRuntime -j$(nproc)
 ```
 
-## Compiling GNUstep Test Programs
+## Building GNUstep Test Programs
 
-When creating or compiling Objective-C test programs for GNUstep, use these flags:
+The project now uses CMake for cross-platform building of test programs. The CMakeLists.txt supports both Linux (WSL) and Windows.
 
+### Using CMake Build System (Recommended)
 ```bash
-CC=/home/robk/llvm-build/build/bin/clang
-LLDB=/home/robk/llvm-build/build/bin/lldb
+cd /home/robk/code/llvm-project/lldb/examples
+mkdir -p build-examples && cd build-examples
+
+# Configure with your newly built clang
+cmake -S .. -B . \
+    -DCMAKE_C_COMPILER=/home/robk/code/llvm-project/build-stage1/bin/clang \
+    -DCMAKE_OBJC_COMPILER=/home/robk/code/llvm-project/build-stage1/bin/clang \
+    -DLLDB_BIN=/home/robk/code/llvm-project/build/bin/lldb \
+    -DLLDB_SERVER_BIN=/home/robk/code/llvm-project/build/bin/lldb-server
+
+# Build all examples
+cmake --build . -j
+
+# Build specific example
+cmake --build . --target custom_class_test
+
+# Debug with LLDB (launches LLDB with proper environment)
+cmake --build . --target debug-custom_class_test
+```
+
+### Manual Compilation (if needed)
+```bash
+CC=/home/robk/code/llvm-project/build-stage1/bin/clang
+LLDB=/home/robk/code/llvm-project/build/bin/lldb
 
 CFLAGS="-fobjc-runtime=gnustep-2.1 \
         -fblocks \
@@ -106,13 +162,6 @@ LIBS="-lgnustep-base -lobjc -lBlocksRuntime -lpthread -lm"
 
 # Example compilation
 $CC $CFLAGS $LDFLAGS -o test_program test_program.m $LIBS
-```
-
-### Building Example Tests
-```bash
-cd /home/robk/code/llvm-project/lldb/examples
-make all  # Build all test programs
-make custom_class_test  # Build specific test
 ```
 
 ## Testing the Plugin

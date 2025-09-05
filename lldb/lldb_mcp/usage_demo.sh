@@ -6,12 +6,12 @@ echo
 
 # Method 1: Using CLI argument
 echo "1. Using CLI argument:"
-echo "   python3 lldb_mcp.py --lldb-path /home/robk/llvm-build/bin/lldb --debug"
+echo "   python3 lldb_mcp.py --lldb-path /home/robk/llvm-project/build/bin/lldb --debug"
 echo
 
 # Method 2: Using environment variable
 echo "2. Using environment variable:"
-echo "   export LLDB_EXECUTABLE=/home/robk/llvm-build/bin/lldb"
+echo "   export LLDB_EXECUTABLE=/home/robk/llvm-project/build/bin/lldb"
 echo "   python3 lldb_mcp.py --debug"
 echo
 
@@ -34,10 +34,10 @@ echo
 
 echo "=== Testing with your VS Code configuration ==="
 echo "Based on your VS Code settings.json, you're using:"
-echo "   /home/robk/llvm-build/bin/lldb"
+echo "   /home/robk/llvm-project/build/bin/lldb"
 echo
 echo "To use the same LLDB with MCP server:"
-echo "   python3 lldb_mcp.py --lldb-path /home/robk/llvm-build/bin/lldb"
+echo "   python3 lldb_mcp.py --lldb-path /home/robk/llvm-project/build/bin/lldb"
 echo "or:"
-echo "   export LLDB_EXECUTABLE=/home/robk/llvm-build/bin/lldb"
+echo "   export LLDB_EXECUTABLE=/home/robk/llvm-project/build/bin/lldb"
 echo "   python3 lldb_mcp.py"

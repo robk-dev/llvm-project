@@ -16,8 +16,8 @@ if [ -z "${WORKSPACE_ROOT:-}" ]; then
     # Determine paths relative to this script
     HELPERS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     SCRIPT_DIR="$(dirname "$HELPERS_DIR")"           # .../scripts2
-    PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"           # repo root containing examples/, gnustep-install/
-    WORKSPACE_ROOT="$PROJECT_ROOT"                     # Treat workspace root as repo root
+    WORKSPACE_ROOT="$(dirname "$SCRIPT_DIR")"           # repo root containing examples/, gnustep-install/
+    PROJECT_ROOT="$(dirname "$WORKSPACE_ROOT")"           # repo root containing examples/, gnustep-install/
 fi
 
 # Calculate safe parallel jobs based on available memory
@@ -84,10 +84,10 @@ show_build_status() {
     print_progress "Build Status Summary"
     echo "===================="
     
-    local lldb_binary="$LLVM_BUILD_DIR/build/bin/lldb"
-    local lldb_server_binary="$LLVM_BUILD_DIR/build/bin/lldb-server"
-    local clang_binary="$LLVM_BUILD_DIR/build/bin/clang"
-    local plugin_dir="$LLVM_BUILD_DIR/llvm-project/lldb/source/Plugins/LanguageRuntime/ObjC/GNUstepObjCRuntime"
+    local lldb_binary="$LLVM_BUILD_DIR/bin/lldb"
+    local lldb_server_binary="$LLVM_BUILD_DIR/bin/lldb-server"
+    local clang_binary="$LLVM_BUILD_DIR/bin/clang"
+    local plugin_dir="$PROJECT_ROOT/lldb/source/Plugins/LanguageRuntime/ObjC/GNUstepObjCRuntime"
     
     if [ -f "$lldb_binary" ]; then
         local lldb_date=$(date -r "$lldb_binary" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo "unknown")

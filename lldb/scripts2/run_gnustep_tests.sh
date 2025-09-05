@@ -22,7 +22,9 @@ NC='\033[0m' # No Color
 
 # Paths
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+WORKSPACE_ROOT="$(dirname "$SCRIPT_DIR")"           # repo root containing examples/, gnustep-install/
+PROJECT_ROOT="$(dirname "$WORKSPACE_ROOT")"   
+
 BUILD_DIR="$PROJECT_ROOT/build"
 LLDB_BIN="$BUILD_DIR/bin/lldb"
 TEST_PROGRAMS_DIR="$PROJECT_ROOT/lldb/examples"

@@ -9,13 +9,13 @@
 #ifndef LLDB_SOURCE_PLUGINS_LANGUAGERUNTIME_OBJC_GNUSTEPOBJCRUNTIMEINTROSPECTOR_H
 #define LLDB_SOURCE_PLUGINS_LANGUAGERUNTIME_OBJC_GNUSTEPOBJCRUNTIMEINTROSPECTOR_H
 
-#include "lldb/lldb-private.h"
-#include "lldb/Target/Process.h"
-#include "lldb/Expression/FunctionCaller.h"
 #include "GNUstepObjCRuntimeUtilities.h"
+#include "lldb/Expression/FunctionCaller.h"
+#include "lldb/Target/Process.h"
+#include "lldb/lldb-private.h"
+#include <atomic>
 #include <memory>
 #include <unordered_map>
-#include <atomic>
 
 namespace lldb_private {
 
@@ -35,67 +35,70 @@ public:
 
   // Extract ISA from a ValueObject
   lldb::addr_t GetISAFromObject(ValueObject &valobj);
-  
+
   // Given an isa pointer, return the class name.
   std::string GetClassName(lldb::addr_t isa_addr);
-  
+
   // Get class name from ISA with caching support
   lldb_private::ConstString GetClassNameFromISA(lldb::addr_t isa_addr);
-  
+
   // Get class name directly from a ValueObject
   std::string GetClassNameFromObject(ValueObject &valobj);
-  
+
   // Find a class by name in the runtime
   lldb::addr_t FindClass(const std::string &class_name);
-  
+
   // Check if this looks like a valid GNUstep runtime
   bool IsValidGNUstepRuntime();
-  
+
   // Load runtime function symbols for direct calling
   bool LoadRuntimeSymbols();
-  
+
   // CRITICAL: Direct method introspection using runtime.h functions
-  // These avoid expression evaluation during interface declaration to break recursion
+  // These avoid expression evaluation during interface declaration to break
+  // recursion
   struct MethodInfo {
     std::string selector_name;
     std::string type_encoding;
     lldb::addr_t implementation;
   };
-  
+
   // Get all instance methods from a class pointer (direct memory access)
   std::vector<MethodInfo> GetInstanceMethods(lldb::addr_t class_ptr);
-  
-  // Get all class methods from a class pointer via metaclass (direct memory access)  
+
+  // Get all class methods from a class pointer via metaclass (direct memory
+  // access)
   std::vector<MethodInfo> GetClassMethods(lldb::addr_t class_ptr);
-  
+
   // Get class pointer by name using objc_getClass (direct runtime call)
   lldb::addr_t GetClassPointer(const std::string &class_name);
-  
+
   // Get metaclass pointer by name using objc_getMetaClass (direct runtime call)
   lldb::addr_t GetMetaClassPointer(const std::string &class_name);
-  
+
   // Ensure runtime symbols are loaded (call this before using symbol addresses)
   void EnsureRuntimeSymbolsLoaded();
-  
+
   // Get runtime function address by name with caching
   lldb::addr_t GetRuntimeFunctionAddress(const char *function_name);
-  
+
   // Check if an object is a tagged pointer
   bool IsTaggedPointer(lldb::addr_t obj_addr);
-  
+
   // Decode tagged pointer data for strings
   std::string DecodeTaggedString(lldb::addr_t obj_addr);
-  
+
   // Get the class pointer for a tagged pointer using runtime functions
   lldb::addr_t GetTaggedPointerClass(lldb::addr_t obj_addr);
-  
+
   // Get the class name for a tagged pointer
   std::string GetTaggedPointerClassName(lldb::addr_t obj_addr);
-  
+
   // Check if an address represents a valid object
   bool IsValidObjectPointer(lldb::addr_t obj_addr);
-  
-  // Helper to call functions in the target process (public interface for DeclVendor)
+
+  // Helper to call functions in the target process (public interface for
+  // DeclVendor)
   lldb::addr_t CallRuntimeFunction(const std::string &function_name,
                                    const std::vector<lldb::addr_t> &args);
 
@@ -103,10 +106,10 @@ private:
   Process *m_process;
   uint32_t m_address_size;
   lldb::ByteOrder m_byte_order;
-  
+
   // Reentrancy protection
   mutable std::atomic<bool> m_in_function_call{false};
-  
+
   // Runtime function addresses for direct calling (performance optimization)
   lldb::addr_t m_object_getClass_addr = LLDB_INVALID_ADDRESS;
   lldb::addr_t m_class_getSuperclass_addr = LLDB_INVALID_ADDRESS;
@@ -116,18 +119,19 @@ private:
   lldb::addr_t m_objc_copyClassList_addr = LLDB_INVALID_ADDRESS;
   lldb::addr_t m_class_getName_addr = LLDB_INVALID_ADDRESS;
   lldb::addr_t m_free_addr = LLDB_INVALID_ADDRESS;
-  
-  // Method introspection function addresses from runtime.h for dynamic method discovery
+
+  // Method introspection function addresses from runtime.h for dynamic method
+  // discovery
   lldb::addr_t m_objc_getMetaClass_addr = LLDB_INVALID_ADDRESS;
   lldb::addr_t m_objc_getClass_addr = LLDB_INVALID_ADDRESS;
   lldb::addr_t m_class_copyMethodList_addr = LLDB_INVALID_ADDRESS;
   lldb::addr_t m_method_getName_addr = LLDB_INVALID_ADDRESS;
   lldb::addr_t m_method_getTypeEncoding_addr = LLDB_INVALID_ADDRESS;
   lldb::addr_t m_sel_getName_addr = LLDB_INVALID_ADDRESS;
-  
+
   // Flag to track if we've attempted to load runtime symbols
   bool m_runtime_symbols_loaded = false;
-  
+
   // Cache for function callers to avoid repeated compilation
   struct FunctionCallerCache {
     std::unique_ptr<FunctionCaller> objc_lookup_class_caller;
@@ -135,29 +139,29 @@ private:
     std::unique_ptr<FunctionCaller> object_getClass_caller;
     std::unique_ptr<FunctionCaller> class_getSuperclass_caller;
     // Generic cache for other functions
-    std::unordered_map<std::string, std::unique_ptr<FunctionCaller>> generic_callers;
+    std::unordered_map<std::string, std::unique_ptr<FunctionCaller>>
+        generic_callers;
   };
-  
+
   mutable FunctionCallerCache m_function_cache;
-  
+
   // Cache for ISA to class name mapping
-  mutable std::unordered_map<lldb::addr_t, lldb_private::ConstString> m_isa_to_name_cache;
-  
+  mutable std::unordered_map<lldb::addr_t, lldb_private::ConstString>
+      m_isa_to_name_cache;
+
   // New implementation methods for function calling
-  lldb::addr_t CallRuntimeFunctionImpl(
-      const char *function_name,
-      const CompilerType &return_type,
-      const ValueList &args,
-      ExecutionContext &exe_ctx,
-      Status &error) const;
-      
-  std::unique_ptr<FunctionCaller>& GetOrCreateFunctionCaller(
-      const char *function_name,
-      const CompilerType &return_type,
-      const ValueList &arg_types,
-      ExecutionContext &exe_ctx,
-      Status &error) const;
-  
+  lldb::addr_t CallRuntimeFunctionImpl(const char *function_name,
+                                       const CompilerType &return_type,
+                                       const ValueList &args,
+                                       ExecutionContext &exe_ctx,
+                                       Status &error) const;
+
+  std::unique_ptr<FunctionCaller> &
+  GetOrCreateFunctionCaller(const char *function_name,
+                            const CompilerType &return_type,
+                            const ValueList &arg_types,
+                            ExecutionContext &exe_ctx, Status &error) const;
+
   // Helper to get modules
   lldb::ModuleSP GetObjCModule() const;
   lldb::ModuleSP GetFoundationModule() const;

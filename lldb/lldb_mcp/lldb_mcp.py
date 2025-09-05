@@ -41,15 +41,16 @@ from contextlib import asynccontextmanager
 
 from mcp.server.fastmcp import FastMCP, Context
 
-os.environ["LD_LIBRARY_PATH"] = "../lib:/usr/local/lib:../build/lib:../build/lib:/home/robk/gnustep-install/lib"
+# os.environ["LD_LIBRARY_PATH"] = "../lib:/usr/local/lib:../build/lib:../build/lib:/home/robk/gnustep-install/lib"
+os.environ["LD_LIBRARY_PATH"] = "/home/robk/code/llvm-project/lib:/usr/local/lib:/home/robk/code/llvm-project/build/lib:/home/robk/code/llvm-project/build/lib:/home/robk/gnustep-install/lib"
         # "LD_LIBRARY_PATH": "../lib:/usr/local/lib:../build/lib",
         # "PATH": "../build/bin:../bin:${env:PATH}"
 # Global debug flag - set to False by default
 DEBUG = False
 
 # Global LLDB executable path - can be set via CLI arg or env var
-DEFAULT_LLDB_PATH = "../build/bin/lldb"
-DEFAULT_LLDB_SERVER_PATH = "../build/bin/lldb-server"
+DEFAULT_LLDB_PATH = "/home/robk/code/llvm-project/build/bin/lldb"
+DEFAULT_LLDB_SERVER_PATH = "/home/robk/code/llvm-project/build/bin/lldb-server"
 
 def set_lldb_path(path: str) -> None:
     """Set the global LLDB executable path"""

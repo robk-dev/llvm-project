@@ -9,17 +9,17 @@
 #ifndef LLDB_SOURCE_PLUGINS_LANGUAGERUNTIME_OBJC_GNUSTEPOBJCDECLVENDOR_H
 #define LLDB_SOURCE_PLUGINS_LANGUAGERUNTIME_OBJC_GNUSTEPOBJCDECLVENDOR_H
 
-#include "Plugins/ExpressionParser/Clang/ClangDeclVendor.h"
-#include "Plugins/TypeSystem/Clang/TypeSystemClang.h"
+#include "../ObjCLanguageRuntime.h"
 #include "GNUstepObjCRuntimeIntrospector.h"
 #include "GNUstepRuntimeV2API.h"
-#include "../ObjCLanguageRuntime.h"
+#include "Plugins/ExpressionParser/Clang/ClangDeclVendor.h"
+#include "Plugins/TypeSystem/Clang/TypeSystemClang.h"
 #include <unordered_map>
 
 namespace clang {
 class ObjCInterfaceDecl;
 class ExternalASTSource;
-}
+} // namespace clang
 
 namespace lldb_private {
 
@@ -40,39 +40,31 @@ public:
 
 private:
   typedef std::unordered_map<ObjCLanguageRuntime::ObjCISA,
-                             clang::ObjCInterfaceDecl *> ISAToInterfaceMap;
+                             clang::ObjCInterfaceDecl *>
+      ISAToInterfaceMap;
 
   ObjCLanguageRuntime &m_runtime;
   GNUstepObjCExternalASTSource *m_external_source;
   ISAToInterfaceMap m_isa_to_interface;
   ObjCLanguageRuntime::EncodingToTypeSP m_type_realizer_sp;
 
-  // Helper methods
-  void AddFoundationClassMethods(clang::ObjCInterfaceDecl *interface_decl,
-                                 const std::string &class_name);
-  clang::ObjCMethodDecl *CreateMethodDecl(clang::ObjCInterfaceDecl *interface_decl,
-                                           const char *name, const char *types,
-                                           bool is_instance);
-
   // Method forwarding infrastructure for modern subscript syntax
   struct MethodForwardingInfo {
-    std::string modern_method;      // e.g., "objectAtIndexedSubscript:"
-    std::string legacy_method;      // e.g., "objectAtIndex:"
-    std::string class_prefix;       // e.g., "NSArray" or "*" for all classes
+    std::string modern_method; // e.g., "objectAtIndexedSubscript:"
+    std::string legacy_method; // e.g., "objectAtIndex:"
+    std::string class_prefix;  // e.g., "NSArray" or "*" for all classes
     bool enabled;
   };
 
   // Method resolution and forwarding
-  clang::ObjCMethodDecl *ResolveMethodWithForwarding(
-      clang::ObjCInterfaceDecl *interface_decl,
-      const std::string &method_name,
-      const std::string &class_name,
-      bool is_instance);
+  clang::ObjCMethodDecl *
+  ResolveMethodWithForwarding(clang::ObjCInterfaceDecl *interface_decl,
+                              const std::string &method_name,
+                              const std::string &class_name, bool is_instance);
 
   // Check if a method should be forwarded to another method
-  std::optional<std::string> GetForwardingTarget(
-      const std::string &method_name, 
-      const std::string &class_name);
+  std::optional<std::string> GetForwardingTarget(const std::string &method_name,
+                                                 const std::string &class_name);
 
   // Install default method forwarding rules
   void InstallDefaultForwardingRules();
@@ -83,17 +75,19 @@ private:
 
 public:
   // Runtime-based interface population
-  bool PopulateInterfaceFromRuntime(TypeSystemClang &ts, const std::string &class_name);
+  bool PopulateInterfaceFromRuntime(TypeSystemClang &ts,
+                                    const std::string &class_name);
 
 private:
   // Method forwarding table
   std::vector<MethodForwardingInfo> m_method_forwarding_rules;
   bool m_forwarding_initialized;
-  
+
   // Runtime API for dynamic class/method discovery
   std::unique_ptr<GNUstepRuntimeV2API> m_runtime_api;
-  
-  // CRITICAL: Direct memory introspector for breaking expression evaluation recursion
+
+  // CRITICAL: Direct memory introspector for breaking expression evaluation
+  // recursion
   std::unique_ptr<GNUstepObjCRuntimeIntrospector> m_introspector;
 };
 
