@@ -8,7 +8,6 @@
 
 #include "GNUstepObjCRuntimeIntrospector.h"
 #include "GNUstepObjCRuntimeUtilities.h"
-#include "formatters/GNUstepFormattersBase.h"
 #include "Plugins/TypeSystem/Clang/TypeSystemClang.h"
 #include "lldb/Core/Module.h"
 #include "lldb/Core/ModuleList.h"
@@ -1028,7 +1027,8 @@ std::vector<std::string> GNUstepObjCRuntimeIntrospector::GetAllClassNames() {
   
   // Read the count
   uint32_t class_count = 0;
-  if (!formatters::GNUstepRuntimeHelper::ReadMemory(m_process, count_addr, &class_count, sizeof(class_count))) {
+  size_t bytes_read = m_process->ReadMemory(count_addr, &class_count, sizeof(class_count), error);
+  if (error.Fail() || bytes_read != sizeof(class_count)) {
     m_process->DeallocateMemory(count_addr);
     return class_names;
   }
@@ -1038,7 +1038,8 @@ std::vector<std::string> GNUstepObjCRuntimeIntrospector::GetAllClassNames() {
     lldb::addr_t class_ptr_addr = class_list_ptr + (i * m_address_size);
     lldb::addr_t class_ptr = 0;
     
-    if (formatters::GNUstepRuntimeHelper::ReadMemory(m_process, class_ptr_addr, &class_ptr, m_address_size)) {
+    bytes_read = m_process->ReadMemory(class_ptr_addr, &class_ptr, m_address_size, error);
+    if (!error.Fail() && bytes_read == m_address_size) {
       std::string class_name = GetClassName(class_ptr);
       if (!class_name.empty()) {
         class_names.push_back(class_name);

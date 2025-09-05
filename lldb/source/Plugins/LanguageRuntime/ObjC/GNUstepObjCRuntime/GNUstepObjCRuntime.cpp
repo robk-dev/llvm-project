@@ -8,7 +8,7 @@
 
 #include "GNUstepObjCRuntime.h"
 #include "GNUstepObjCRuntimeUtilities.h"
-#include "formatters/GNUstepIdDispatcher.h"
+#include "formatters/GNUstepUniversalFormatter.h"
 #include "lldb/Core/PluginManager.h"
 #include "lldb/Expression/UtilityFunction.h"
 #include "lldb/Expression/DiagnosticManager.h"
@@ -441,7 +441,7 @@ llvm::Error GNUstepObjCRuntime::GetObjectDescription(
         // Try our ID dispatcher formatter
         StreamString formatter_stream;
         TypeSummaryOptions summary_options;
-        if (formatters::GNUstepIdDispatcherFunction(*temp_valobj_sp, formatter_stream, summary_options)) {
+        if (formatters::GNUstepUniversalSummaryProvider(*temp_valobj_sp, formatter_stream, summary_options)) {
           std::string formatter_output = formatter_stream.GetData();
           if (!formatter_output.empty() && formatter_output != "nil" && 
               formatter_output.find("GNUstep object at") == std::string::npos) {

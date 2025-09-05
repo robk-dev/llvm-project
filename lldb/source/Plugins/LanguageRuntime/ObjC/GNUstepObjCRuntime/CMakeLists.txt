@@ -2,14 +2,7 @@ add_lldb_library(lldbPluginGNUstepObjCRuntime PLUGIN
   GNUstepObjCRuntime.cpp
   GNUstepObjCRuntimeIntrospector.cpp
   GNUstepObjCRuntimeUtilities.cpp
-  formatters/GNUstepFormattersBase.cpp
-  formatters/GNUstepIdDispatcher.cpp
-  formatters/GNUstepStringFormatters.cpp
-  formatters/GNUstepNumberFormatters.cpp
-  formatters/GNUstepArrayFormatters.cpp
-  formatters/GNUstepDictionaryFormatters.cpp
-  formatters/GNUstepSetFormatters.cpp
-  formatters/GNUstepGenericFormatter.cpp
+  formatters/GNUstepUniversalFormatter.cpp
 
   LINK_LIBS
     lldbCore
