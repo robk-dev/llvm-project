@@ -8,11 +8,8 @@
 
 #include "GNUstepObjCRuntime.h"
 #include "GNUstepObjCRuntimeUtilities.h"
-#include "formatters/GNUstepFormattersRegistry.h"
 #include "formatters/GNUstepIdDispatcher.h"
 #include "lldb/Core/PluginManager.h"
-#include "lldb/DataFormatters/DataVisualization.h"
-#include "lldb/DataFormatters/TypeCategory.h"
 #include "lldb/Expression/UtilityFunction.h"
 #include "lldb/Expression/DiagnosticManager.h"
 #include "lldb/Target/ExecutionContext.h"
@@ -114,7 +111,7 @@ GNUstepObjCRuntime::CreateInstance(Process *process,
 }
 
 GNUstepObjCRuntime::GNUstepObjCRuntime(Process *process)
-    : ObjCLanguageRuntime(process), m_formatters_registered(false), m_gnustep_library_loaded(false) {
+    : ObjCLanguageRuntime(process), m_gnustep_library_loaded(false) {
   // Initialize the consolidated runtime function caller
   if (process) {
     m_runtime_caller = std::make_unique<RuntimeFunctionCaller>(process);
@@ -177,11 +174,8 @@ void GNUstepObjCRuntime::DidLaunch() {
   LLDB_LOG(log, "[GNUstep] DidLaunch: Process launched, registering formatters only");
   printf("[DEBUG] GNUstepObjCRuntime::DidLaunch called\n");
   
-  // Only register formatters during launch - defer expression hooks to avoid hanging
-  // Re-enable RegisterFormatters() to get all GNUstep formatters working including NSString
-  RegisterFormatters();
-  
-  // Note: Expression evaluation hooks will be installed lazily when needed
+  // Formatters are registered in ObjCLanguage.cpp via LoadGNUstepFormatters()
+  // Expression evaluation hooks will be installed lazily when needed
   // This prevents hanging with NSNumber literals during process launch
 }
 
@@ -189,11 +183,8 @@ void GNUstepObjCRuntime::DidAttach(ArchSpec &arch_spec) {
   Log *log = GetLog(LLDBLog::Language | LLDBLog::Types);
   LLDB_LOG(log, "[GNUstep] DidAttach: Process attached, registering formatters only");
   
-  // Only register formatters during attach - defer expression hooks to avoid hanging
-  // Re-enable RegisterFormatters() to get all GNUstep formatters working including NSString
-  RegisterFormatters();
-  
-  // Note: Expression evaluation hooks will be installed lazily when needed
+  // Formatters are registered in ObjCLanguage.cpp via LoadGNUstepFormatters()
+  // Expression evaluation hooks will be installed lazily when needed
   // This prevents hanging with NSNumber literals during process attach
 }
 
@@ -358,17 +349,7 @@ llvm::Error GNUstepObjCRuntime::GetObjectDescription(
   // but documenting the intention to replace with FunctionCaller
   
   if (exe_ctx.GetFramePtr()) {
-    // Use FunctionCaller to safely call -description and UTF8String methods
-    if (auto desc_result = GetObjectDescriptionViaFunctionCaller(object_ptr, exe_ctx)) {
-      str << desc_result->c_str();
-      
-      // Cache the description
-      m_object_description_cache.descriptions[object_ptr] = *desc_result;
-      
-      return llvm::Error::success();
-    }
-    
-    // Fallback: If FunctionCaller fails, try simple expression evaluation
+    // Try simple expression evaluation
     EvaluateExpressionOptions options = MakeSafeExpressionOptions();
     options.SetSuppressPersistentResult(true);
     options.SetKeepInMemory(false);
@@ -392,17 +373,7 @@ llvm::Error GNUstepObjCRuntime::GetObjectDescription(
       // The result is an NSString object, we need to call UTF8String on it to get the C string
       addr_t nsstring_addr = result_sp->GetValueAsUnsigned(0);
       if (nsstring_addr != 0 && nsstring_addr != LLDB_INVALID_ADDRESS) {
-        // Use FunctionCaller for UTF8String method instead of expression evaluation
-        if (auto utf8_result = GetUTF8StringViaFunctionCaller(nsstring_addr, exe_ctx)) {
-          str << utf8_result->c_str();
-          
-          // Cache the description
-          m_object_description_cache.descriptions[object_ptr] = *utf8_result;
-          
-          return llvm::Error::success();
-        }
-        
-        // Final fallback: expression evaluation for UTF8String
+        // Use expression evaluation for UTF8String
         char utf8_expr[256];
         snprintf(utf8_expr, sizeof(utf8_expr), "(char*)[(id)0x%" PRIx64 " UTF8String]", nsstring_addr);
         
@@ -1218,34 +1189,6 @@ void GNUstepObjCRuntime::InitializeRuntimeAPI() {
   } else {
     LLDB_LOG(log, "Runtime introspector not available, using fallback mechanisms");
   }
-}
-
-void GNUstepObjCRuntime::RegisterFormatters() {
-  if (m_formatters_registered) {
-    return;
-  }
-    
-  Log *log = GetLog(LLDBLog::Process | LLDBLog::Types);
-  LLDB_LOG(log, "GNUstepObjCRuntime::RegisterFormatters - Registering GNUstep formatters");
-  
-  // Debug: Add stdout message to confirm this function is called
-  printf("[DEBUG] GNUstepObjCRuntime::RegisterFormatters called\n");
-  
-  // Get the "objc" type category where formatters are registered
-  TypeCategoryImplSP objc_category_sp;
-  if (DataVisualization::Categories::GetCategory(ConstString("objc"), objc_category_sp)) {
-    printf("[DEBUG] Using GNUstepFormattersRegistry to register all formatters\n");
-    
-    // Register all GNUstep formatters using the comprehensive registry
-    GNUstepFormattersRegistry::RegisterFormatters(*objc_category_sp);
-    
-    LLDB_LOG(log, "GNUstep formatters registered successfully via GNUstepFormattersRegistry");
-  } else {
-    LLDB_LOG(log, "Failed to get objc category for formatter registration");
-    printf("[ERROR] Failed to get objc category for formatter registration\n");
-  }
-  
-  m_formatters_registered = true;
 }
 
 DeclVendor *GNUstepObjCRuntime::GetDeclVendor() {
@@ -2205,69 +2148,6 @@ lldb::addr_t GNUstepObjCRuntime::LookupRuntimeSymbol(ConstString name) {
 
   LLDB_LOG(log, "GNUstepObjCRuntime::LookupRuntimeSymbol: No match found for {0}", name.GetCString());
   return LLDB_INVALID_ADDRESS;
-}
-
-// Helper function to get object description via FunctionCaller
-std::optional<std::string> GNUstepObjCRuntime::GetObjectDescriptionViaFunctionCaller(
-    lldb::addr_t object_ptr, ExecutionContext &exe_ctx) {
-  
-  Log *log = GetLog(LLDBLog::Language);
-  LLDB_LOG(log, "GNUstepObjCRuntime: GetObjectDescriptionViaFunctionCaller called for object 0x{0:x}", object_ptr);
-  
-  // Check cache first
-  m_object_description_cache.InvalidateIfStale();
-  auto cache_iter = m_object_description_cache.descriptions.find(object_ptr);
-  if (cache_iter != m_object_description_cache.descriptions.end()) {
-    LLDB_LOG(log, "GNUstepObjCRuntime: Using cached description for 0x{0:x}: {1}", object_ptr, cache_iter->second);
-    return cache_iter->second;
-  }
-  
-  // Ensure we have the necessary runtime symbols
-  if (m_objc_msgSend_addr == LLDB_INVALID_ADDRESS || m_sel_getUid_addr == LLDB_INVALID_ADDRESS) {
-    LLDB_LOG(log, "GNUstepObjCRuntime: Missing runtime symbols for FunctionCaller description");
-    return std::nullopt;
-  }
-  
-  ThreadSP thread_sp = exe_ctx.GetThreadSP();
-  if (!thread_sp) {
-    LLDB_LOG(log, "GNUstepObjCRuntime: No thread available for FunctionCaller description");
-    return std::nullopt;
-  }
-  
-  // Get type system for function call setup
-  auto ts = ScratchTypeSystemClang::GetForTarget(m_process->GetTarget());
-  if (!ts) {
-    LLDB_LOG(log, "GNUstepObjCRuntime: No type system available for FunctionCaller");
-    return std::nullopt;
-  }
-  
-  // Step 1: Get selector for "description" using our CallRuntimeFunction
-  lldb::addr_t desc_selector = CallRuntimeFunction("sel_getUid", "description");
-  
-  if (desc_selector == LLDB_INVALID_ADDRESS) {
-    LLDB_LOG(log, "GNUstepObjCRuntime: Failed to get description selector via CallRuntimeFunction");
-    return std::nullopt;
-  }
-  
-  LLDB_LOG(log, "GNUstepObjCRuntime: Got description selector: 0x{0:x}", desc_selector);
-  
-  // Step 2: For now, fall back to expression evaluation as implementing
-  // the full FunctionCaller approach for objc_msgSend requires complex ABI handling
-  LLDB_LOG(log, "GNUstepObjCRuntime: FunctionCaller for objc_msgSend not yet fully implemented, using expression evaluation fallback");
-  return std::nullopt;
-}
-
-// Helper function to get UTF8String via FunctionCaller
-std::optional<std::string> GNUstepObjCRuntime::GetUTF8StringViaFunctionCaller(
-    lldb::addr_t nsstring_ptr, ExecutionContext &exe_ctx) {
-  
-  Log *log = GetLog(LLDBLog::Language);
-  LLDB_LOG(log, "GNUstepObjCRuntime: GetUTF8StringViaFunctionCaller called for NSString 0x{0:x}", nsstring_ptr);
-  
-  // For now, fall back to simple implementation as FunctionCaller for NSString methods
-  // requires complex ABI handling and proper type system integration
-  LLDB_LOG(log, "GNUstepObjCRuntime: FunctionCaller for NSString UTF8String not yet fully implemented");
-  return std::nullopt;
 }
 
 LLDB_PLUGIN_DEFINE(GNUstepObjCRuntime)

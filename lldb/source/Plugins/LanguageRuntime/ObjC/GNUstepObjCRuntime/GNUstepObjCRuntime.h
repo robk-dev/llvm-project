@@ -118,18 +118,9 @@ private:
   lldb::addr_t CallRuntimeFunction(const char *function_name,
                                    const char *string_arg);
 
-  // FunctionCaller-based object description helpers
-  std::optional<std::string>
-  GetObjectDescriptionViaFunctionCaller(lldb::addr_t object_ptr,
-                                        ExecutionContext &exe_ctx);
-  std::optional<std::string>
-  GetUTF8StringViaFunctionCaller(lldb::addr_t nsstring_ptr,
-                                 ExecutionContext &exe_ctx);
-
   std::unique_ptr<GNUstepObjCRuntimeIntrospector> m_introspector_up;
   std::unique_ptr<DeclVendor> m_decl_vendor_up;
   bool m_has_read_objc_library = false;
-  bool m_formatters_registered = false;
   bool m_gnustep_library_loaded = false;
   bool m_subscript_mapping_enabled = false;
   bool m_expression_hooks_installed = false;
@@ -193,9 +184,6 @@ private:
   // Diagnostic utility for field testing
   std::unique_ptr<UtilityFunction> m_diagnostic_utility_fn;
   lldb::addr_t m_diagnostic_function_addr = LLDB_INVALID_ADDRESS;
-
-  // Helper method to register formatters
-  void RegisterFormatters();
 
   // Initialize runtime API
   void InitializeRuntimeAPI();
