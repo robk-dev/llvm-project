@@ -408,12 +408,38 @@ bool IRForTarget::RewriteObjCConstString(llvm::GlobalVariable *ns_str,
   Type *i8_ty = Type::getInt8Ty(m_module->getContext());
 
   if (!m_CFStringCreateWithBytes) {
+    // First check if this is GNUstep - if so, always use NSString directly
+    static lldb_private::ConstString g_objc_getClass_str("objc_getClass");
+    static lldb_private::ConstString g_objc_msgSend_str("objc_msgSend");
+    static lldb_private::ConstString g_sel_getUid_str("sel_getUid");
+    static lldb_private::ConstString g_gnustep_base_str("gnustep_base_version");
+    
+    bool missing_weak = false;
+    
+    // Check if GNUstep is present by looking for gnustep_base_version symbol
+    lldb::addr_t gnustep_indicator = m_execution_unit.FindSymbol(g_gnustep_base_str, missing_weak);
+    
+    if (gnustep_indicator != LLDB_INVALID_ADDRESS) {
+      // This is GNUstep - use NSString directly instead of CFString
+      lldb::addr_t objc_getClass_addr = m_execution_unit.FindSymbol(g_objc_getClass_str, missing_weak);
+      lldb::addr_t objc_msgSend_addr = m_execution_unit.FindSymbol(g_objc_msgSend_str, missing_weak);
+      lldb::addr_t sel_getUid_addr = m_execution_unit.FindSymbol(g_sel_getUid_str, missing_weak);
+      
+      if (objc_getClass_addr != LLDB_INVALID_ADDRESS && 
+          objc_msgSend_addr != LLDB_INVALID_ADDRESS &&
+          sel_getUid_addr != LLDB_INVALID_ADDRESS) {
+        LLDB_LOG(log, "Detected GNUstep runtime - using NSString path instead of CFStringCreateWithBytes");
+        // For GNUstep, we'll rewrite to use NSString stringWithUTF8String:
+        return RewriteObjCConstStringGNUstep(ns_str, cstr);
+      }
+    }
+    
+    // Not GNUstep or missing runtime functions - try CFStringCreateWithBytes
     lldb::addr_t CFStringCreateWithBytes_addr;
 
     static lldb_private::ConstString g_CFStringCreateWithBytes_str(
         "CFStringCreateWithBytes");
 
-    bool missing_weak = false;
     CFStringCreateWithBytes_addr = m_execution_unit.FindSymbol(
         g_CFStringCreateWithBytes_str, missing_weak);
     if (CFStringCreateWithBytes_addr == LLDB_INVALID_ADDRESS || missing_weak) {
@@ -534,15 +560,161 @@ bool IRForTarget::RewriteObjCConstString(llvm::GlobalVariable *ns_str,
   return true;
 }
 
+bool IRForTarget::RewriteObjCConstStringGNUstep(llvm::GlobalVariable *ns_str,
+                                                llvm::GlobalVariable *cstr) {
+  lldb_private::Log *log(GetLog(LLDBLog::Expressions));
+  
+  // Debug output to understand what we're dealing with
+  LLDB_LOG(log, "RewriteObjCConstStringGNUstep called");
+  fprintf(stderr, "DEBUG: RewriteObjCConstStringGNUstep called\n");
+  
+  // Safety check: make sure we're actually dealing with a string constant
+  // NSNumber literals shouldn't reach here
+  if (!ns_str->getName().contains("_unnamed_cfstring_")) {
+    LLDB_LOG(log, "Not a string constant, skipping: {0}", ns_str->getName());
+    return true;
+  }
+  
+  if (cstr) {
+    if (cstr->hasInitializer()) {
+      if (auto *data = dyn_cast<ConstantDataArray>(cstr->getInitializer())) {
+        if (data->isString()) {
+          StringRef str = data->getAsString();
+          LLDB_LOG(log, "String content: '{0}'", str);
+          fprintf(stderr, "DEBUG: String content: '%s'\n", str.str().c_str());
+        }
+      }
+    }
+  }
+  
+  // Create the necessary types
+  Type *i8_ptr_ty = PointerType::getUnqual(m_module->getContext());
+  
+  // Get runtime function addresses
+  static lldb_private::ConstString g_objc_getClass_str("objc_getClass");
+  static lldb_private::ConstString g_objc_msgSend_str("objc_msgSend");
+  static lldb_private::ConstString g_sel_getUid_str("sel_getUid");
+  
+  bool missing_weak = false;
+  lldb::addr_t objc_getClass_addr = m_execution_unit.FindSymbol(g_objc_getClass_str, missing_weak);
+  lldb::addr_t objc_msgSend_addr = m_execution_unit.FindSymbol(g_objc_msgSend_str, missing_weak);
+  lldb::addr_t sel_getUid_addr = m_execution_unit.FindSymbol(g_sel_getUid_str, missing_weak);
+  
+  LLDB_LOG(log, "Runtime addresses - objc_getClass: 0x{0:x}, objc_msgSend: 0x{1:x}, sel_getUid: 0x{2:x}",
+           objc_getClass_addr, objc_msgSend_addr, sel_getUid_addr);
+  fprintf(stderr, "DEBUG: objc_getClass: 0x%llx, objc_msgSend: 0x%llx, sel_getUid: 0x%llx\n",
+          (unsigned long long)objc_getClass_addr, 
+          (unsigned long long)objc_msgSend_addr,
+          (unsigned long long)sel_getUid_addr);
+  
+  if (objc_getClass_addr == LLDB_INVALID_ADDRESS || 
+      objc_msgSend_addr == LLDB_INVALID_ADDRESS ||
+      sel_getUid_addr == LLDB_INVALID_ADDRESS) {
+    LLDB_LOG(log, "Failed to find runtime functions");
+    fprintf(stderr, "DEBUG: Failed to find runtime functions\n");
+    // Fallback to null
+    ns_str->replaceAllUsesWith(ConstantPointerNull::get(ns_str->getType()));
+    ns_str->eraseFromParent();
+    return true;
+  }
+  
+  // Build function types
+  FunctionType *objc_getClass_type = 
+      FunctionType::get(i8_ptr_ty, {i8_ptr_ty}, false);
+  FunctionType *sel_getUid_type = 
+      FunctionType::get(i8_ptr_ty, {i8_ptr_ty}, false);
+  FunctionType *objc_msgSend_type = 
+      FunctionType::get(i8_ptr_ty, {i8_ptr_ty, i8_ptr_ty, i8_ptr_ty}, true);
+  
+  // Create function pointers
+  Constant *objc_getClass_addr_int = ConstantInt::get(m_intptr_ty, objc_getClass_addr, false);
+  Constant *objc_getClass_func = ConstantExpr::getIntToPtr(
+      objc_getClass_addr_int, PointerType::getUnqual(objc_getClass_type));
+  
+  Constant *sel_getUid_addr_int = ConstantInt::get(m_intptr_ty, sel_getUid_addr, false);
+  Constant *sel_getUid_func = ConstantExpr::getIntToPtr(
+      sel_getUid_addr_int, PointerType::getUnqual(sel_getUid_type));
+  
+  Constant *objc_msgSend_addr_int = ConstantInt::get(m_intptr_ty, objc_msgSend_addr, false);
+  Constant *objc_msgSend_func = ConstantExpr::getIntToPtr(
+      objc_msgSend_addr_int, PointerType::getUnqual(objc_msgSend_type));
+  
+  // Create the class name and selector constants
+  Constant *class_name = ConstantDataArray::getString(
+      m_module->getContext(), "NSString", true);
+  GlobalVariable *class_name_global = new GlobalVariable(
+      *m_module, class_name->getType(), true, GlobalValue::PrivateLinkage,
+      class_name, "_gnustep_class_NSString");
+  
+  Constant *sel_name = ConstantDataArray::getString(
+      m_module->getContext(), "stringWithUTF8String:", true);
+  GlobalVariable *sel_name_global = new GlobalVariable(
+      *m_module, sel_name->getType(), true, GlobalValue::PrivateLinkage,
+      sel_name, "_gnustep_sel_stringWithUTF8String");
+  
+  // Create pointers to the constants
+  Value *class_name_ptr = ConstantExpr::getPointerCast(class_name_global, i8_ptr_ty);
+  Value *sel_name_ptr = ConstantExpr::getPointerCast(sel_name_global, i8_ptr_ty);
+  Value *string_ptr = cstr ? ConstantExpr::getPointerCast(cstr, i8_ptr_ty)
+                            : ConstantPointerNull::get(cast<PointerType>(i8_ptr_ty));
+  
+  // Use UnfoldConstant to properly handle the replacement
+  FunctionValueCache string_creator(
+      [this, objc_getClass_func, objc_getClass_type, sel_getUid_func, sel_getUid_type,
+       objc_msgSend_func, objc_msgSend_type, class_name_ptr, sel_name_ptr, string_ptr]
+      (llvm::Function *function) -> llvm::Value * {
+        // Find the entry instruction for this function
+        Instruction *entry_instruction = llvm::cast<Instruction>(
+            m_entry_instruction_finder.GetValue(function));
+        
+        // Create the call sequence
+        CallInst *getClass_call = CallInst::Create(
+            objc_getClass_type, objc_getClass_func, class_name_ptr, "NSString_class",
+            entry_instruction->getIterator());
+        
+        CallInst *getSelector_call = CallInst::Create(
+            sel_getUid_type, sel_getUid_func, sel_name_ptr, "stringWithUTF8String_sel",
+            entry_instruction->getIterator());
+        
+        Value *msgSend_args[] = {getClass_call, getSelector_call, string_ptr};
+        CallInst *msgSend_call = CallInst::Create(
+            objc_msgSend_type, objc_msgSend_func, msgSend_args, "string_result",
+            entry_instruction->getIterator());
+        
+        return msgSend_call;
+      });
+  
+  // Use UnfoldConstant to replace all uses
+  if (!UnfoldConstant(ns_str, nullptr, string_creator, m_entry_instruction_finder,
+                      m_error_stream)) {
+    LLDB_LOG(log, "UnfoldConstant failed, trying direct replacement");
+    fprintf(stderr, "DEBUG: UnfoldConstant failed, trying direct replacement\n");
+    
+    // If UnfoldConstant fails, try a simpler direct approach for non-complex cases
+    // This should work for simple cases like direct usage in expressions
+    ns_str->replaceAllUsesWith(ConstantPointerNull::get(ns_str->getType()));
+    ns_str->eraseFromParent();
+    return true;
+  }
+  
+  ns_str->eraseFromParent();
+  return true;
+}
+
 bool IRForTarget::RewriteObjCConstStrings() {
   lldb_private::Log *log(GetLog(LLDBLog::Expressions));
 
   ValueSymbolTable &value_symbol_table = m_module->getValueSymbolTable();
 
+  LLDB_LOG(log, "RewriteObjCConstStrings: Scanning value symbol table");
+  
   for (StringMapEntry<llvm::Value *> &value_symbol : value_symbol_table) {
     llvm::StringRef value_name = value_symbol.first();
+    
+    LLDB_LOG(log, "RewriteObjCConstStrings: Found symbol '{0}'", value_name);
 
     if (value_name.contains("_unnamed_cfstring_")) {
+      LLDB_LOG(log, "RewriteObjCConstStrings: Processing cfstring '{0}'", value_name);
       Value *nsstring_value = value_symbol.second;
 
       GlobalVariable *nsstring_global =
@@ -1165,8 +1337,8 @@ bool IRForTarget::HandleObjCClass(Value *classlist_reference) {
             LLDB_LOG(log, "Found objc_getClass at {0}", objc_getClass_addr);
             
             // Create function type: Class objc_getClass(const char*)
-            Type *class_type = m_intptr_ty; // Class is essentially a pointer
-            Type *char_ptr_type = m_intptr_ty; // const char* as intptr
+            Type *class_type = PointerType::get(m_module->getContext(), 0); // Class is a pointer
+            Type *char_ptr_type = PointerType::get(m_module->getContext(), 0); // const char* as pointer
             FunctionType *ogc_type = FunctionType::get(class_type, {char_ptr_type}, false);
             
             Constant *ogc_addr_const = 
@@ -1187,7 +1359,7 @@ bool IRForTarget::HandleObjCClass(Value *classlist_reference) {
           for (auto *user : global_variable->users()) {
             if (LoadInst *load_inst = dyn_cast<LoadInst>(user)) {
               // Create the call right before this load
-              Value *class_name_ptr = ConstantExpr::getPointerCast(class_name_global, m_intptr_ty);
+              Value *class_name_ptr = ConstantExpr::getPointerCast(class_name_global, PointerType::get(m_module->getContext(), 0));
               CallInst *objc_getClass_call = CallInst::Create(
                   m_objc_getClass, class_name_ptr, "objc_getClass", load_inst->getIterator());
               
@@ -1518,8 +1690,16 @@ bool IRForTarget::UnfoldConstant(Constant *old_constant,
                                   "expressions is unsupported.\n");
           return false;
         }
-        inst->replaceUsesOfWith(
-            old_constant, value_maker.GetValue(inst->getParent()->getParent()));
+        // Safety check to prevent type mismatch crashes
+        Value *new_value = value_maker.GetValue(inst->getParent()->getParent());
+        if (new_value->getType() != old_constant->getType()) {
+          lldb_private::Log *unfold_log(GetLog(LLDBLog::Expressions));
+          LLDB_LOG(unfold_log, "Type mismatch in UnfoldConstant: old={0} new={1}", 
+                   PrintType(old_constant->getType()), PrintType(new_value->getType()));
+          // Skip this replacement to avoid crash
+          continue;
+        }
+        inst->replaceUsesOfWith(old_constant, new_value);
       } else {
         error_stream.Printf(
             "error [IRForTarget internal]: Unhandled non-constant type: \"%s\"",

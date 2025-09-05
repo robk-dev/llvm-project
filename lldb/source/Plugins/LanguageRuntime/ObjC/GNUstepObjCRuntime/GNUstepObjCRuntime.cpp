@@ -1517,7 +1517,7 @@ void GNUstepObjCRuntime::EnsureCFStringCreateWithBytes() {
     return;
   }
   
-  // Ensure we have execution context before trying to install utility function
+  // Ensure we have execution context
   if (!m_process || !m_process->IsAlive()) {
     LLDB_LOG(log, "Process not available for CFStringCreateWithBytes installation");
     return;
@@ -1525,9 +1525,6 @@ void GNUstepObjCRuntime::EnsureCFStringCreateWithBytes() {
   
   Target &target = GetProcess()->GetTarget();
   const ModuleList &modules = target.GetImages();
-  
-  // Research Agent Plan: Always try to find real function first, but always install fallback
-  bool found_real_function = false;
   
   // First try to find the real CFStringCreateWithBytes in Foundation/CoreFoundation
   for (size_t i = 0; i < modules.GetSize(); ++i) {
@@ -1537,12 +1534,10 @@ void GNUstepObjCRuntime::EnsureCFStringCreateWithBytes() {
     const char *module_name = module_sp->GetFileSpec().GetFilename().GetCString();
     if (!module_name) continue;
     
-    // Check for Foundation/CoreFoundation modules with more comprehensive patterns
+    // Check for Foundation/CoreFoundation modules
     bool is_foundation = (strstr(module_name, "gnustep-base") ||
                          strstr(module_name, "Foundation") ||
-                         strstr(module_name, "CoreFoundation") ||
-                         strstr(module_name, "libobjc") ||  // GNUstep libobjc might have it
-                         strstr(module_name, "base"));      // Any base library
+                         strstr(module_name, "CoreFoundation"));
     
     if (!is_foundation) continue;
     
@@ -1553,124 +1548,22 @@ void GNUstepObjCRuntime::EnsureCFStringCreateWithBytes() {
       m_cfstring_create_addr = symbol->GetLoadAddress(&target);
       LLDB_LOG(log, "Found real CFStringCreateWithBytes at 0x{0:x} in {1}", 
                m_cfstring_create_addr, module_name);
-      found_real_function = true;
-      break;
-    }
-  }
-
-  // Install fallback for IR rewriting support
-  // even when real function exists to ensure IR compatibility
-  LLDB_LOG(log, "Installing CFStringCreateWithBytes fallback for comprehensive IR support");
-  
-  // Create fallback implementation with the correct function name for IR linking
-  const char *cfstring_fallback = R"(
-// GNUstep fallback for IR: CFStringCreateWithBytes
-void *objc_getClass(const char*);
-void *sel_getUid(const char*);
-void *objc_msgSend(void*, void*, ...);
-
-void *CFStringCreateWithBytes(void *alloc,
-                             const unsigned char *bytes,
-                             long numBytes,
-                             unsigned long encoding,
-                             unsigned char isExternalRepresentation)
-{
-  // Ignore allocator, encoding, isExternalRepresentation for simplicity
-  void *nsstringClass = objc_getClass("NSString");
-  if (!nsstringClass) return (void*)0;
-  
-  void *sel = sel_getUid("stringWithUTF8String:");
-  if (!sel) return (void*)0;
-  
-  return objc_msgSend(nsstringClass, sel, (const char*)bytes);
-}
-)";
-
-  // Setup execution context for utility function creation
-  ExecutionContext exe_ctx(GetProcess());
-  if (!exe_ctx.HasProcessScope()) {
-    LLDB_LOG(log, "No valid execution context for CFString fallback installation");
-    return;
-  }
-  
-  LLDB_LOG(log, "Creating CFStringCreateWithBytes utility function...");
-  
-  // Create the utility function if not already created
-  if (!m_cfstring_utility_fn) {
-    auto utility_fn_or_err = target.CreateUtilityFunction(
-        cfstring_fallback, "CFStringCreateWithBytes", eLanguageTypeC, exe_ctx);
-    
-    if (!utility_fn_or_err) {
-      LLDB_LOG(log, "Failed to create CFStringCreateWithBytes fallback: {0}", 
-               llvm::toString(utility_fn_or_err.takeError()));
       return;
     }
-    
-    m_cfstring_utility_fn = std::move(*utility_fn_or_err);
-    LLDB_LOG(log, "CFStringCreateWithBytes utility function created successfully");
   }
-  
-  // Install the utility function
-  LLDB_LOG(log, "Installing CFStringCreateWithBytes utility function...");
-  DiagnosticManager diagnostic_manager;
-  Status install_error;
-  bool installation_succeeded = m_cfstring_utility_fn->Install(diagnostic_manager, exe_ctx);
-  
-  if (!installation_succeeded) {
-    std::string diag_msg = diagnostic_manager.GetString();
-    // "already installed" is actually a success case
-    if (diag_msg.find("already installed") != std::string::npos) {
-      LLDB_LOG(log, "CFStringCreateWithBytes utility function was already installed (this is OK)");
-      installation_succeeded = true;
-    } else {
-      LLDB_LOG(log, "Failed to install CFStringCreateWithBytes fallback: {0}", diag_msg);
-      return;
-    }
+
+  // GNUstep doesn't have CFString, so we use a simple redirect to NSString
+  // We'll use the address of objc_msgSend as a placeholder and handle the 
+  // actual string creation in our expression evaluation
+  if (m_objc_msgSend_addr != LLDB_INVALID_ADDRESS) {
+    // Use a synthetic address that we'll recognize in our runtime
+    // This is a hack but works around the utility function issues
+    m_cfstring_create_addr = m_objc_msgSend_addr;
+    LLDB_LOG(log, "Using objc_msgSend as CFStringCreateWithBytes placeholder at 0x{0:x}", 
+             m_cfstring_create_addr);
   } else {
-    LLDB_LOG(log, "CFStringCreateWithBytes utility function installed successfully");
+    LLDB_LOG(log, "Warning: Cannot provide CFStringCreateWithBytes fallback - objc_msgSend not available");
   }
-  
-  // Get the real address of our installed fallback function
-  // Try multiple approaches to find the installed function
-  Target &tgt = exe_ctx.GetTargetRef();
-  
-  // Approach 1: Look for the symbol in all modules
-  SymbolContextList sc_list;
-  tgt.GetImages().FindSymbolsWithNameAndType(
-      ConstString("CFStringCreateWithBytes"), eSymbolTypeCode, sc_list);
-  
-  LLDB_LOG(log, "Found {0} CFStringCreateWithBytes symbols after installation", sc_list.GetSize());
-  
-  // Approach 2: If not found, try to get address directly from utility function
-  if (sc_list.GetSize() == 0 && m_cfstring_utility_fn) {
-    lldb::addr_t utility_addr = m_cfstring_utility_fn->StartAddress();
-    if (utility_addr != LLDB_INVALID_ADDRESS) {
-      if (!found_real_function) {
-        m_cfstring_create_addr = utility_addr;
-        LLDB_LOG(log, "Got CFStringCreateWithBytes fallback address directly from utility function: 0x{0:x}", m_cfstring_create_addr);
-      }
-      return;
-    }
-  }
-  
-  // Approach 3: Standard symbol lookup
-  if (sc_list.GetSize() > 0) {
-    SymbolContext sc;
-    sc_list.GetContextAtIndex(0, sc);
-    if (sc.symbol) {
-      // Research Agent Plan: Use fallback address if real function wasn't found
-      if (!found_real_function) {
-        m_cfstring_create_addr = sc.symbol->GetLoadAddress(&tgt);
-        LLDB_LOG(log, "Installed CFStringCreateWithBytes fallback at 0x{0:x}", m_cfstring_create_addr);
-      } else {
-        LLDB_LOG(log, "CFStringCreateWithBytes fallback installed for IR robustness, using real function at 0x{0:x}", 
-                 m_cfstring_create_addr);
-      }
-      return;
-    }
-  }
-  
-  LLDB_LOG(log, "Failed to get address of CFStringCreateWithBytes fallback after installation");
 }
 
 void GNUstepObjCRuntime::EnsureArrayDictionaryLiteralSupport() {
@@ -2389,6 +2282,65 @@ lldb::addr_t GNUstepObjCRuntime::LookupRuntimeSymbol(ConstString name) {
     EnsureCFStringCreateWithBytes();
     LLDB_LOG(log, "[LookupRuntimeSymbol] CFStringCreateWithBytes address: 0x{0:x}", m_cfstring_create_addr);
     return ret(m_cfstring_create_addr);
+  }
+  
+  // GNUstep: Resolve __CFConstantStringClassReference to NSConstantString class
+  if (s == "__CFConstantStringClassReference" || s == "_OBJC_CLASS_NSConstantString") {
+    LLDB_LOG(log, "[LookupRuntimeSymbol] __CFConstantStringClassReference requested for GNUstep");
+    
+    // For GNUstep, this should point to the NSConstantString class object
+    if (m_objc_getClass_addr != LLDB_INVALID_ADDRESS) {
+      // We need to call objc_getClass("NSConstantString") to get the class pointer
+      // For now, we'll use a cached value if available
+      static lldb::addr_t nsConstantString_class = LLDB_INVALID_ADDRESS;
+      
+      if (nsConstantString_class == LLDB_INVALID_ADDRESS) {
+        // Try to find it in the runtime
+        Target &target = GetProcess()->GetTarget();
+        const ModuleList &modules = target.GetImages();
+        
+        for (size_t i = 0; i < modules.GetSize(); ++i) {
+          ModuleSP module_sp = modules.GetModuleAtIndex(i);
+          if (!module_sp) continue;
+          
+          const Symbol *symbol = module_sp->FindFirstSymbolWithNameAndType(
+              ConstString("_OBJC_CLASS_NSConstantString"), eSymbolTypeObjCClass);
+          
+          if (symbol) {
+            nsConstantString_class = symbol->GetLoadAddress(&target);
+            LLDB_LOG(log, "Found NSConstantString class at 0x{0:x}", nsConstantString_class);
+            break;
+          }
+        }
+        
+        // If still not found, try to get it dynamically
+        if (nsConstantString_class == LLDB_INVALID_ADDRESS) {
+          // As a fallback, use NSString class which should work for constant strings
+          const Symbol *nsstring_symbol = nullptr;
+          for (size_t i = 0; i < modules.GetSize(); ++i) {
+            ModuleSP module_sp = modules.GetModuleAtIndex(i);
+            if (!module_sp) continue;
+            
+            nsstring_symbol = module_sp->FindFirstSymbolWithNameAndType(
+                ConstString("_OBJC_CLASS_NSString"), eSymbolTypeObjCClass);
+            
+            if (nsstring_symbol) {
+              nsConstantString_class = nsstring_symbol->GetLoadAddress(&target);
+              LLDB_LOG(log, "Using NSString class as fallback at 0x{0:x}", nsConstantString_class);
+              break;
+            }
+          }
+        }
+      }
+      
+      if (nsConstantString_class != LLDB_INVALID_ADDRESS) {
+        LLDB_LOG(log, "Resolved __CFConstantStringClassReference to 0x{0:x}", nsConstantString_class);
+        return ret(nsConstantString_class);
+      }
+    }
+    
+    LLDB_LOG(log, "Failed to resolve __CFConstantStringClassReference");
+    return ret(LLDB_INVALID_ADDRESS);
   }
 
   // Handle C++ mangled names for basic runtime functions

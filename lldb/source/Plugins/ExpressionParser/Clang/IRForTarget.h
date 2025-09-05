@@ -159,6 +159,20 @@ private:
   bool RewriteObjCConstString(llvm::GlobalVariable *NSStr,
                               llvm::GlobalVariable *CStr);
 
+  /// Rewrite a single Objective-C constant string for GNUstep using NSString directly
+  ///
+  /// \param[in] NSStr
+  ///     The constant NSString to be transformed
+  ///
+  /// \param[in] CStr
+  ///     The constant C string inside the NSString.  This will be
+  ///     passed as the bytes argument to NSString stringWithUTF8String.
+  ///
+  /// \return
+  ///     True on success; false otherwise
+  bool RewriteObjCConstStringGNUstep(llvm::GlobalVariable *NSStr,
+                                     llvm::GlobalVariable *CStr);
+
   /// The top-level pass implementation
   ///
   /// \return
