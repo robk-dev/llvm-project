@@ -101,9 +101,12 @@ GNUstepObjCRuntime::CreateInstance(Process *process,
     }
   }
   
-  if (!found_objc_markers)
+  if (!found_objc_markers) {
+    printf("[DEBUG] No ObjC markers found, returning nullptr\n");
     return nullptr;
+  }
   
+  printf("[DEBUG] ObjC markers found, creating GNUstepObjCRuntime\n");
   std::unique_ptr<GNUstepObjCRuntime> runtime_sp(new GNUstepObjCRuntime(process));
   // Don't install hooks here - let them be installed after process launch
   return runtime_sp.release();
@@ -166,9 +169,11 @@ void GNUstepObjCRuntime::ModulesDidLoad(const ModuleList &module_list) {
 void GNUstepObjCRuntime::DidLaunch() {
   Log *log = GetLog(LLDBLog::Language | LLDBLog::Types);
   LLDB_LOG(log, "[GNUstep] DidLaunch: Process launched, registering formatters only");
+  printf("[DEBUG] GNUstepObjCRuntime::DidLaunch called\n");
   
   // Only register formatters during launch - defer expression hooks to avoid hanging
-  RegisterFormatters();
+  // Note: RegisterFormatters() is commented out since formatters are now loaded via ObjCLanguage
+  // RegisterFormatters();
   
   // Note: Expression evaluation hooks will be installed lazily when needed
   // This prevents hanging with NSNumber literals during process launch
@@ -179,7 +184,8 @@ void GNUstepObjCRuntime::DidAttach(ArchSpec &arch_spec) {
   LLDB_LOG(log, "[GNUstep] DidAttach: Process attached, registering formatters only");
   
   // Only register formatters during attach - defer expression hooks to avoid hanging
-  RegisterFormatters();
+  // Note: RegisterFormatters() is commented out since formatters are now loaded via ObjCLanguage
+  // RegisterFormatters();
   
   // Note: Expression evaluation hooks will be installed lazily when needed
   // This prevents hanging with NSNumber literals during process attach
@@ -1271,36 +1277,14 @@ void GNUstepObjCRuntime::RegisterFormatters() {
   // Debug: Add stdout message to confirm this function is called
   printf("[DEBUG] GNUstepObjCRuntime::RegisterFormatters called\n");
   
-  // Disable Apple's ObjC formatters to prevent conflicts
-  // This is necessary because both Apple and GNUstep register formatters for the same types
-  TypeCategoryImplSP objc_category_sp;
-  if (DataVisualization::Categories::GetCategory(ConstString("objc"), objc_category_sp)) {
-    DataVisualization::Categories::Disable(ConstString("objc"));
-    LLDB_LOG(log, "Disabled Apple ObjC formatters to prevent conflicts");
-  }
+  // Note: We don't disable the objc category since GNUstep formatters are registered there
+  // by ObjCLanguage.cpp LoadGNUstepFormatters()
   
-  // Get or create the GNUstep type category
-  TypeCategoryImplSP category_sp;
-  if (!DataVisualization::Categories::GetCategory(ConstString("gnustep"), 
-                                                  category_sp, true)) {
-    LLDB_LOG(log, "Failed to get/create GNUstep category");
-    return;
-  }
-  
-  if (!category_sp) {
-    LLDB_LOG(log, "Got null category pointer");
-    return;
-  }
-  
-  // Register our formatters
-  GNUstepFormattersRegistry::RegisterFormatters(*category_sp);
-  
-  // Enable the category with higher priority than default
-  DataVisualization::Categories::Enable(ConstString("gnustep"), 
-                                        TypeCategoryMap::Default);
+  // For now, we rely on the formatters registered in ObjCLanguage.cpp
+  // This avoids duplication and conflicts
   
   m_formatters_registered = true;
-  LLDB_LOG(log, "GNUstep formatters registered and category enabled");
+  LLDB_LOG(log, "GNUstep formatters are already registered via ObjCLanguage");
 }
 
 DeclVendor *GNUstepObjCRuntime::GetDeclVendor() {

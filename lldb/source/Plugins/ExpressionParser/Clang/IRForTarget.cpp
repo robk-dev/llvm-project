@@ -566,7 +566,6 @@ bool IRForTarget::RewriteObjCConstStringGNUstep(llvm::GlobalVariable *ns_str,
   
   // Debug output to understand what we're dealing with
   LLDB_LOG(log, "RewriteObjCConstStringGNUstep called");
-  fprintf(stderr, "DEBUG: RewriteObjCConstStringGNUstep called\n");
   
   // Safety check: make sure we're actually dealing with a string constant
   // NSNumber literals shouldn't reach here
@@ -581,7 +580,6 @@ bool IRForTarget::RewriteObjCConstStringGNUstep(llvm::GlobalVariable *ns_str,
         if (data->isString()) {
           StringRef str = data->getAsString();
           LLDB_LOG(log, "String content: '{0}'", str);
-          fprintf(stderr, "DEBUG: String content: '%s'\n", str.str().c_str());
         }
       }
     }
@@ -602,16 +600,11 @@ bool IRForTarget::RewriteObjCConstStringGNUstep(llvm::GlobalVariable *ns_str,
   
   LLDB_LOG(log, "Runtime addresses - objc_getClass: 0x{0:x}, objc_msgSend: 0x{1:x}, sel_getUid: 0x{2:x}",
            objc_getClass_addr, objc_msgSend_addr, sel_getUid_addr);
-  fprintf(stderr, "DEBUG: objc_getClass: 0x%llx, objc_msgSend: 0x%llx, sel_getUid: 0x%llx\n",
-          (unsigned long long)objc_getClass_addr, 
-          (unsigned long long)objc_msgSend_addr,
-          (unsigned long long)sel_getUid_addr);
   
   if (objc_getClass_addr == LLDB_INVALID_ADDRESS || 
       objc_msgSend_addr == LLDB_INVALID_ADDRESS ||
       sel_getUid_addr == LLDB_INVALID_ADDRESS) {
     LLDB_LOG(log, "Failed to find runtime functions");
-    fprintf(stderr, "DEBUG: Failed to find runtime functions\n");
     // Fallback to null
     ns_str->replaceAllUsesWith(ConstantPointerNull::get(ns_str->getType()));
     ns_str->eraseFromParent();
@@ -688,7 +681,6 @@ bool IRForTarget::RewriteObjCConstStringGNUstep(llvm::GlobalVariable *ns_str,
   if (!UnfoldConstant(ns_str, nullptr, string_creator, m_entry_instruction_finder,
                       m_error_stream)) {
     LLDB_LOG(log, "UnfoldConstant failed, trying direct replacement");
-    fprintf(stderr, "DEBUG: UnfoldConstant failed, trying direct replacement\n");
     
     // If UnfoldConstant fails, try a simpler direct approach for non-complex cases
     // This should work for simple cases like direct usage in expressions
@@ -1866,9 +1858,8 @@ bool IRForTarget::ReplaceVariables(Function &llvm_function) {
                                entry_instruction->getIterator());
 
               return load;
-            } else {
-              return get_element_ptr;
             }
+            return get_element_ptr;
           });
 
       if (Constant *constant = dyn_cast<Constant>(value)) {

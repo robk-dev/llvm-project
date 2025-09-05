@@ -47,6 +47,13 @@ bool GNUstepArraySummaryProvider(ValueObject &valobj, Stream &stream,
 SyntheticChildrenFrontEnd *
 GNUstepArraySyntheticFrontEndCreator(CXXSyntheticChildren *, 
                                     lldb::ValueObjectSP);
+
+bool GNUstepNSSetFormatterFunction(ValueObject &valobj, Stream &stream,
+                                  const TypeSummaryOptions &options);
+
+SyntheticChildrenFrontEnd *
+GNUstepNSSetSyntheticFrontEndCreator(CXXSyntheticChildren *,
+                                    lldb::ValueObjectSP);
 } // namespace formatters
 } // namespace lldb_private
 
@@ -939,6 +946,69 @@ static void LoadGNUstepFormatters(TypeCategoryImplSP objc_category_sp) {
     AddCXXSynthetic(objc_category_sp,
         lldb_private::formatters::GNUstepArraySyntheticFrontEndCreator,
         "GNUstep NSMutableArray synthetic children", "NSMutableArray",
+        ScriptedSyntheticChildren::Flags());
+        
+    // GNUstep Set Summary Providers
+    AddCXXSummary(objc_category_sp,
+        lldb_private::formatters::GNUstepNSSetFormatterFunction,
+        "GNUstep NSSet summary provider", "GSSet",
+        gnustep_flags);
+        
+    AddCXXSummary(objc_category_sp,
+        lldb_private::formatters::GNUstepNSSetFormatterFunction,
+        "GNUstep NSSet summary provider", "__NSSet0",
+        gnustep_flags);
+        
+    AddCXXSummary(objc_category_sp,
+        lldb_private::formatters::GNUstepNSSetFormatterFunction,
+        "GNUstep NSMutableSet summary provider", "GSMutableSet",
+        gnustep_flags);
+        
+    AddCXXSummary(objc_category_sp,
+        lldb_private::formatters::GNUstepNSSetFormatterFunction,
+        "GNUstep NSCountedSet summary provider", "GSCountedSet",
+        gnustep_flags);
+        
+    // GNUstep Set Synthetic Providers
+    AddCXXSynthetic(objc_category_sp,
+        lldb_private::formatters::GNUstepNSSetSyntheticFrontEndCreator,
+        "GNUstep NSSet synthetic children", "GSSet",
+        ScriptedSyntheticChildren::Flags());
+        
+    AddCXXSynthetic(objc_category_sp,
+        lldb_private::formatters::GNUstepNSSetSyntheticFrontEndCreator,
+        "GNUstep NSSet synthetic children", "__NSSet0",
+        ScriptedSyntheticChildren::Flags());
+        
+    AddCXXSynthetic(objc_category_sp,
+        lldb_private::formatters::GNUstepNSSetSyntheticFrontEndCreator,
+        "GNUstep NSMutableSet synthetic children", "GSMutableSet",
+        ScriptedSyntheticChildren::Flags());
+        
+    AddCXXSynthetic(objc_category_sp,
+        lldb_private::formatters::GNUstepNSSetSyntheticFrontEndCreator,
+        "GNUstep NSCountedSet synthetic children", "GSCountedSet",
+        ScriptedSyntheticChildren::Flags());
+        
+    // Also register for generic NSSet and NSMutableSet
+    AddCXXSummary(objc_category_sp,
+        lldb_private::formatters::GNUstepNSSetFormatterFunction,
+        "GNUstep NSSet summary provider", "NSSet",
+        gnustep_flags);
+        
+    AddCXXSummary(objc_category_sp,
+        lldb_private::formatters::GNUstepNSSetFormatterFunction,
+        "GNUstep NSMutableSet summary provider", "NSMutableSet",
+        gnustep_flags);
+        
+    AddCXXSynthetic(objc_category_sp,
+        lldb_private::formatters::GNUstepNSSetSyntheticFrontEndCreator,
+        "GNUstep NSSet synthetic children", "NSSet",
+        ScriptedSyntheticChildren::Flags());
+        
+    AddCXXSynthetic(objc_category_sp,
+        lldb_private::formatters::GNUstepNSSetSyntheticFrontEndCreator,
+        "GNUstep NSMutableSet synthetic children", "NSMutableSet",
         ScriptedSyntheticChildren::Flags());
 }
 
