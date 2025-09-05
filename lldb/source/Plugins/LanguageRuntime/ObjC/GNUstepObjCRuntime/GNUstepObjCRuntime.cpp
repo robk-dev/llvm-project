@@ -123,7 +123,6 @@ GNUstepObjCRuntime::GNUstepObjCRuntime(Process *process)
 }
 
 GNUstepObjCRuntime::~GNUstepObjCRuntime() {
-  // Note: We don't unregister formatters here as they may be used by other GNUstep processes
 }
 
 void GNUstepObjCRuntime::ArmEarlyInstall() {

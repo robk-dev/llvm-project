@@ -57,6 +57,16 @@ bool GNUstepNSSetFormatterFunction(ValueObject &valobj, Stream &stream,
 SyntheticChildrenFrontEnd *
 GNUstepNSSetSyntheticFrontEndCreator(CXXSyntheticChildren *,
                                     lldb::ValueObjectSP);
+
+bool GNUstepNSDictionaryFormatterFunction(ValueObject &valobj, Stream &stream,
+                                         const TypeSummaryOptions &options);
+
+SyntheticChildrenFrontEnd *
+GNUstepNSDictionarySyntheticFrontEndCreator(CXXSyntheticChildren *,
+                                           lldb::ValueObjectSP);
+
+bool GNUstepNSNumberFormatterFunction(ValueObject &valobj, Stream &stream,
+                                     const TypeSummaryOptions &options);
 } // namespace formatters
 } // namespace lldb_private
 
@@ -509,29 +519,16 @@ static void LoadObjCFormatters(TypeCategoryImplSP objc_category_sp) {
                   lldb_private::formatters::NSArraySyntheticFrontEndCreator,
                   "NSArray synthetic children", "__NSArrayI",
                   ScriptedSyntheticChildren::Flags());
-  // DISABLED for GNUstep: __NSArray0 conflicts with GNUstep
-  // AddCXXSynthetic(objc_category_sp,
-  //                 lldb_private::formatters::NSArraySyntheticFrontEndCreator,
-  //                 "NSArray synthetic children", "__NSArray0",
-  //                 ScriptedSyntheticChildren::Flags());
+  // IMPORTANT: Skip generic NSArray/NSMutableArray and __NSArray0 for GNUstep compatibility
+  // These are handled by the GNUstep formatters when a GNUstep process is detected
   AddCXXSynthetic(objc_category_sp,
                   lldb_private::formatters::NSArraySyntheticFrontEndCreator,
                   "NSArray synthetic children", "__NSSingleObjectArrayI",
                   ScriptedSyntheticChildren::Flags());
-  // DISABLED for GNUstep: Generic NSArray handled by GNUstep provider
-  // AddCXXSynthetic(objc_category_sp,
-  //                 lldb_private::formatters::NSArraySyntheticFrontEndCreator,
-  //                 "NSArray synthetic children", "NSArray",
-  //                 ScriptedSyntheticChildren::Flags());
   AddCXXSynthetic(objc_category_sp,
                   lldb_private::formatters::NSArraySyntheticFrontEndCreator,
                   "NSArray synthetic children", "NSConstantArray",
                   ScriptedSyntheticChildren::Flags());
-  // DISABLED for GNUstep: Generic NSMutableArray handled by GNUstep provider  
-  // AddCXXSynthetic(objc_category_sp,
-  //                 lldb_private::formatters::NSArraySyntheticFrontEndCreator,
-  //                 "NSArray synthetic children", "NSMutableArray",
-  //                 ScriptedSyntheticChildren::Flags());
   AddCXXSynthetic(objc_category_sp,
                   lldb_private::formatters::NSArraySyntheticFrontEndCreator,
                   "NSArray synthetic children", "__NSCFArray",
@@ -574,16 +571,8 @@ static void LoadObjCFormatters(TypeCategoryImplSP objc_category_sp) {
       lldb_private::formatters::NSDictionarySyntheticFrontEndCreator,
       "NSDictionary synthetic children", "__NSCFDictionary",
       ScriptedSyntheticChildren::Flags());
-  AddCXXSynthetic(
-      objc_category_sp,
-      lldb_private::formatters::NSDictionarySyntheticFrontEndCreator,
-      "NSDictionary synthetic children", "NSDictionary",
-      ScriptedSyntheticChildren::Flags());
-  AddCXXSynthetic(
-      objc_category_sp,
-      lldb_private::formatters::NSDictionarySyntheticFrontEndCreator,
-      "NSDictionary synthetic children", "NSMutableDictionary",
-      ScriptedSyntheticChildren::Flags());
+  // Skip generic NSDictionary/NSMutableDictionary for GNUstep compatibility
+  // These are handled by the GNUstep formatters when a GNUstep process is detected
   AddCXXSynthetic(
       objc_category_sp,
       lldb_private::formatters::NSDictionarySyntheticFrontEndCreator,
@@ -609,9 +598,8 @@ static void LoadObjCFormatters(TypeCategoryImplSP objc_category_sp) {
                   "NSException synthetic children", "NSException",
                   ScriptedSyntheticChildren::Flags());
 
-  AddCXXSynthetic(
-      objc_category_sp, lldb_private::formatters::NSSetSyntheticFrontEndCreator,
-      "NSSet synthetic children", "NSSet", ScriptedSyntheticChildren::Flags());
+  // Skip generic NSSet for GNUstep compatibility
+  // This is handled by the GNUstep formatters when a GNUstep process is detected
   AddCXXSynthetic(objc_category_sp,
                   lldb_private::formatters::NSSetSyntheticFrontEndCreator,
                   "__NSSetI synthetic children", "__NSSetI",
@@ -629,10 +617,7 @@ static void LoadObjCFormatters(TypeCategoryImplSP objc_category_sp) {
                   "CFSetRef synthetic children", "CFSetRef",
                   ScriptedSyntheticChildren::Flags());
 
-  AddCXXSynthetic(objc_category_sp,
-                  lldb_private::formatters::NSSetSyntheticFrontEndCreator,
-                  "NSMutableSet synthetic children", "NSMutableSet",
-                  ScriptedSyntheticChildren::Flags());
+  // Skip generic NSMutableSet for GNUstep compatibility
   AddCXXSynthetic(objc_category_sp,
                   lldb_private::formatters::NSSetSyntheticFrontEndCreator,
                   "NSOrderedSet synthetic children", "NSOrderedSet",
@@ -1043,6 +1028,70 @@ static void LoadGNUstepFormatters(TypeCategoryImplSP objc_category_sp) {
         lldb_private::formatters::GNUstepNSSetSyntheticFrontEndCreator,
         "GNUstep NSMutableSet synthetic children", "NSMutableSet",
         ScriptedSyntheticChildren::Flags());
+        
+    // GNUstep Dictionary Summary Providers
+    AddCXXSummary(objc_category_sp,
+        lldb_private::formatters::GNUstepNSDictionaryFormatterFunction,
+        "GNUstep NSDictionary summary provider", "GSDictionary",
+        gnustep_flags);
+        
+    AddCXXSummary(objc_category_sp,
+        lldb_private::formatters::GNUstepNSDictionaryFormatterFunction,
+        "GNUstep NSDictionary summary provider", "GSMutableDictionary",
+        gnustep_flags);
+        
+    AddCXXSummary(objc_category_sp,
+        lldb_private::formatters::GNUstepNSDictionaryFormatterFunction,
+        "GNUstep NSDictionary summary provider", "NSConstantDictionary",
+        gnustep_flags);
+        
+    // Register for generic NSDictionary/NSMutableDictionary
+    AddCXXSummary(objc_category_sp,
+        lldb_private::formatters::GNUstepNSDictionaryFormatterFunction,
+        "GNUstep NSDictionary summary provider", "NSDictionary",
+        gnustep_flags);
+        
+    AddCXXSummary(objc_category_sp,
+        lldb_private::formatters::GNUstepNSDictionaryFormatterFunction,
+        "GNUstep NSMutableDictionary summary provider", "NSMutableDictionary",
+        gnustep_flags);
+        
+    // GNUstep Dictionary Synthetic Providers
+    AddCXXSynthetic(objc_category_sp,
+        lldb_private::formatters::GNUstepNSDictionarySyntheticFrontEndCreator,
+        "GNUstep NSDictionary synthetic children", "GSDictionary",
+        ScriptedSyntheticChildren::Flags());
+        
+    AddCXXSynthetic(objc_category_sp,
+        lldb_private::formatters::GNUstepNSDictionarySyntheticFrontEndCreator,
+        "GNUstep NSMutableDictionary synthetic children", "GSMutableDictionary",
+        ScriptedSyntheticChildren::Flags());
+        
+    AddCXXSynthetic(objc_category_sp,
+        lldb_private::formatters::GNUstepNSDictionarySyntheticFrontEndCreator,
+        "GNUstep NSDictionary synthetic children", "NSConstantDictionary",
+        ScriptedSyntheticChildren::Flags());
+        
+    AddCXXSynthetic(objc_category_sp,
+        lldb_private::formatters::GNUstepNSDictionarySyntheticFrontEndCreator,
+        "GNUstep NSDictionary synthetic children", "NSDictionary",
+        ScriptedSyntheticChildren::Flags());
+        
+    AddCXXSynthetic(objc_category_sp,
+        lldb_private::formatters::GNUstepNSDictionarySyntheticFrontEndCreator,
+        "GNUstep NSMutableDictionary synthetic children", "NSMutableDictionary",
+        ScriptedSyntheticChildren::Flags());
+        
+    // GNUstep Number Summary Provider
+    AddCXXSummary(objc_category_sp,
+        lldb_private::formatters::GNUstepNSNumberFormatterFunction,
+        "GNUstep NSNumber summary provider", "GSNumber",
+        gnustep_flags);
+        
+    AddCXXSummary(objc_category_sp,
+        lldb_private::formatters::GNUstepNSNumberFormatterFunction,
+        "GNUstep NSNumber summary provider", "NSNumber",
+        gnustep_flags);
 }
 
 lldb::TypeCategoryImplSP ObjCLanguage::GetFormatters() {
@@ -1055,7 +1104,6 @@ lldb::TypeCategoryImplSP ObjCLanguage::GetFormatters() {
     if (g_category) {
       LoadCoreMediaFormatters(g_category);
       LoadObjCFormatters(g_category);
-      // Enable GNUstep formatters (no longer causes infinite loop with proper runtime integration)
       LoadGNUstepFormatters(g_category);
     }
   });

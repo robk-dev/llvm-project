@@ -816,6 +816,9 @@ double GNUstepGenericFormatter::ReadFloatingPoint(Process *process,
 
 bool lldb_private::formatters::GNUstepGenericFormatterFunction(ValueObject &valobj, Stream &stream,
                                      const TypeSummaryOptions &options) {
+  lldb::addr_t obj_addr = valobj.GetValueAsUnsigned(0);
+  printf("[DEBUG] GNUstepGenericFormatter called for object at 0x%llx\n", (unsigned long long)obj_addr);
+  
   // CRITICAL: Skip specific types that have their own specialized formatters
   // This prevents the generic formatter from interfering with specialized formatters
   std::string class_name = GNUstepRuntimeHelper::GetGNUstepClassName(valobj);

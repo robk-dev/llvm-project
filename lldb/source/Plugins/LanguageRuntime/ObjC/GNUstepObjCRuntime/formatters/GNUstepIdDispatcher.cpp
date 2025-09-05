@@ -13,19 +13,7 @@
 #include "GNUstepArrayFormatters.h"
 #include "GNUstepDictionaryFormatters.h"
 #include "GNUstepSetFormatters.h"
-#include "GNUstepDateFormatters.h"
-#include "GNUstepURLFormatters.h"
-#include "GNUstepErrorFormatters.h"
-#include "GNUstepDataFormatters.h"
-#include "GNUstepUUIDFormatters.h"
-#include "GNUstepJSONSerializationFormatters.h"
 #include "GNUstepGenericFormatter.h"
-#include "GNUstepLocaleFormatters.h"
-#include "GNUstepCalendarFormatters.h"
-#include "GNUstepProcessInfoFormatters.h"
-#include "GNUstepBundleFormatters.h"
-#include "GNUstepScannerFormatters.h"
-#include "GNUstepUserDefaultsFormatters.h"
 #include "../GNUstepObjCRuntimeIntrospector.h"
 #include "Plugins/LanguageRuntime/ObjC/ObjCLanguageRuntime.h"
 #include "lldb/Utility/Log.h"
@@ -70,6 +58,8 @@ bool lldb_private::formatters::GNUstepIdDispatcherFunction(ValueObject &valobj, 
                                                            const TypeSummaryOptions &options) {
   // Get the address of the object
   lldb::addr_t obj_addr = valobj.GetValueAsUnsigned(0);
+  
+  printf("[DEBUG] GNUstepIdDispatcher called for object at 0x%llx\n", (unsigned long long)obj_addr);
   
   // Check for nil
   if (obj_addr == 0) {
@@ -119,6 +109,8 @@ bool lldb_private::formatters::GNUstepIdDispatcherFunction(ValueObject &valobj, 
   // Get the actual runtime class name
   std::string class_name = GNUstepRuntimeHelper::GetGNUstepClassName(valobj);
   
+  printf("[DEBUG] GNUstepIdDispatcher: class_name = '%s'\n", class_name.c_str());
+  
   Log *log = GetLog(LLDBLog::DataFormatters);
   if (log) {
     log->Printf("GNUstepIdDispatcher: Object at 0x%" PRIx64 " has runtime class: %s", 
@@ -139,6 +131,7 @@ bool lldb_private::formatters::GNUstepIdDispatcherFunction(ValueObject &valobj, 
       (class_name.find("String") != std::string::npos && 
        (class_name.find("Constant") != std::string::npos || 
         class_name.find("Immutable") != std::string::npos))) {
+    printf("[DEBUG] Routing to NSString formatter\n");
     return GNUstepNSStringFormatterFunction(valobj, stream, options);
   }
   
@@ -148,92 +141,30 @@ bool lldb_private::formatters::GNUstepIdDispatcherFunction(ValueObject &valobj, 
       class_name.find("BoolNumber") != std::string::npos ||
       class_name.find("FloatNumber") != std::string::npos ||
       class_name.find("DoubleNumber") != std::string::npos) {
+    printf("[DEBUG] Routing to NSNumber formatter\n");
     return GNUstepNSNumberFormatterFunction(valobj, stream, options);
   }
   
   // Check for NSArray and variants
   if (class_name.find("Array") != std::string::npos && 
       class_name.find("ByteArray") == std::string::npos) { // Exclude NSData variants
+    printf("[DEBUG] Routing to NSArray formatter\n");
     return GNUstepNSArrayFormatterFunction(valobj, stream, options);
   }
   
   // Check for NSDictionary and variants
   if (class_name.find("Dictionary") != std::string::npos) {
+    printf("[DEBUG] Routing to NSDictionary formatter\n");
     return GNUstepNSDictionaryFormatterFunction(valobj, stream, options);
   }
   
   // Check for NSSet and variants
   if (class_name.find("Set") != std::string::npos &&
       class_name.find("IndexSet") == std::string::npos) { // Exclude NSIndexSet
+    printf("[DEBUG] Routing to NSSet formatter\n");
     return GNUstepNSSetFormatterFunction(valobj, stream, options);
   }
   
-  // Check for NSDate and variants
-  if (class_name.find("Date") != std::string::npos &&
-      class_name.find("DateFormatter") == std::string::npos) { // Exclude formatter classes
-    return GNUstepNSDateFormatterFunction(valobj, stream, options);
-  }
-  
-  // Check for NSURL and variants
-  if (class_name.find("URL") != std::string::npos &&
-      class_name.find("URLRequest") == std::string::npos &&
-      class_name.find("URLResponse") == std::string::npos) { // Exclude related classes
-    return GNUstepNSURLFormatterFunction(valobj, stream, options);
-  }
-  
-  // Check for NSError and variants
-  if (class_name.find("Error") != std::string::npos) {
-    return GNUstepNSErrorFormatterFunction(valobj, stream, options);
-  }
-  
-  // Check for NSData and variants
-  if (class_name.find("Data") != std::string::npos &&
-      class_name.find("Date") == std::string::npos) { // Exclude NSDate
-    return GNUstepNSDataFormatterFunction(valobj, stream, options);
-  }
-  
-  // Check for NSUUID and variants
-  if (class_name.find("UUID") != std::string::npos) {
-    return GNUstepNSUUIDFormatterFunction(valobj, stream, options);
-  }
-  
-  // Check for NSJSONSerialization and JSON-related classes
-  if (class_name.find("JSON") != std::string::npos) {
-    return GNUstepNSJSONSerializationFormatterFunction(valobj, stream, options);
-  }
-  
-  // Check for NSLocale and variants
-  if (class_name.find("Locale") != std::string::npos &&
-      class_name.find("LocaleChangeNotification") == std::string::npos) {
-    return GNUstepNSLocaleFormatterFunction(valobj, stream, options);
-  }
-  
-  // Check for NSCalendar and variants
-  if (class_name.find("Calendar") != std::string::npos &&
-      class_name.find("CalendarDate") == std::string::npos) { // Exclude NSCalendarDate (handled by Date)
-    return GNUstepNSCalendarFormatterFunction(valobj, stream, options);
-  }
-  
-  // Check for NSProcessInfo and variants
-  if (class_name.find("ProcessInfo") != std::string::npos ||
-      class_name == "_NSConcreteProcessInfo") {
-    return GNUstepNSProcessInfoFormatterFunction(valobj, stream, options);
-  }
-  
-  // Check for NSBundle and variants
-  if (class_name.find("Bundle") != std::string::npos) {
-    return GNUstepNSBundleFormatterFunction(valobj, stream, options);
-  }
-  
-  // Check for NSScanner and variants
-  if (class_name.find("Scanner") != std::string::npos) {
-    return GNUstepNSScannerFormatterFunction(valobj, stream, options);
-  }
-  
-  // Check for NSUserDefaults and variants
-  if (class_name.find("UserDefaults") != std::string::npos) {
-    return GNUstepNSUserDefaultsFormatterFunction(valobj, stream, options);
-  }
   
   // Check for NSValue (including NSNumber which inherits from NSValue)
   if (class_name.find("Value") != std::string::npos) {
@@ -259,6 +190,7 @@ bool lldb_private::formatters::GNUstepIdDispatcherFunction(ValueObject &valobj, 
   }
   
   if (class_name[0] >= 'A' && class_name[0] <= 'Z') { // Likely an Objective-C class
+    printf("[DEBUG] No specific formatter for '%s', using generic formatter\n", class_name.c_str());
     return GNUstepGenericFormatterFunction(valobj, stream, options);
   }
   
