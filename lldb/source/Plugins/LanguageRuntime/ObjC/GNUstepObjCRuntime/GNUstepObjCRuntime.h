@@ -107,12 +107,9 @@ public:
     return m_runtime_caller.get();
   }
 
-  // Get cached runtime symbol addresses for IR rewriting
-  std::map<std::string, lldb::addr_t> GetObjCRuntimeAddresses();
 
   // Override from LanguageRuntime - this is the critical hook that IRForTarget
   // uses
-  lldb::addr_t LookupRuntimeSymbol(ConstString name) override;
 
   // Process lifecycle hooks to ensure expression evaluation is ready
   void DidLaunch();
@@ -128,7 +125,6 @@ private:
   bool m_has_read_objc_library = false;
   bool m_gnustep_library_loaded = false;
   bool m_subscript_mapping_enabled = false;
-  bool m_expression_hooks_installed = false;
 
   // Reentrancy protection flags
   bool m_in_object_description = false;
@@ -154,42 +150,8 @@ private:
     }
   } m_object_description_cache;
 
-  // Cached runtime symbol addresses for expression evaluation
-  lldb::addr_t m_objc_msgSend_addr = LLDB_INVALID_ADDRESS;
-  lldb::addr_t m_objc_msgSend_stret_addr = LLDB_INVALID_ADDRESS;
-  lldb::addr_t m_objc_msgSend_fpret_addr = LLDB_INVALID_ADDRESS;
-  lldb::addr_t m_objc_getClass_addr = LLDB_INVALID_ADDRESS;
-  lldb::addr_t m_sel_getUid_addr = LLDB_INVALID_ADDRESS;
-  lldb::addr_t m_object_getClass_addr = LLDB_INVALID_ADDRESS;
-  lldb::addr_t m_class_getMethodImplementation_addr = LLDB_INVALID_ADDRESS;
-  lldb::addr_t m_cfstring_create_addr = LLDB_INVALID_ADDRESS;
-  lldb::addr_t m_class_addMethod_addr = LLDB_INVALID_ADDRESS;
+  // Symbol resolution now handled entirely by runtime introspection
 
-  // Optional ARC helpers (non-fatal if not found)
-  lldb::addr_t m_objc_retain_addr = LLDB_INVALID_ADDRESS;
-  lldb::addr_t m_objc_release_addr = LLDB_INVALID_ADDRESS;
-  lldb::addr_t m_objc_autoreleaseReturnValue_addr = LLDB_INVALID_ADDRESS;
-  lldb::addr_t m_objc_retainAutoreleasedReturnValue_addr = LLDB_INVALID_ADDRESS;
-
-  // CFString fallback utility function if needed
-  std::unique_ptr<UtilityFunction> m_cfstring_utility_fn;
-
-  // Array/Dictionary literal support utility functions
-  std::unique_ptr<UtilityFunction> m_array_literal_utility_fn;
-  std::unique_ptr<UtilityFunction> m_dict_literal_utility_fn;
-  lldb::addr_t m_array_literal_addr = LLDB_INVALID_ADDRESS;
-  lldb::addr_t m_dict_literal_addr = LLDB_INVALID_ADDRESS;
-
-  // Subscript shim support
-  std::unique_ptr<UtilityFunction> m_subscript_utils_fn;
-  lldb::addr_t m_imp_array_subscript_addr = LLDB_INVALID_ADDRESS;
-  lldb::addr_t m_imp_dict_subscript_addr = LLDB_INVALID_ADDRESS;
-  lldb::addr_t m_install_subscripts_addr = LLDB_INVALID_ADDRESS;
-  bool m_subscripts_installed = false;
-
-  // Diagnostic utility for field testing
-  std::unique_ptr<UtilityFunction> m_diagnostic_utility_fn;
-  lldb::addr_t m_diagnostic_function_addr = LLDB_INVALID_ADDRESS;
 
   // Initialize runtime API
   void InitializeRuntimeAPI();
@@ -197,18 +159,8 @@ private:
   // Install subscript method mapping
   void InstallSubscriptMethodMapping();
 
-  // Install expression evaluation hooks for subscript forwarding
-  void InstallExpressionEvaluationHooks();
-
-  // Helper methods for expression evaluation setup
-  void ResolveAndCacheRuntimeSymbols();
-  void EnsureCFStringCreateWithBytes();
-  void EnsureArrayDictionaryLiteralSupport();
-  void CreateAndInstallSubscriptShims(ExecutionContext &exe_ctx);
-  void RegisterSymbolsWithIRForTarget();
-  void ArmEarlyInstall();
+  // Expression evaluation helpers no longer needed - runtime handles symbols
   void InjectRuntimeFunctionDecls(TypeSystemClang &ts);
-  void CreateDiagnosticUtility(ExecutionContext &exe_ctx);
 };
 
 } // namespace lldb_private

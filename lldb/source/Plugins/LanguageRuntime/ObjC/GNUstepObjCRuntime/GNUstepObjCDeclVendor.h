@@ -47,8 +47,6 @@ private:
   ObjCLanguageRuntime::EncodingToTypeSP m_type_realizer_sp;
 
   // Helper methods
-  void AddFoundationClassMethods(clang::ObjCInterfaceDecl *interface_decl,
-                                 const std::string &class_name);
   clang::ObjCMethodDecl *CreateMethodDecl(clang::ObjCInterfaceDecl *interface_decl,
                                            const char *name, const char *types,
                                            bool is_instance);

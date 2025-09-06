@@ -376,12 +376,6 @@ private:
   bool m_is_valid = false;
 };
 
-void GNUstepObjCDeclVendor::AddFoundationClassMethods(
-    clang::ObjCInterfaceDecl *interface_decl, const std::string &class_name) {
-  // All methods are now discovered dynamically via ClassDescriptor.Describe()
-  // No hardcoded methods needed
-}
-
 clang::ObjCMethodDecl *GNUstepObjCDeclVendor::CreateMethodDecl(
     clang::ObjCInterfaceDecl *interface_decl, const char *name, const char *types,
     bool is_instance) {

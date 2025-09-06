@@ -136,7 +136,7 @@ bool GNUstepClassDescriptorV2::Describe(
     }
   }
   
-  // Handle ivars callback - this is the critical part
+  // Handle ivars callback
   if (ivar_func) {
     // Fetch ivars if not already fetched
     std::call_once(m_ivars_fetched, [this]() { FetchIvars(); });

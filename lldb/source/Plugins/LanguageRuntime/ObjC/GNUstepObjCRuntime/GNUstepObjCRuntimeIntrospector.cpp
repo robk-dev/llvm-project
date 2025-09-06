@@ -55,9 +55,7 @@ GNUstepObjCRuntimeIntrospector::GNUstepObjCRuntimeIntrospector(Process *process)
     // Create the consolidated runtime function caller
     m_runtime_caller = std::make_unique<RuntimeFunctionCaller>(m_process);
 
-    // Note: Don't load runtime symbols here as libraries may not be loaded yet
-    // LoadRuntimeSymbols() will be called on-demand when symbols are first
-    // needed
+    // Runtime symbols are handled by RuntimeFunctionCaller on-demand
   } else {
     m_address_size = 0;
     m_byte_order = lldb::eByteOrderInvalid;
@@ -100,8 +98,6 @@ GNUstepObjCRuntimeIntrospector::GetClassName(lldb::addr_t isa_addr) {
     return "";
   }
 
-  // Ensure runtime symbols are loaded for enhanced introspection
-  EnsureRuntimeSymbolsLoaded();
 
   // Check if this is a tagged pointer
   if (IsTaggedPointer(isa_addr)) {
@@ -600,50 +596,6 @@ lldb::ModuleSP GNUstepObjCRuntimeIntrospector::GetFoundationModule() const {
   return m_runtime_caller->FindFoundationModule();
 }
 
-void GNUstepObjCRuntimeIntrospector::EnsureRuntimeSymbolsLoaded() {
-  if (!m_runtime_symbols_loaded && m_process) {
-    LoadRuntimeSymbols();
-    InitializeRuntimeFunctions();  // Also initialize the m_runtime struct
-    m_runtime_symbols_loaded = true;
-  }
-}
-
-bool GNUstepObjCRuntimeIntrospector::LoadRuntimeSymbols() {
-  if (!m_process) {
-    return false;
-  }
-
-  // Load essential ObjC runtime functions for enhanced introspection
-  m_object_getClass_addr = GetRuntimeFunctionAddress("object_getClass");
-  m_class_getSuperclass_addr = GetRuntimeFunctionAddress("class_getSuperclass");
-  m_class_getInstanceSize_addr =
-      GetRuntimeFunctionAddress("class_getInstanceSize");
-  m_class_getMethodImplementation_addr =
-      GetRuntimeFunctionAddress("class_getMethodImplementation");
-  m_objc_msgSend_addr = GetRuntimeFunctionAddress("objc_msgSend");
-  m_objc_copyClassList_addr = GetRuntimeFunctionAddress("objc_copyClassList");
-  m_class_getName_addr = GetRuntimeFunctionAddress("class_getName");
-  m_free_addr = GetRuntimeFunctionAddress("free");
-
-  // Load method introspection functions for dynamic method discovery
-  m_objc_getMetaClass_addr = GetRuntimeFunctionAddress("objc_getMetaClass");
-  m_objc_getClass_addr = GetRuntimeFunctionAddress("objc_getClass");
-  m_class_copyMethodList_addr =
-      GetRuntimeFunctionAddress("class_copyMethodList");
-  m_method_getName_addr = GetRuntimeFunctionAddress("method_getName");
-  m_method_getTypeEncoding_addr =
-      GetRuntimeFunctionAddress("method_getTypeEncoding");
-  m_sel_getName_addr = GetRuntimeFunctionAddress("sel_getName");
-
-  // Return success if we got the core functions needed for introspection
-  return (m_object_getClass_addr != LLDB_INVALID_ADDRESS &&
-          m_class_getSuperclass_addr != LLDB_INVALID_ADDRESS &&
-          m_class_getName_addr != LLDB_INVALID_ADDRESS &&
-          m_objc_getMetaClass_addr != LLDB_INVALID_ADDRESS &&
-          m_class_copyMethodList_addr != LLDB_INVALID_ADDRESS &&
-          m_method_getName_addr != LLDB_INVALID_ADDRESS &&
-          m_method_getTypeEncoding_addr != LLDB_INVALID_ADDRESS);
-}
 
 lldb::addr_t GNUstepObjCRuntimeIntrospector::GetRuntimeFunctionAddress(
     const char *function_name) {
@@ -735,9 +687,8 @@ GNUstepObjCRuntimeIntrospector::GetClassPointer(const std::string &class_name) {
     return LLDB_INVALID_ADDRESS;
   }
 
-  EnsureRuntimeSymbolsLoaded();
-
-  if (m_objc_getClass_addr == LLDB_INVALID_ADDRESS) {
+  // Runtime symbols handled by RuntimeFunctionCaller on-demand
+  if (!GetRuntimeFunctionAddress("objc_getClass")) {
     return LLDB_INVALID_ADDRESS;
   }
 
@@ -773,9 +724,8 @@ lldb::addr_t GNUstepObjCRuntimeIntrospector::GetMetaClassPointer(
     return LLDB_INVALID_ADDRESS;
   }
 
-  EnsureRuntimeSymbolsLoaded();
-
-  if (m_objc_getMetaClass_addr == LLDB_INVALID_ADDRESS) {
+  // Runtime symbols handled by RuntimeFunctionCaller on-demand  
+  if (!GetRuntimeFunctionAddress("objc_getMetaClass")) {
     return LLDB_INVALID_ADDRESS;
   }
 
@@ -814,13 +764,12 @@ GNUstepObjCRuntimeIntrospector::GetInstanceMethods(lldb::addr_t class_ptr) {
     return methods;
   }
 
-  EnsureRuntimeSymbolsLoaded();
-
-  if (m_class_copyMethodList_addr == LLDB_INVALID_ADDRESS ||
-      m_method_getName_addr == LLDB_INVALID_ADDRESS ||
-      m_method_getTypeEncoding_addr == LLDB_INVALID_ADDRESS ||
-      m_sel_getName_addr == LLDB_INVALID_ADDRESS ||
-      m_free_addr == LLDB_INVALID_ADDRESS) {
+  // Runtime symbols handled by RuntimeFunctionCaller on-demand
+  if (!GetRuntimeFunctionAddress("class_copyMethodList") ||
+      !GetRuntimeFunctionAddress("method_getName") ||
+      !GetRuntimeFunctionAddress("method_getTypeEncoding") ||
+      !GetRuntimeFunctionAddress("sel_getName") ||
+      !GetRuntimeFunctionAddress("free")) {
     return methods;
   }
 
@@ -986,9 +935,8 @@ std::vector<std::string> GNUstepObjCRuntimeIntrospector::GetAllClassNames() {
     return class_names;
   }
   
-  EnsureRuntimeSymbolsLoaded();
-  
-  if (m_objc_copyClassList_addr == LLDB_INVALID_ADDRESS) {
+  // Runtime symbols handled by RuntimeFunctionCaller on-demand
+  if (!GetRuntimeFunctionAddress("objc_copyClassList")) {
     return class_names;
   }
   
@@ -1049,16 +997,9 @@ std::vector<std::string> GNUstepObjCRuntimeIntrospector::GetAllClassNames() {
     }
   }
   
-  // Free the allocated memory
-  if (m_free_addr != LLDB_INVALID_ADDRESS) {
-    ValueList free_args;
-    Value free_value;
-    free_value.SetValueType(Value::ValueType::LoadAddress);
-    free_value.SetCompilerType(scratch_ts_sp->GetBasicType(eBasicTypeVoid).GetPointerType());
-    free_value.GetScalar() = class_list_ptr;
-    free_args.PushValue(free_value);
-    
-    CallRuntimeFunctionImpl("free", scratch_ts_sp->GetBasicType(eBasicTypeVoid), free_args, exe_ctx, error);
+  // Free the allocated memory  
+  if (GetRuntimeFunctionAddress("free")) {
+    CallRuntimeFunction("free", { class_list_ptr });
   }
   
   m_process->DeallocateMemory(count_addr);
@@ -1125,109 +1066,6 @@ llvm::Error CreateError(const char *format, ...) {
 
 } // anonymous namespace
 
-bool GNUstepObjCRuntimeIntrospector::InitializeRuntimeFunctions() {
-  Log *log = GetLog(LLDBLog::Language);
-  
-  // Find libobjc2 module
-  const ModuleList &modules = m_process->GetTarget().GetImages();
-  for (size_t i = 0; i < modules.GetSize(); ++i) {
-    ModuleSP module_sp = modules.GetModuleAtIndex(i);
-    if (!module_sp)
-      continue;
-
-    const FileSpec &file_spec = module_sp->GetFileSpec();
-    llvm::StringRef filename = file_spec.GetFilename().GetStringRef();
-
-    if (filename.contains("libobjc.so") || filename.contains("libobjc2")) {
-      m_objc_module = module_sp;
-      LLDB_LOG(log, "Found libobjc2 module: {0}", file_spec.GetPath());
-    } else if (filename.contains("libgnustep-base")) {
-      m_foundation_module = module_sp;
-      LLDB_LOG(log, "Found Foundation module: {0}", file_spec.GetPath());
-    }
-  }
-
-  if (!m_objc_module) {
-    LLDB_LOG(log, "libobjc2 module not found");
-    return false;
-  }
-
-  // Resolve runtime function pointers
-  m_runtime.objc_getClass = (Class (*)(const char *))ResolveRuntimeSymbol("objc_getClass");
-  m_runtime.objc_lookUpClass = (Class (*)(const char *))ResolveRuntimeSymbol("objc_lookUpClass");
-  m_runtime.objc_getMetaClass = (Class (*)(const char *))ResolveRuntimeSymbol("objc_getMetaClass");
-  m_runtime.objc_copyClassList = (Class *(*)(unsigned int *))ResolveRuntimeSymbol("objc_copyClassList");
-
-  m_runtime.class_getName = (const char *(*)(Class))ResolveRuntimeSymbol("class_getName");
-  m_runtime.class_getSuperclass = (Class (*)(Class))ResolveRuntimeSymbol("class_getSuperclass");
-  m_runtime.class_getInstanceSize = (size_t (*)(Class))ResolveRuntimeSymbol("class_getInstanceSize");
-  m_runtime.class_isMetaClass = (bool (*)(Class))ResolveRuntimeSymbol("class_isMetaClass");
-
-  m_runtime.class_copyIvarList = (Ivar *(*)(Class, unsigned int *))ResolveRuntimeSymbol("class_copyIvarList");
-  m_runtime.ivar_getName = (const char *(*)(Ivar))ResolveRuntimeSymbol("ivar_getName");
-  m_runtime.ivar_getTypeEncoding = (const char *(*)(Ivar))ResolveRuntimeSymbol("ivar_getTypeEncoding");
-  m_runtime.ivar_getOffset = (ptrdiff_t (*)(Ivar))ResolveRuntimeSymbol("ivar_getOffset");
-
-  m_runtime.class_copyMethodList = (Method *(*)(Class, unsigned int *))ResolveRuntimeSymbol("class_copyMethodList");
-  m_runtime.method_getName = (SEL (*)(Method))ResolveRuntimeSymbol("method_getName");
-  m_runtime.method_getTypeEncoding = (const char *(*)(Method))ResolveRuntimeSymbol("method_getTypeEncoding");
-  m_runtime.method_getImplementation = (void *(*)(Method))ResolveRuntimeSymbol("method_getImplementation");
-  m_runtime.sel_getName = (const char *(*)(SEL))ResolveRuntimeSymbol("sel_getName");
-
-  // Method lookup and selector checking
-  m_runtime.sel_getUid = (SEL (*)(const char *))ResolveRuntimeSymbol("sel_getUid");
-  m_runtime.class_respondsToSelector = (bool (*)(Class, SEL))ResolveRuntimeSymbol("class_respondsToSelector");
-  m_runtime.class_getInstanceMethod = (Method (*)(Class, SEL))ResolveRuntimeSymbol("class_getInstanceMethod");
-  m_runtime.class_getClassMethod = (Method (*)(Class, SEL))ResolveRuntimeSymbol("class_getClassMethod");
-
-  m_runtime.class_copyPropertyList = (Property *(*)(Class, unsigned int *))ResolveRuntimeSymbol("class_copyPropertyList");
-  m_runtime.property_getName = (const char *(*)(Property))ResolveRuntimeSymbol("property_getName");
-  m_runtime.property_getAttributes = (const char *(*)(Property))ResolveRuntimeSymbol("property_getAttributes");
-
-  m_runtime.object_getClass = (Class (*)(void *))ResolveRuntimeSymbol("object_getClass");
-  m_runtime.object_getClassName = (const char *(*)(void *))ResolveRuntimeSymbol("object_getClassName");
-
-  m_runtime.free = (void (*)(void *))ResolveRuntimeSymbol("free");
-
-  // Check critical functions are resolved
-  bool success = m_runtime.objc_copyClassList && m_runtime.class_getName &&
-                 m_runtime.class_getSuperclass && m_runtime.class_copyIvarList;
-
-  if (success) {
-    LLDB_LOG(log, "All critical runtime functions resolved");
-  } else {
-    LLDB_LOG(log, "Failed to resolve critical runtime functions");
-  }
-
-  return success;
-}
-
-lldb::addr_t GNUstepObjCRuntimeIntrospector::ResolveRuntimeSymbol(const char *name) {
-  if (!m_objc_module || !name)
-    return LLDB_INVALID_ADDRESS;
-
-  ConstString symbol_name(name);
-  const Symbol *symbol = m_objc_module->FindFirstSymbolWithNameAndType(symbol_name, eSymbolTypeCode);
-
-  if (!symbol) {
-    // Try in Foundation module as fallback
-    if (m_foundation_module) {
-      symbol = m_foundation_module->FindFirstSymbolWithNameAndType(symbol_name, eSymbolTypeCode);
-    }
-  }
-
-  if (symbol) {
-    addr_t addr = symbol->GetAddress().GetLoadAddress(&m_process->GetTarget());
-    if (addr != LLDB_INVALID_ADDRESS) {
-      Log *log = GetLog(LLDBLog::Language);
-      LLDB_LOG(log, "Resolved {0} to 0x{1:x}", name, addr);
-      return addr;
-    }
-  }
-
-  return LLDB_INVALID_ADDRESS;
-}
-
 llvm::Expected<std::string> GNUstepObjCRuntimeIntrospector::ReadCStringFromTarget(lldb::addr_t addr) {
   if (addr == 0 || addr == LLDB_INVALID_ADDRESS) {
     return CreateError("Invalid address");
@@ -1269,8 +1107,11 @@ GNUstepObjCRuntimeIntrospector::GetAllIvarsIncludingInherited(Class cls) {
   }
   
   // Check if we have the runtime functions available
-  if (!m_runtime.class_copyIvarList || !m_runtime.ivar_getName || 
-      !m_runtime.ivar_getTypeEncoding || !m_runtime.ivar_getOffset) {
+  // Runtime symbols handled by RuntimeFunctionCaller on-demand
+  if (!GetRuntimeFunctionAddress("class_copyIvarList") || 
+      !GetRuntimeFunctionAddress("ivar_getName") ||
+      !GetRuntimeFunctionAddress("ivar_getTypeEncoding") || 
+      !GetRuntimeFunctionAddress("ivar_getOffset")) {
     return CreateError("Runtime functions not available");
   }
   
@@ -1351,7 +1192,7 @@ GNUstepObjCRuntimeIntrospector::GetAllIvarsIncludingInherited(Class cls) {
       }
       
       // Free the ivar list
-      if (m_runtime.free) {
+      if (GetRuntimeFunctionAddress("free")) {
         args = {ivar_list_ptr};
         CallRuntimeFunction("free", args);
       }
@@ -1373,9 +1214,8 @@ GNUstepObjCRuntimeIntrospector::GetAllClasses() {
     return CreateError("No process available");
   }
   
-  EnsureRuntimeSymbolsLoaded();
-  
-  if (!m_runtime.objc_copyClassList) {
+  // Runtime symbols handled by RuntimeFunctionCaller on-demand
+  if (!GetRuntimeFunctionAddress("objc_copyClassList")) {
     return CreateError("objc_copyClassList not available");
   }
   
@@ -1414,7 +1254,7 @@ GNUstepObjCRuntimeIntrospector::GetAllClasses() {
     }
     
     // Free the class list
-    if (m_runtime.free) {
+    if (GetRuntimeFunctionAddress("free")) {
       args = {class_list_ptr};
       CallRuntimeFunction("free", args);
     }

@@ -53,8 +53,6 @@ public:
   // Check if this looks like a valid GNUstep runtime
   bool IsValidGNUstepRuntime();
 
-  // Load runtime function symbols for direct calling
-  bool LoadRuntimeSymbols();
 
   // CRITICAL: Direct method introspection using runtime.h functions
   // These avoid expression evaluation during interface declaration to break
@@ -78,8 +76,6 @@ public:
   // Get metaclass pointer by name using objc_getMetaClass (direct runtime call)
   lldb::addr_t GetMetaClassPointer(const std::string &class_name);
 
-  // Ensure runtime symbols are loaded (call this before using symbol addresses)
-  void EnsureRuntimeSymbolsLoaded();
 
   // Get runtime function address by name with caching
   lldb::addr_t GetRuntimeFunctionAddress(const char *function_name);
@@ -252,78 +248,11 @@ private:
   // Consolidated runtime function caller
   std::unique_ptr<RuntimeFunctionCaller> m_runtime_caller;
 
-  // Runtime function addresses for direct calling (performance optimization)
-  lldb::addr_t m_object_getClass_addr = LLDB_INVALID_ADDRESS;
-  lldb::addr_t m_class_getSuperclass_addr = LLDB_INVALID_ADDRESS;
-  lldb::addr_t m_class_getInstanceSize_addr = LLDB_INVALID_ADDRESS;
-  lldb::addr_t m_class_getMethodImplementation_addr = LLDB_INVALID_ADDRESS;
-  lldb::addr_t m_objc_msgSend_addr = LLDB_INVALID_ADDRESS;
-  lldb::addr_t m_objc_copyClassList_addr = LLDB_INVALID_ADDRESS;
-  lldb::addr_t m_class_getName_addr = LLDB_INVALID_ADDRESS;
-  lldb::addr_t m_free_addr = LLDB_INVALID_ADDRESS;
 
-  // Method introspection function addresses from runtime.h for dynamic method
-  // discovery
-  lldb::addr_t m_objc_getMetaClass_addr = LLDB_INVALID_ADDRESS;
-  lldb::addr_t m_objc_getClass_addr = LLDB_INVALID_ADDRESS;
-  lldb::addr_t m_class_copyMethodList_addr = LLDB_INVALID_ADDRESS;
-  lldb::addr_t m_method_getName_addr = LLDB_INVALID_ADDRESS;
-  lldb::addr_t m_method_getTypeEncoding_addr = LLDB_INVALID_ADDRESS;
-  lldb::addr_t m_sel_getName_addr = LLDB_INVALID_ADDRESS;
-
-  // === Enhanced Runtime Function Addresses (merged from GNUstepRuntimeV2API) ===
-  
-  // Runtime function structure for comprehensive access
-  struct RuntimeFunctions {
-    // Core class functions
-    Class (*objc_getClass)(const char *name);
-    Class (*objc_lookUpClass)(const char *name);
-    Class (*objc_getMetaClass)(const char *name);
-    Class *(*objc_copyClassList)(unsigned int *outCount);
-
-    // Class introspection
-    const char *(*class_getName)(Class cls);
-    Class (*class_getSuperclass)(Class cls);
-    size_t (*class_getInstanceSize)(Class cls);
-    bool (*class_isMetaClass)(Class cls);
-
-    // Ivar introspection
-    Ivar *(*class_copyIvarList)(Class cls, unsigned int *outCount);
-    const char *(*ivar_getName)(Ivar ivar);
-    const char *(*ivar_getTypeEncoding)(Ivar ivar);
-    ptrdiff_t (*ivar_getOffset)(Ivar ivar);
-
-    // Method introspection
-    Method *(*class_copyMethodList)(Class cls, unsigned int *outCount);
-    SEL (*method_getName)(Method method);
-    const char *(*method_getTypeEncoding)(Method method);
-    void *(*method_getImplementation)(Method method);
-    const char *(*sel_getName)(SEL sel);
-
-    // Method lookup and selector checking
-    SEL (*sel_getUid)(const char *str);
-    bool (*class_respondsToSelector)(Class cls, SEL sel);
-    Method (*class_getInstanceMethod)(Class cls, SEL sel);
-    Method (*class_getClassMethod)(Class cls, SEL sel);
-
-    // Property introspection
-    Property *(*class_copyPropertyList)(Class cls, unsigned int *outCount);
-    const char *(*property_getName)(Property prop);
-    const char *(*property_getAttributes)(Property prop);
-
-    // Object introspection
-    Class (*object_getClass)(void *obj);
-    const char *(*object_getClassName)(void *obj);
-
-    // Memory management
-    void (*free)(void *ptr);
-  } m_runtime;
 
   // Thread safety for enhanced functionality
   mutable std::recursive_mutex m_mutex;
 
-  // Flag to track if we've attempted to load runtime symbols
-  bool m_runtime_symbols_loaded = false;
 
   // Cache for function callers to avoid repeated compilation
   struct FunctionCallerCache {
@@ -361,11 +290,6 @@ private:
 
   // === Enhanced Private Methods (merged from GNUstepRuntimeV2API) ===
 
-  // Initialize comprehensive runtime function pointers
-  bool InitializeRuntimeFunctions();
-
-  // Resolve a runtime function by name with module searching
-  lldb::addr_t ResolveRuntimeSymbol(const char *name);
 
   // Call a runtime function in target process with comprehensive error handling
   template <typename ReturnType>
