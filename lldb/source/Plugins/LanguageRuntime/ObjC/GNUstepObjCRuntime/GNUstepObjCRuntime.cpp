@@ -43,7 +43,7 @@ using namespace lldb_private::gnustep_objc_runtime_utilities;
 
 void GNUstepObjCRuntime::Initialize() {
   PluginManager::RegisterPlugin(
-      "gnu-objc-v2", "GNUstep Objective-C V2 Runtime",
+      "gnu-objc-v2", "GNUstep libobjc2 Objective-C Runtime",
       CreateInstance, nullptr);
 }
 

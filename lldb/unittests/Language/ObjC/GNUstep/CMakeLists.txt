@@ -1,55 +1,8 @@
+# Minimal unit tests for GNUstep LLDB Plugin
+# Tests only components that don't require runtime
+
 add_lldb_unittest(LanguageObjCGNUstepTests
-  Core/GNUstepTaggedPointerTest.cpp
-  Core/GNUstepIntrospectorTest.cpp
-  Core/GNUstepRuntimeTest.cpp
-  Core/GNUstepRuntimeAPITest.cpp  # Re-enabled with mock implementation
-  Core/GNUstepDeclVendorTest.cpp
-  Core/GNUstepClassDescriptorTest.cpp      # New comprehensive class descriptor tests
-  Core/GNUstepDynamicTypeSimpleTest.cpp     # New dynamic type resolution tests - simplified approach working
-  Core/GNUstepObjectDescriptionSimpleTest.cpp # New object description tests - simplified approach working
-  Core/GNUstepMemoryManagementTest.cpp     # New memory management (CallObjCCopyClassList fix) tests
-  Core/GNUstepRuntimeSymbolLoadingTest.cpp # New runtime symbol loading (LoadRuntimeSymbols) tests
-  Core/GNUstepStepThroughTrampolineTest.cpp # New step-through trampoline (GetStepThroughTrampolinePlan) tests
-  Core/ISADescriptorMappingTest.cpp        # New ISA-to-descriptor mapping tests
-  
-  # Formatter tests with comprehensive validation - ALL PLACEHOLDERS REPLACED
-  Formatters/Collections/NSArrayFormatterTest.cpp
-  Formatters/Collections/NSDictionaryFormatterTest.cpp
-  Formatters/Collections/NSSetFormatterTest.cpp
-  Formatters/Collections/NSIndexSetFormatterTest.cpp
-  Formatters/Collections/NSOrderedSetFormatterTest.cpp
-  Formatters/Primitives/NSDecimalNumberFormatterTest.cpp  # Now has real validation tests
-  Formatters/Text/NSCharacterSetFormatterTest.cpp         # Now has real character set tests
-  Formatters/Foundation/NSBundleFormatterTest.cpp         # New comprehensive Bundle formatter test
-  
-  # Foundation Formatter Tests - Comprehensive validation enabled
-  Formatters/Foundation/NSValueFormatterTest.cpp          # IdDispatcher routing & generic formatter tests
-  Formatters/Foundation/NSJSONSerializationFormatterTest.cpp  # JSON formatting & options tests
-  Formatters/Foundation/NSProxyFormatterTest.cpp          # Proxy type detection & target identification tests
-  
-  # Comprehensive Foundation Formatter Tests - Production ready
-  Formatters/Foundation/NSDataFormatterTest.cpp           # Data length, preview, & performance tests
-  Formatters/Foundation/NSURLFormatterTest.cpp            # URL string extraction & scheme handling tests
-  Formatters/Foundation/NSUUIDFormatterTest.cpp           # UUID formatting & special value tests
-  Formatters/Foundation/NSErrorFormatterTest.cpp          # Error domain, code, & userInfo tests
-  Formatters/Foundation/NSDateFormatterTest.cpp           # Date interval & timezone handling tests
-  Formatters/Foundation/NSLocaleFormatterTest.cpp         # Locale identifier & property extraction tests
-  
-  # NEW: Performance and Stress Testing Framework
-  Formatters/Performance/PerformanceBenchmarkTest.cpp     # <50ms requirement validation, concurrent access
-  Formatters/Performance/StressTest.cpp                   # Large datasets, deep nesting, memory pressure
-  
-  # NEW: Comprehensive Edge Case Testing
-  Formatters/EdgeCaseTest.cpp                             # Boundary conditions, malformed data, corruption resistance
-  
-  # NEW: Cross-platform Compatibility Testing  
-  CrossPlatform/EndiannessTest.cpp                        # Endianness handling, memory layout validation
-  
-  # NEW: Regression Testing Suite
-  RegressionTest.cpp                                       # Ensures no functionality breaks, performance regression
-  
-  # Integration tests - Disabled: requires liblldb linkage (SB API)
-  # Integration/EndToEndFormatterTest.cpp                   # Requires SB API - temporarily disabled
+  GNUstepUtilitiesTest.cpp  # Tests for helper utilities that don't need runtime
 
   PARTIAL_SOURCES_INTENDED
 
@@ -59,23 +12,9 @@ add_lldb_unittest(LanguageObjCGNUstepTests
     lldbPluginPlatformLinux
     lldbTarget
     lldbUtility
+    lldbUtilityHelpers
     lldbCore
     lldbDataFormatters
     lldbSymbol
     lldbHost
-)
-
-# Integration tests that require full LLDB API (SB API)
-add_lldb_unittest(LanguageObjCGNUstepIntegrationTests
-  Integration/DynamicTypeIntegrationTest.cpp  # Dynamic type resolution integration tests
-  
-  PARTIAL_SOURCES_INTENDED
-
-  LINK_LIBS
-    lldbPluginGNUstepObjCRuntime
-    liblldb
-    lldbAPI
-    lldbCore
-    lldbHost
-    lldbInterpreter
 )

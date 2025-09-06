@@ -31,7 +31,10 @@
         "cmath": "cpp",
         "chrono": "cpp",
         "variant": "cpp",
-        "algorithm": "cpp"
+        "algorithm": "cpp",
+        "string": "cpp",
+        "sstream": "cpp",
+        "regex": "cpp"
     },
     "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
     "cmake.configureOnOpen": false,

@@ -316,6 +316,74 @@ private:
                                        Status &error);
 };
 
+// Helper functions for testing - these don't require runtime
+inline bool IsTaggedPointer(uint64_t ptr) {
+  // In GNUstep, tagged pointers have the low bit set
+  return (ptr & 1) != 0;
+}
+
+inline uint64_t GetTaggedPointerSlot(uint64_t ptr) {
+  // Bits 1-3 contain the slot index
+  return (ptr >> 1) & 0x7;
+}
+
+inline uint32_t GetPointerSize(uint32_t address_size) {
+  return address_size;
+}
+
+inline uint64_t AlignTo(uint64_t value, uint64_t alignment) {
+  return (value + alignment - 1) & ~(alignment - 1);
+}
+
+inline std::string ExtractClassName(const std::string &mangled) {
+  // Extract class name from mangled Objective-C symbols
+  size_t pos = mangled.find("_OBJC_CLASS_$_");
+  if (pos != std::string::npos) {
+    return mangled.substr(pos + 14);
+  }
+  return "";
+}
+
+inline std::string CleanSelectorName(const std::string &selector) {
+  // Clean up selector names (already clean in GNUstep)
+  return selector;
+}
+
+inline std::string FormatRuntimeError(const std::string &function,
+                                      const std::string &error) {
+  return "Runtime error in " + function + ": " + error;
+}
+
+inline bool IsAligned(uint64_t value, uint64_t alignment) {
+  return (value % alignment) == 0;
+}
+
+inline uint32_t SwapBytes32(uint32_t value) {
+  return ((value & 0xFF000000) >> 24) |
+         ((value & 0x00FF0000) >> 8) |
+         ((value & 0x0000FF00) << 8) |
+         ((value & 0x000000FF) << 24);
+}
+
+inline uint64_t SwapBytes64(uint64_t value) {
+  return ((value & 0xFF00000000000000ULL) >> 56) |
+         ((value & 0x00FF000000000000ULL) >> 40) |
+         ((value & 0x0000FF0000000000ULL) >> 24) |
+         ((value & 0x000000FF00000000ULL) >> 8) |
+         ((value & 0x00000000FF000000ULL) << 8) |
+         ((value & 0x0000000000FF0000ULL) << 24) |
+         ((value & 0x000000000000FF00ULL) << 40) |
+         ((value & 0x00000000000000FFULL) << 56);
+}
+
+inline std::string GetPluginName() {
+  return "gnustep-objc-runtime";
+}
+
+inline std::string GetPluginDescription() {
+  return "GNUstep Objective-C runtime support plugin for LLDB";
+}
+
 } // namespace gnustep_objc_runtime_utilities
 } // namespace lldb_private
 

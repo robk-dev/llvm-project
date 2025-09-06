@@ -90,6 +90,37 @@
             "problemMatcher": "$gcc"
         },
         {
+            "label": "build-gnustep-examples",
+            "type": "shell", 
+            "command": "cmake",
+            "args": [
+                "--build", "${workspaceFolder}/examples/objc/gnustep/build",
+                "-j$(nproc)"
+            ],
+            "dependsOn": ["configure-gnustep-examples"],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": "$gcc"
+        },
+        {
+            "label": "configure-gnustep-examples",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "-S", "${workspaceFolder}/examples/objc/gnustep",
+                "-B", "${workspaceFolder}/examples/objc/gnustep/build",
+                "-G", "Ninja",
+                "-DCMAKE_BUILD_TYPE=Debug"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}/examples/objc/gnustep"
+            },
+            "group": "build",
+            "problemMatcher": "$gcc"
+        },
+        {
             "label": "build-all-examples-linux",
             "type": "shell",
             "command": "make",
@@ -97,11 +128,8 @@
             "options": {
                 "cwd": "${workspaceFolder}/examples"
             },
-            "dependsOn": ["build-plugin", "build-full-development"],
-            "group": {
-                "kind": "build",
-                "isDefault": true
-            },
+            // "dependsOn": ["build-plugin"],
+            "group": "build",
             "problemMatcher": "$gcc"
         },
         {

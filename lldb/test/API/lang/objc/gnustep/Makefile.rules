@@ -4,10 +4,17 @@
 # If Makefile.rules doesn't exist in parent directories, provide minimal rules
 LEVEL ?= ../../../../make
 
-# Default build settings
-CC ?= clang
-CXX ?= clang++
-OBJC ?= clang
+# Default build settings - prefer locally built clang if available
+CC ?= /home/robk/code/llvm-project/build-stage1/bin/clang
+CXX ?= /home/robk/code/llvm-project/build-stage1/bin/clang++
+OBJC ?= /home/robk/code/llvm-project/build-stage1/bin/clang
+
+# Fallback to system clang if local build not available
+ifeq (,$(wildcard $(CC)))
+    CC = clang
+    CXX = clang++
+    OBJC = clang
+endif
 
 # Build rules
 all: a.out

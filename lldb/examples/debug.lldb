@@ -1,6 +1,0 @@
-target create simple_test
-image list
-breakpoint set --file simple_test.m --line 8
-run
-image list
-quit

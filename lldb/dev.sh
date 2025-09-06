@@ -11,10 +11,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 LLVM_SRC_DIR="$REPO_ROOT/llvm"
 BUILD_DIR="$REPO_ROOT/build"
-EXAMPLES_DIR="$SCRIPT_DIR/examples"
-EXAMPLES_BUILD_DIR="$EXAMPLES_DIR/build-examples"
-# Build targets - using main LLDB targets instead of plugin-specific one
-BUILD_TARGETS="lldb lldb-server"
+EXAMPLES_DIR="$SCRIPT_DIR/examples/objc/gnustep"
+EXAMPLES_BUILD_DIR="$EXAMPLES_DIR/build"
+# Build targets - just rebuild the plugin library
+BUILD_TARGETS="lldbPluginGNUstepObjCRuntime lldb lldb-server"
 LLDB_BIN="$BUILD_DIR/bin/lldb"
 LLDB_SERVER_BIN="$BUILD_DIR/bin/lldb-server"
 
@@ -93,7 +93,19 @@ configure_full_build() {
 build_examples_cmake() {
     log_section "🔧 Configuring and building examples (CMake)..."
     mkdir -p "$EXAMPLES_BUILD_DIR"
-    cmake -S "$EXAMPLES_DIR" -B "$EXAMPLES_BUILD_DIR" -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_OBJC_COMPILER=clang
+    
+    # Use clang from build-stage1 if available
+    local clang_compiler="clang"
+    if [[ -f "$REPO_ROOT/build-stage1/bin/clang" ]]; then
+        clang_compiler="$REPO_ROOT/build-stage1/bin/clang"
+        log_info "Using stage1 clang: $clang_compiler"
+    fi
+    
+    cmake -S "$EXAMPLES_DIR" -B "$EXAMPLES_BUILD_DIR" -G Ninja \
+        -DCMAKE_BUILD_TYPE=Debug \
+        -DCMAKE_OBJC_COMPILER="$clang_compiler" \
+        -DCMAKE_C_COMPILER="$clang_compiler"
+    
     cmake --build "$EXAMPLES_BUILD_DIR" -j$(nproc)
     log_success "Examples built in $EXAMPLES_BUILD_DIR"
 }
@@ -205,7 +217,12 @@ run_api_tests() {
     check_prerequisites
     
     local api_test_dir="$SCRIPT_DIR/test/API/lang/objc/gnustep"
-    local our_clang="$BUILD_DIR/bin/clang"
+    # Use stage1 clang if available, otherwise fallback to build clang
+    local our_clang="$REPO_ROOT/build-stage1/bin/clang"
+    if [[ ! -f "$our_clang" ]]; then
+        our_clang="$BUILD_DIR/bin/clang"
+        log_warning "Stage1 clang not found, using build clang: $our_clang"
+    fi
     
     if [[ ! -d "$api_test_dir" ]]; then
         log_error "API test directory not found: $api_test_dir"
@@ -273,7 +290,12 @@ run_integration_tests() {
     check_prerequisites
     
     local api_test_dir="$SCRIPT_DIR/test/API/lang/objc/gnustep"
-    local our_clang="$BUILD_DIR/bin/clang"
+    # Use stage1 clang if available, otherwise fallback to build clang
+    local our_clang="$REPO_ROOT/build-stage1/bin/clang"
+    if [[ ! -f "$our_clang" ]]; then
+        our_clang="$BUILD_DIR/bin/clang"
+        log_warning "Stage1 clang not found, using build clang: $our_clang"
+    fi
     
     if [[ ! -d "$api_test_dir" ]]; then
         log_error "API test directory not found: $api_test_dir"
@@ -415,7 +437,12 @@ debug_integration() {
     check_prerequisites
     
     local api_test_dir="$SCRIPT_DIR/test/API/lang/objc/gnustep"
-    local our_clang="$BUILD_DIR/bin/clang"
+    # Use stage1 clang if available, otherwise fallback to build clang
+    local our_clang="$REPO_ROOT/build-stage1/bin/clang"
+    if [[ ! -f "$our_clang" ]]; then
+        our_clang="$BUILD_DIR/bin/clang"
+        log_warning "Stage1 clang not found, using build clang: $our_clang"
+    fi
     
     if [[ ! -d "$api_test_dir" ]]; then
         log_error "API test directory not found: $api_test_dir"
@@ -723,13 +750,14 @@ show_usage() {
     echo "  $0 full                           # Complete development cycle"
     echo ""
     echo -e "${CYAN}Available Examples:${NC}"
-    if [[ -f "$EXAMPLES_DIR/Makefile" ]]; then
-        echo "  custom_class_test, foundation_test, test_collections_formatter"
-        echo "  test_nsnumber_comprehensive, simple_test, array_test"
-        echo "  dictionary_test, nsset_test, test_data_url_uuid"
-        echo "  (See $EXAMPLES_DIR/Makefile for complete list)"
+    if [[ -f "$EXAMPLES_DIR/CMakeLists.txt" ]]; then
+        echo "  simple_test, custom_class_test"
+        echo "  (Built using CMake in $EXAMPLES_DIR)"
+    elif [[ -f "$SCRIPT_DIR/examples/Makefile" ]]; then
+        echo "  Legacy examples in $SCRIPT_DIR/examples/"
+        echo "  (Using old Makefile system)"
     else
-        echo "  (Makefile not found - cannot list examples)"
+        echo "  (No build files found)"
     fi
 }
 

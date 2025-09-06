@@ -844,29 +844,6 @@ static void LoadGNUstepFormatters(TypeCategoryImplSP objc_category_sp) {
   SyntheticChildren::Flags synth_flags;
   synth_flags.SetCascades(true).SetSkipPointers(false).SetSkipReferences(false);
 
-  // Register universal formatter for all GNUstep objects
-  // First register for common specific types to override Apple formatters
-  const char *common_types[] = {
-    "NSString", "NSMutableString",
-    "NSArray", "NSMutableArray", 
-    "NSDictionary", "NSMutableDictionary",
-    "NSSet", "NSMutableSet",
-    "NSNumber", "NSDecimalNumber",
-    "NSData", "NSMutableData",
-    "NSDate", "NSCalendar",
-    "NSURL", "NSUUID",
-    "NSError", "NSException",
-    "NSIndexSet", "NSMutableIndexSet",
-    "NSCharacterSet", "NSMutableCharacterSet",
-    nullptr
-  };
-  
-  for (const char **type = common_types; *type; ++type) {
-    AddCXXSummary(objc_category_sp,
-                  lldb_private::formatters::GNUstepUniversalSummaryProvider,
-                  "GNUstep Universal summary provider", *type, gnustep_flags);
-  }
-
   // --------------------------------------------------------------------------
   // ✅ Universal catch-alls (no per-class enumeration required)
   // Bind to 'id' so any Obj-C object can fall back to our provider.
@@ -888,7 +865,8 @@ static void LoadGNUstepFormatters(TypeCategoryImplSP objc_category_sp) {
 
   AddCXXSummary(objc_category_sp,
                 lldb_private::formatters::GNUstepUniversalSummaryProvider,
-                "GNUstep Universal summary (NS|GS).*", "^(NS|GS).+", gnustep_flags, true);
+                "GNUstep Universal summary (NS|GS).*", "^(NS|GS).+",
+                gnustep_flags, true);
 
   // (Optional) Root-class cascades for legacy/alt runtimes.
   AddCXXSynthetic(
@@ -897,7 +875,8 @@ static void LoadGNUstepFormatters(TypeCategoryImplSP objc_category_sp) {
       "GNUstep Universal synthetic (NSObject)", "NSObject", synth_flags);
   AddCXXSummary(objc_category_sp,
                 lldb_private::formatters::GNUstepUniversalSummaryProvider,
-                "GNUstep Universal summary (NSObject)", "NSObject", gnustep_flags);
+                "GNUstep Universal summary (NSObject)", "NSObject",
+                gnustep_flags);
 
   AddCXXSynthetic(
       objc_category_sp,
@@ -912,34 +891,47 @@ static void LoadGNUstepFormatters(TypeCategoryImplSP objc_category_sp) {
   AddCXXSynthetic(
       objc_category_sp,
       lldb_private::formatters::GNUstepUniversalSyntheticProviderCreator,
-      "GNUstep Universal synthetic (catch-all base)", "^[A-Z][A-Za-z0-9_]+$", synth_flags, true);
+      "GNUstep Universal synthetic (catch-all base)", "^[A-Z][A-Za-z0-9_]+$",
+      synth_flags, true);
   AddCXXSummary(objc_category_sp,
                 lldb_private::formatters::GNUstepUniversalSummaryProvider,
-                "GNUstep Universal summary (catch-all base)", "^[A-Z][A-Za-z0-9_]+$", gnustep_flags, true);
-  
+                "GNUstep Universal summary (catch-all base)",
+                "^[A-Z][A-Za-z0-9_]+$", gnustep_flags, true);
+
   // Pointer type (e.g., "CustomAccount *")
   AddCXXSynthetic(
       objc_category_sp,
       lldb_private::formatters::GNUstepUniversalSyntheticProviderCreator,
-      "GNUstep Universal synthetic (catch-all ptr)", "^[A-Z][A-Za-z0-9_]+ \\*$", synth_flags, true);
+      "GNUstep Universal synthetic (catch-all ptr)", "^[A-Z][A-Za-z0-9_]+ \\*$",
+      synth_flags, true);
   AddCXXSummary(objc_category_sp,
                 lldb_private::formatters::GNUstepUniversalSummaryProvider,
-                "GNUstep Universal summary (catch-all ptr)", "^[A-Z][A-Za-z0-9_]+ \\*$", gnustep_flags, true);
-  
+                "GNUstep Universal summary (catch-all ptr)",
+                "^[A-Z][A-Za-z0-9_]+ \\*$", gnustep_flags, true);
 
-  // Register universal synthetic provider for collections (for backwards compatibility)
-  const char *collection_types[] = {
-    "NSArray", "NSMutableArray",
-    "NSDictionary", "NSMutableDictionary", 
-    "NSSet", "NSMutableSet",
-    nullptr
-  };
-  
-  for (const char **type = collection_types; *type; ++type) {
-    AddCXXSynthetic(
-        objc_category_sp,
-        lldb_private::formatters::GNUstepUniversalSyntheticProviderCreator,
-        "GNUstep Universal synthetic children", *type, synth_flags);
+  // Register universal formatter for all GNUstep objects
+  // First register for common specific types to override Apple formatters
+  const char *common_types[] = {
+      "NSString", "NSMutableString", "NSArray", "NSMutableArray",
+      "NSDictionary", "NSMutableDictionary", "NSSet", "NSMutableSet",
+      "NSNumber", "NSDecimalNumber", "NSConstantIntegerNumber",
+      "NSDate", "NSCalendar", "NSCalendarDate", "NSMutableCalendarDate",
+      "NSURL", "NSUUID", "NSError", "NSException", "NSIndexSet",
+      "NSMutableIndexSet", "NSCharacterSet", "NSMutableCharacterSet",
+      "NSOrderedSet", "NSMutableOrderedSet", "NSScanner", "NSIndexPath",
+      "NSMutableIndexPath", "NSTaggedPointerString",
+      "NSMutableTagPointerString", "NSBundle", "NSMutableBundle", "NSData",
+      "NSMutableData", "NSConcreteData", "NSMutableConcreteData",
+       "NSMutableConstantIntegerNumber", "NSInteger", "NSUInteger",
+      "NSConstantDoubleNumber", "NSMutableConstantDoubleNumber",
+      "NSConstantFloatNumber", "NSMutableConstantFloatNumber", 
+      nullptr
+    };
+
+  for (const char **type = common_types; *type; ++type) {
+    AddCXXSummary(objc_category_sp,
+                  lldb_private::formatters::GNUstepUniversalSummaryProvider,
+                  "GNUstep Universal summary provider", *type, gnustep_flags);
   }
 }
 
@@ -1127,7 +1119,8 @@ bool ObjCLanguage::IsNilReference(ValueObject &valobj) {
   return canReadValue && isZero;
 }
 
-std::optional<bool> ObjCLanguage::GetBooleanFromString(llvm::StringRef str) const {
+std::optional<bool>
+ObjCLanguage::GetBooleanFromString(llvm::StringRef str) const {
   if (str == "YES" || str == "true" || str == "1")
     return true;
   if (str == "NO" || str == "false" || str == "0")
