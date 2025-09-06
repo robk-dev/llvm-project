@@ -102,11 +102,9 @@ GNUstepObjCRuntime::CreateInstance(Process *process,
   }
   
   if (!found_objc_markers) {
-    printf("[DEBUG] No ObjC markers found, returning nullptr\n");
     return nullptr;
   }
   
-  printf("[DEBUG] ObjC markers found, creating GNUstepObjCRuntime\n");
   std::unique_ptr<GNUstepObjCRuntime> runtime_sp(new GNUstepObjCRuntime(process));
   // Don't install hooks here - let them be installed after process launch
   return runtime_sp.release();
@@ -173,7 +171,6 @@ void GNUstepObjCRuntime::ModulesDidLoad(const ModuleList &module_list) {
 void GNUstepObjCRuntime::DidLaunch() {
   Log *log = GetLog(LLDBLog::Language | LLDBLog::Types);
   LLDB_LOG(log, "[GNUstep] DidLaunch: Process launched, registering formatters only");
-  printf("[DEBUG] GNUstepObjCRuntime::DidLaunch called\n");
   
   // Formatters are registered in ObjCLanguage.cpp via LoadGNUstepFormatters()
   // Expression evaluation hooks will be installed lazily when needed

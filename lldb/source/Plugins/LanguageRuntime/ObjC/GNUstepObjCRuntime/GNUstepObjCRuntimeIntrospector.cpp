@@ -968,18 +968,12 @@ GNUstepObjCRuntimeIntrospector::GetClassMethods(lldb::addr_t class_ptr) {
 lldb::addr_t GNUstepObjCRuntimeIntrospector::CallRuntimeFunction(
     const std::string &function_name, const std::vector<lldb::addr_t> &args) {
   
-  fprintf(stderr, "[DEBUG] CallRuntimeFunction: called for '%s' with %zu args\n",
-          function_name.c_str(), args.size());
-  
   if (!m_runtime_caller) {
-    fprintf(stderr, "[DEBUG] CallRuntimeFunction: m_runtime_caller is NULL!\n");
     return LLDB_INVALID_ADDRESS;
   }
 
   // Delegate to the consolidated runtime function caller
   lldb::addr_t result = m_runtime_caller->CallRuntimeFunction(function_name, args);
-  fprintf(stderr, "[DEBUG] CallRuntimeFunction: '%s' returned 0x%llx\n",
-          function_name.c_str(), (unsigned long long)result);
   return result;
 }
 
@@ -1270,18 +1264,13 @@ llvm::Expected<std::vector<GNUstepObjCRuntimeIntrospector::IvarInfo>>
 GNUstepObjCRuntimeIntrospector::GetAllIvarsIncludingInherited(Class cls) {
   std::vector<IvarInfo> all_ivars;
   
-  fprintf(stderr, "[DEBUG] GetAllIvarsIncludingInherited: called with cls=0x%llx\n", 
-          (unsigned long long)cls);
-  
   if (!cls || cls == (void*)LLDB_INVALID_ADDRESS) {
-    fprintf(stderr, "[DEBUG] GetAllIvarsIncludingInherited: Invalid class pointer\n");
     return CreateError("Invalid class pointer");
   }
   
   // Check if we have the runtime functions available
   if (!m_runtime.class_copyIvarList || !m_runtime.ivar_getName || 
       !m_runtime.ivar_getTypeEncoding || !m_runtime.ivar_getOffset) {
-    fprintf(stderr, "[DEBUG] GetAllIvarsIncludingInherited: Runtime functions not available\n");
     return CreateError("Runtime functions not available");
   }
   
@@ -1289,8 +1278,6 @@ GNUstepObjCRuntimeIntrospector::GetAllIvarsIncludingInherited(Class cls) {
   lldb::addr_t current_class = (lldb::addr_t)cls;
   
   while (current_class && current_class != LLDB_INVALID_ADDRESS) {
-    fprintf(stderr, "[DEBUG] GetAllIvarsIncludingInherited: Processing class at 0x%llx\n",
-            (unsigned long long)current_class);
     
     // Call class_copyIvarList through runtime function pointer
     // We need to allocate memory in the target process for the output count
@@ -1299,7 +1286,6 @@ GNUstepObjCRuntimeIntrospector::GetAllIvarsIncludingInherited(Class cls) {
                                                          ePermissionsReadable | ePermissionsWritable, 
                                                          error);
     if (error.Fail() || count_addr == LLDB_INVALID_ADDRESS) {
-      fprintf(stderr, "[DEBUG] GetAllIvarsIncludingInherited: Failed to allocate memory for count\n");
       continue;
     }
     
@@ -1320,8 +1306,6 @@ GNUstepObjCRuntimeIntrospector::GetAllIvarsIncludingInherited(Class cls) {
     m_process->DeallocateMemory(count_addr);
     
     if (ivar_list_ptr && ivar_list_ptr != LLDB_INVALID_ADDRESS && ivar_count > 0) {
-      fprintf(stderr, "[DEBUG] GetAllIvarsIncludingInherited: Got ivar list at 0x%llx with %u ivars\n",
-              (unsigned long long)ivar_list_ptr, ivar_count);
       
       // Read the ivar array
       for (unsigned int i = 0; i < ivar_count; i++) {
@@ -1331,7 +1315,6 @@ GNUstepObjCRuntimeIntrospector::GetAllIvarsIncludingInherited(Class cls) {
             ivar_list_ptr + (i * m_address_size), error);
         
         if (error.Fail() || ivar_ptr == 0 || ivar_ptr == LLDB_INVALID_ADDRESS) {
-          fprintf(stderr, "[DEBUG] GetAllIvarsIncludingInherited: Failed to read ivar pointer at index %u\n", i);
           continue;
         }
         
@@ -1359,8 +1342,6 @@ GNUstepObjCRuntimeIntrospector::GetAllIvarsIncludingInherited(Class cls) {
         // Get ivar offset
         lldb::addr_t offset = CallRuntimeFunction("ivar_getOffset", args);
         
-        fprintf(stderr, "[DEBUG] GetAllIvarsIncludingInherited: Ivar %u: name='%s', type='%s', offset=%lld\n",
-                i, ivar_name.c_str(), type_encoding.c_str(), (long long)offset);
         
         IvarInfo info;
         info.name = ivar_name;
@@ -1379,12 +1360,7 @@ GNUstepObjCRuntimeIntrospector::GetAllIvarsIncludingInherited(Class cls) {
     // Get superclass
     args = {current_class};
     current_class = CallRuntimeFunction("class_getSuperclass", args);
-    
-    fprintf(stderr, "[DEBUG] GetAllIvarsIncludingInherited: Superclass at 0x%llx\n",
-            (unsigned long long)current_class);
   }
-  
-  fprintf(stderr, "[DEBUG] GetAllIvarsIncludingInherited: returning %zu total ivars\n", all_ivars.size());
   
   return all_ivars;
 }
@@ -1456,14 +1432,11 @@ GNUstepObjCRuntimeIntrospector::GetAllClassesWithISAs() {
     static int cache_hits = 0;
     cache_hits++;
     if (cache_hits % 100 == 1) {  // Only log every 100th hit to reduce noise
-      fprintf(stderr, "[DEBUG] GetAllClassesWithISAs: Returning cached classes (hit #%d)\n", cache_hits);
     }
     return m_all_classes_cache;
   }
   
   // Cache doesn't exist, enumerate classes once for the session
-  fprintf(stderr, "[DEBUG] GetAllClassesWithISAs: First call, enumerating all classes for this session\n");
-  
   std::vector<std::pair<lldb::addr_t, std::string>> class_info;
   
   auto classes_result = GetAllClasses();
@@ -1482,9 +1455,6 @@ GNUstepObjCRuntimeIntrospector::GetAllClassesWithISAs() {
   // Update cache - valid for entire session
   m_all_classes_cache = class_info;
   m_all_classes_cached = true;
-  
-  fprintf(stderr, "[DEBUG] GetAllClassesWithISAs: Cached %zu classes for entire session\n", 
-          class_info.size());
   
   return class_info;
 }
