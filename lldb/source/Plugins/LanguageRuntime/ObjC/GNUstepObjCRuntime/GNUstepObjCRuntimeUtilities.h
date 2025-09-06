@@ -292,6 +292,13 @@ public:
   /// Get or resolve a runtime function address with caching
   lldb::addr_t GetRuntimeFunctionAddress(const char *function_name);
 
+  /// Call objc_msgSend to invoke a method on an object
+  /// Returns the result address, or LLDB_INVALID_ADDRESS on failure
+  lldb::addr_t CallObjCMethod(lldb::addr_t object_addr, const char *selector_name);
+  
+  /// Get a selector ID for a selector name using sel_getUid
+  lldb::addr_t GetSelectorForName(const char *selector_name);
+
   /// Find GNUstep runtime modules (libobjc2, libgnustep-base)
   lldb::ModuleSP FindObjCModule() const;
   lldb::ModuleSP FindFoundationModule() const;

@@ -34,23 +34,30 @@ The tool provides a comprehensive set of commands for working with LLDB, includi
    cd lldb-mcp
    ```
 
-2. Install dependencies:
+2. Install dependencies (recommended via the bundled virtual environment):
+   ```bash
+   cd lldb_mcp
+   ./run.sh --help   # first run will create .venv and install requirements
    ```
-   pip install mcp
+
+   Alternatively, if you prefer to manage the environment yourself:
+   ```bash
+   python3 -m venv .venv && source .venv/bin/activate
+   pip install -r requirements.txt
    ```
 
 3. Configure Claude to use the LLDB-MCP server:
    - Open the Claude desktop app configuration
    - Add the following to your MCP configuration:
-   ```json
-   "mcpServers": {
-     "lldb-mcp": {
-       "command": "python3",
-       "args": ["/path/to/lldb-mcp/lldb_mcp.py"],
-       "disabled": false
-     }
-   }
-   ```
+    ```json
+    "mcpServers": {
+       "lldb-mcp": {
+          "command": "/home/robk/code/llvm-project/lldb/lldb_mcp/run.sh",
+          "args": [],
+          "disabled": false
+       }
+    }
+    ```
 
 ## Usage
 

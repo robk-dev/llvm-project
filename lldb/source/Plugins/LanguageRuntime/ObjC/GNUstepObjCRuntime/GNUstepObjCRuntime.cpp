@@ -8,6 +8,8 @@
 
 #include "GNUstepObjCRuntime.h"
 #include "GNUstepObjCRuntimeUtilities.h"
+#include "GNUstepObjCDeclVendor.h"
+#include "GNUstepClassDescriptorV2.h"
 #include "formatters/GNUstepUniversalFormatter.h"
 #include "lldb/Core/PluginManager.h"
 #include "lldb/Expression/UtilityFunction.h"
@@ -1049,16 +1051,79 @@ void GNUstepObjCRuntime::UpdateISAToDescriptorMapIfNeeded() {
   Log *log = GetLog(LLDBLog::Process | LLDBLog::Types);
   LLDB_LOG(log, "GNUstepObjCRuntime::UpdateISAToDescriptorMapIfNeeded called");
   
-  // TODO: Re-implement using merged GNUstepObjCRuntimeIntrospector functionality
-  // The old GNUstepRuntimeV2API and GNUstepClassDescriptor classes have been merged
-  // into GNUstepObjCRuntimeIntrospector. This method will be restored once the
-  // integration is complete.
-  
-  // Also update any custom classes we've encountered during runtime introspection
-  if (m_introspector_up) {
-    // The introspector may have cached ISA-to-name mappings we can use
-    // This is a future enhancement point for custom class discovery
+  // Prevent recursive calls during map update
+  if (m_updating_isa_to_descriptor) {
+    LLDB_LOG(log, "Already updating ISA to descriptor map, skipping recursive call");
+    return;
   }
+  
+  Process *process = GetProcess();
+  if (!process) {
+    LLDB_LOG(log, "No process available for class discovery");
+    return;
+  }
+  
+  // Check if we need to update based on process stop ID
+  uint32_t current_stop_id = process->GetStopID();
+  if (m_isa_to_descriptor_stop_id == current_stop_id) {
+    LLDB_LOG(log, "ISA to descriptor map already up to date for stop ID {0}", current_stop_id);
+    return;
+  }
+  
+  // Set flag to prevent recursion
+  m_updating_isa_to_descriptor = true;
+  
+  // Update the stop ID
+  m_isa_to_descriptor_stop_id = current_stop_id;
+  
+  if (!m_introspector_up) {
+    LLDB_LOG(log, "No introspector available for class discovery");
+    m_updating_isa_to_descriptor = false;
+    return;
+  }
+  
+  // Get all runtime classes with their ISAs
+  auto classes_result = m_introspector_up->GetAllClassesWithISAs();
+  if (!classes_result) {
+    LLDB_LOG(log, "Failed to get runtime classes: {0}", 
+             llvm::toString(classes_result.takeError()));
+    m_updating_isa_to_descriptor = false;
+    return;
+  }
+  
+  size_t classes_added = 0;
+  size_t classes_updated = 0;
+  
+  // For each class, create a descriptor and add to the map
+  for (const auto &[isa, class_name] : *classes_result) {
+    // Skip invalid ISAs
+    if (isa == 0 || isa == LLDB_INVALID_ADDRESS) {
+      continue;
+    }
+    
+    // Check if we already have this class
+    ClassDescriptorSP existing = ObjCLanguageRuntime::GetClassDescriptorFromISA(isa);
+    if (existing) {
+      classes_updated++;
+      continue;
+    }
+    
+    // Create a new class descriptor
+    ClassDescriptorSP descriptor_sp = 
+        std::make_shared<GNUstepClassDescriptorV2>(*this, isa, class_name);
+    
+    if (descriptor_sp && descriptor_sp->IsValid()) {
+      AddClass(isa, descriptor_sp);
+      classes_added++;
+      LLDB_LOG(log, "Added class '{0}' with ISA 0x{1:x}", class_name, isa);
+    }
+  }
+  
+  LLDB_LOG(log, "Class discovery complete: {0} classes added, {1} already cached", 
+           classes_added, classes_updated);
+  
+  // Clear the recursion flag
+  m_updating_isa_to_descriptor = false;
 }
 
 ObjCLanguageRuntime::ClassDescriptorSP
@@ -1069,19 +1134,30 @@ GNUstepObjCRuntime::GetClassDescriptorFromISA(ObjCISA isa) {
   if (!isa)
     return ClassDescriptorSP();
   
-  // First check the base class cache
-  UpdateISAToDescriptorMap();
+  // First check the base class cache WITHOUT triggering a full update
   ClassDescriptorSP descriptor_sp = ObjCLanguageRuntime::GetClassDescriptorFromISA(isa);
   if (descriptor_sp)
     return descriptor_sp;
   
-  // Create a generic class descriptor for this ISA
-  // TODO: Replace with proper GNUstepClassDescriptor once integrated
-  descriptor_sp = ClassDescriptorSP();
+  // Don't enumerate all classes - just look up the one we need lazily
+  // This avoids calling objc_copyClassList for every single ISA lookup
+  
+  // Use the introspector to get class information for this specific ISA
+  if (!m_introspector_up)
+    return ClassDescriptorSP();
+    
+  std::string class_name = m_introspector_up->GetClassName(isa);
+  if (class_name.empty())
+    return ClassDescriptorSP();
+    
+  // Create a proper class descriptor with runtime introspection
+  descriptor_sp = std::make_shared<GNUstepClassDescriptorV2>(*this, isa, class_name);
   
   // Add to cache if valid
   if (descriptor_sp && descriptor_sp->IsValid()) {
     AddClass(isa, descriptor_sp);
+    LLDB_LOG(log, "GNUstepObjCRuntime::GetClassDescriptorFromISA: Lazily created descriptor for {0} (ISA: {1:x})", 
+             class_name, isa);
     return descriptor_sp;
   }
   
@@ -1193,9 +1269,8 @@ void GNUstepObjCRuntime::InitializeRuntimeAPI() {
 DeclVendor *GNUstepObjCRuntime::GetDeclVendor() {
   if (!m_decl_vendor_up) {
     Log *log = GetLog(LLDBLog::Process | LLDBLog::Types);
-    // TODO: Re-implement DeclVendor functionality after cleanup
-    // m_decl_vendor_up = std::make_unique<GNUstepObjCDeclVendor>(*this);
-    LLDB_LOG(log, "DeclVendor temporarily disabled during refactoring");
+    m_decl_vendor_up = std::make_unique<GNUstepObjCDeclVendor>(*this);
+    LLDB_LOG(log, "GNUstepObjCDeclVendor created");
   }
   
   return m_decl_vendor_up.get();

@@ -54,14 +54,19 @@ private:
     Array,
     Dictionary,
     Set,
-    Other
+    Other,
+    CustomClass
   };
   
   ObjectType m_type;
+  ObjCLanguageRuntime::ClassDescriptorSP m_class_descriptor;
   std::vector<lldb::ValueObjectSP> m_children_cache;
   
   // Helper methods
   lldb::ValueObjectSP EvaluateExpression(const std::string &expr);
+  lldb::ValueObjectSP GetArrayElementViaFunctionCaller(uint32_t idx);
+  lldb::ValueObjectSP GetSetElementViaFunctionCaller(uint32_t idx);
+  uint32_t GetCollectionCountViaFunctionCaller();
   ObjectType DetectObjectType();
   bool IsTaggedPointer() const { return (m_obj_addr & 0x1) != 0; }
 };

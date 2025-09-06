@@ -182,6 +182,9 @@ public:
 
   // Get all runtime classes as Class pointers
   llvm::Expected<std::vector<Class>> GetAllClasses();
+  
+  // Get all runtime classes with their ISA addresses and names
+  llvm::Expected<std::vector<std::pair<lldb::addr_t, std::string>>> GetAllClassesWithISAs();
 
   // Get all Foundation classes with full ClassInfo
   llvm::Expected<std::vector<ClassInfo>> GetAllFoundationClasses();
@@ -394,6 +397,11 @@ private:
   std::unordered_map<std::string, ClassInfo> m_class_cache;
   std::unordered_map<Class, std::string> m_class_name_cache;
   std::vector<std::string> m_foundation_classes;
+  
+  // Cache for all runtime classes to avoid repeated objc_copyClassList calls
+  mutable std::vector<std::pair<lldb::addr_t, std::string>> m_all_classes_cache;
+  mutable bool m_all_classes_cached = false;
+  mutable uint32_t m_cached_stop_id = UINT32_MAX;
 };
 
 } // namespace lldb_private

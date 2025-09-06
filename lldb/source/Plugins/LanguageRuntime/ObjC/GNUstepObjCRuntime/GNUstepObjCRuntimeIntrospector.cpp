@@ -603,6 +603,7 @@ lldb::ModuleSP GNUstepObjCRuntimeIntrospector::GetFoundationModule() const {
 void GNUstepObjCRuntimeIntrospector::EnsureRuntimeSymbolsLoaded() {
   if (!m_runtime_symbols_loaded && m_process) {
     LoadRuntimeSymbols();
+    InitializeRuntimeFunctions();  // Also initialize the m_runtime struct
     m_runtime_symbols_loaded = true;
   }
 }
@@ -967,12 +968,19 @@ GNUstepObjCRuntimeIntrospector::GetClassMethods(lldb::addr_t class_ptr) {
 lldb::addr_t GNUstepObjCRuntimeIntrospector::CallRuntimeFunction(
     const std::string &function_name, const std::vector<lldb::addr_t> &args) {
   
+  fprintf(stderr, "[DEBUG] CallRuntimeFunction: called for '%s' with %zu args\n",
+          function_name.c_str(), args.size());
+  
   if (!m_runtime_caller) {
+    fprintf(stderr, "[DEBUG] CallRuntimeFunction: m_runtime_caller is NULL!\n");
     return LLDB_INVALID_ADDRESS;
   }
 
   // Delegate to the consolidated runtime function caller
-  return m_runtime_caller->CallRuntimeFunction(function_name, args);
+  lldb::addr_t result = m_runtime_caller->CallRuntimeFunction(function_name, args);
+  fprintf(stderr, "[DEBUG] CallRuntimeFunction: '%s' returned 0x%llx\n",
+          function_name.c_str(), (unsigned long long)result);
+  return result;
 }
 
 // Runtime class enumeration methods for dynamic formatter registration
@@ -1256,4 +1264,227 @@ llvm::Expected<std::vector<uint8_t>> GNUstepObjCRuntimeIntrospector::ReadMemory(
   }
 
   return buffer;
+}
+
+llvm::Expected<std::vector<GNUstepObjCRuntimeIntrospector::IvarInfo>>
+GNUstepObjCRuntimeIntrospector::GetAllIvarsIncludingInherited(Class cls) {
+  std::vector<IvarInfo> all_ivars;
+  
+  fprintf(stderr, "[DEBUG] GetAllIvarsIncludingInherited: called with cls=0x%llx\n", 
+          (unsigned long long)cls);
+  
+  if (!cls || cls == (void*)LLDB_INVALID_ADDRESS) {
+    fprintf(stderr, "[DEBUG] GetAllIvarsIncludingInherited: Invalid class pointer\n");
+    return CreateError("Invalid class pointer");
+  }
+  
+  // Check if we have the runtime functions available
+  if (!m_runtime.class_copyIvarList || !m_runtime.ivar_getName || 
+      !m_runtime.ivar_getTypeEncoding || !m_runtime.ivar_getOffset) {
+    fprintf(stderr, "[DEBUG] GetAllIvarsIncludingInherited: Runtime functions not available\n");
+    return CreateError("Runtime functions not available");
+  }
+  
+  // Walk up the class hierarchy and collect ivars
+  lldb::addr_t current_class = (lldb::addr_t)cls;
+  
+  while (current_class && current_class != LLDB_INVALID_ADDRESS) {
+    fprintf(stderr, "[DEBUG] GetAllIvarsIncludingInherited: Processing class at 0x%llx\n",
+            (unsigned long long)current_class);
+    
+    // Call class_copyIvarList through runtime function pointer
+    // We need to allocate memory in the target process for the output count
+    Status error;
+    lldb::addr_t count_addr = m_process->AllocateMemory(sizeof(unsigned int), 
+                                                         ePermissionsReadable | ePermissionsWritable, 
+                                                         error);
+    if (error.Fail() || count_addr == LLDB_INVALID_ADDRESS) {
+      fprintf(stderr, "[DEBUG] GetAllIvarsIncludingInherited: Failed to allocate memory for count\n");
+      continue;
+    }
+    
+    // Initialize count to 0
+    unsigned int zero = 0;
+    m_process->WriteMemory(count_addr, &zero, sizeof(unsigned int), error);
+    
+    std::vector<lldb::addr_t> args = {current_class, count_addr};
+    
+    // We need to use CallRuntimeFunction to get the ivar list
+    lldb::addr_t ivar_list_ptr = CallRuntimeFunction("class_copyIvarList", args);
+    
+    // Read the count back from target memory
+    unsigned int ivar_count = 0;
+    m_process->ReadMemory(count_addr, &ivar_count, sizeof(unsigned int), error);
+    
+    // Free the count memory
+    m_process->DeallocateMemory(count_addr);
+    
+    if (ivar_list_ptr && ivar_list_ptr != LLDB_INVALID_ADDRESS && ivar_count > 0) {
+      fprintf(stderr, "[DEBUG] GetAllIvarsIncludingInherited: Got ivar list at 0x%llx with %u ivars\n",
+              (unsigned long long)ivar_list_ptr, ivar_count);
+      
+      // Read the ivar array
+      for (unsigned int i = 0; i < ivar_count; i++) {
+        // Read the Ivar pointer from the array
+        Status error;
+        lldb::addr_t ivar_ptr = m_process->ReadPointerFromMemory(
+            ivar_list_ptr + (i * m_address_size), error);
+        
+        if (error.Fail() || ivar_ptr == 0 || ivar_ptr == LLDB_INVALID_ADDRESS) {
+          fprintf(stderr, "[DEBUG] GetAllIvarsIncludingInherited: Failed to read ivar pointer at index %u\n", i);
+          continue;
+        }
+        
+        // Get ivar name
+        args = {ivar_ptr};
+        lldb::addr_t name_ptr = CallRuntimeFunction("ivar_getName", args);
+        std::string ivar_name;
+        if (name_ptr && name_ptr != LLDB_INVALID_ADDRESS) {
+          auto name_result = ReadCStringFromTarget(name_ptr);
+          if (name_result) {
+            ivar_name = *name_result;
+          }
+        }
+        
+        // Get ivar type encoding
+        lldb::addr_t type_ptr = CallRuntimeFunction("ivar_getTypeEncoding", args);
+        std::string type_encoding;
+        if (type_ptr && type_ptr != LLDB_INVALID_ADDRESS) {
+          auto type_result = ReadCStringFromTarget(type_ptr);
+          if (type_result) {
+            type_encoding = *type_result;
+          }
+        }
+        
+        // Get ivar offset
+        lldb::addr_t offset = CallRuntimeFunction("ivar_getOffset", args);
+        
+        fprintf(stderr, "[DEBUG] GetAllIvarsIncludingInherited: Ivar %u: name='%s', type='%s', offset=%lld\n",
+                i, ivar_name.c_str(), type_encoding.c_str(), (long long)offset);
+        
+        IvarInfo info;
+        info.name = ivar_name;
+        info.type_encoding = type_encoding;
+        info.offset = (ptrdiff_t)offset;
+        all_ivars.push_back(info);
+      }
+      
+      // Free the ivar list
+      if (m_runtime.free) {
+        args = {ivar_list_ptr};
+        CallRuntimeFunction("free", args);
+      }
+    }
+    
+    // Get superclass
+    args = {current_class};
+    current_class = CallRuntimeFunction("class_getSuperclass", args);
+    
+    fprintf(stderr, "[DEBUG] GetAllIvarsIncludingInherited: Superclass at 0x%llx\n",
+            (unsigned long long)current_class);
+  }
+  
+  fprintf(stderr, "[DEBUG] GetAllIvarsIncludingInherited: returning %zu total ivars\n", all_ivars.size());
+  
+  return all_ivars;
+}
+
+llvm::Expected<std::vector<GNUstepObjCRuntimeIntrospector::Class>>
+GNUstepObjCRuntimeIntrospector::GetAllClasses() {
+  std::vector<Class> classes;
+  
+  if (!m_process) {
+    return CreateError("No process available");
+  }
+  
+  EnsureRuntimeSymbolsLoaded();
+  
+  if (!m_runtime.objc_copyClassList) {
+    return CreateError("objc_copyClassList not available");
+  }
+  
+  // Allocate memory for count
+  Status error;
+  lldb::addr_t count_addr = m_process->AllocateMemory(sizeof(unsigned int),
+                                                       ePermissionsReadable | ePermissionsWritable,
+                                                       error);
+  if (error.Fail() || count_addr == LLDB_INVALID_ADDRESS) {
+    return CreateError("Failed to allocate memory for count");
+  }
+  
+  // Initialize count to 0
+  unsigned int zero = 0;
+  m_process->WriteMemory(count_addr, &zero, sizeof(unsigned int), error);
+  
+  // Call objc_copyClassList
+  std::vector<lldb::addr_t> args = {count_addr};
+  lldb::addr_t class_list_ptr = CallRuntimeFunction("objc_copyClassList", args);
+  
+  // Read the count
+  unsigned int count = 0;
+  m_process->ReadMemory(count_addr, &count, sizeof(unsigned int), error);
+  
+  // Free the count memory
+  m_process->DeallocateMemory(count_addr);
+  
+  if (class_list_ptr && class_list_ptr != LLDB_INVALID_ADDRESS && count > 0) {
+    // Read the class pointers
+    for (unsigned int i = 0; i < count; i++) {
+      lldb::addr_t class_ptr = m_process->ReadPointerFromMemory(
+          class_list_ptr + (i * m_address_size), error);
+      if (!error.Fail() && class_ptr && class_ptr != LLDB_INVALID_ADDRESS) {
+        classes.push_back((Class)class_ptr);
+      }
+    }
+    
+    // Free the class list
+    if (m_runtime.free) {
+      args = {class_list_ptr};
+      CallRuntimeFunction("free", args);
+    }
+  }
+  
+  return classes;
+}
+
+llvm::Expected<std::vector<std::pair<lldb::addr_t, std::string>>>
+GNUstepObjCRuntimeIntrospector::GetAllClassesWithISAs() {
+  // Use session-based caching since the class list doesn't change during debugging
+  // unless new classes are dynamically loaded (which is rare)
+  if (m_all_classes_cached) {
+    // Cache is valid for the entire session, return cached data
+    static int cache_hits = 0;
+    cache_hits++;
+    if (cache_hits % 100 == 1) {  // Only log every 100th hit to reduce noise
+      fprintf(stderr, "[DEBUG] GetAllClassesWithISAs: Returning cached classes (hit #%d)\n", cache_hits);
+    }
+    return m_all_classes_cache;
+  }
+  
+  // Cache doesn't exist, enumerate classes once for the session
+  fprintf(stderr, "[DEBUG] GetAllClassesWithISAs: First call, enumerating all classes for this session\n");
+  
+  std::vector<std::pair<lldb::addr_t, std::string>> class_info;
+  
+  auto classes_result = GetAllClasses();
+  if (!classes_result) {
+    return classes_result.takeError();
+  }
+  
+  for (Class cls : *classes_result) {
+    lldb::addr_t isa = (lldb::addr_t)cls;
+    std::string name = GetClassName(isa);
+    if (!name.empty()) {
+      class_info.push_back({isa, name});
+    }
+  }
+  
+  // Update cache - valid for entire session
+  m_all_classes_cache = class_info;
+  m_all_classes_cached = true;
+  
+  fprintf(stderr, "[DEBUG] GetAllClassesWithISAs: Cached %zu classes for entire session\n", 
+          class_info.size());
+  
+  return class_info;
 }

@@ -102,6 +102,11 @@ public:
     return m_introspector_up.get(); 
   }
 
+  // Get the runtime function caller
+  gnustep_objc_runtime_utilities::RuntimeFunctionCaller *GetRuntimeFunctionCaller() {
+    return m_runtime_caller.get();
+  }
+
   // Get cached runtime symbol addresses for IR rewriting
   std::map<std::string, lldb::addr_t> GetObjCRuntimeAddresses();
 
@@ -128,6 +133,7 @@ private:
   // Reentrancy protection flags
   bool m_in_object_description = false;
   bool m_in_dynamic_type_check = false;
+  bool m_updating_isa_to_descriptor = false;
   // Consolidated runtime function caller
   std::unique_ptr<gnustep_objc_runtime_utilities::RuntimeFunctionCaller> m_runtime_caller;
 

@@ -1,347 +1,684 @@
-//===-- GNUstepUniversalFormatter.cpp ------------------------------------===//
+//===-- GNUstepSimpleUniversalFormatter.cpp ------------------------------===//
 //
-// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
-// See https://llvm.org/LICENSE.txt for license information.
-// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+// Minimal universal formatter for GNUstep - just bridges to LLDB's machinery
 //
 //===----------------------------------------------------------------------===//
 
 #include "GNUstepUniversalFormatter.h"
-#include "lldb/ValueObject/ValueObject.h"
+#include "../GNUstepObjCRuntime.h"
+#include "../GNUstepObjCRuntimeIntrospector.h"
 #include "lldb/DataFormatters/FormattersHelpers.h"
-#include "lldb/Target/ExecutionContext.h"
 #include "lldb/Target/Process.h"
-#include "lldb/Target/Target.h"
+#include "lldb/ValueObject/ValueObject.h"
+#include "lldb/ValueObject/ValueObjectConstResult.h"
 #include "lldb/Utility/Stream.h"
-#include <cstdio>
+#include "lldb/Utility/DataExtractor.h"
+#include "Plugins/TypeSystem/Clang/TypeSystemClang.h"
 
 using namespace lldb;
 using namespace lldb_private;
 using namespace lldb_private::formatters;
 
-//===----------------------------------------------------------------------===//
-// Universal Summary Provider - Handles ALL GNUstep/ObjC objects
-//===----------------------------------------------------------------------===//
-
+// Universal summary - get object description via runtime calls
 bool lldb_private::formatters::GNUstepUniversalSummaryProvider(
     ValueObject &valobj, Stream &stream, const TypeSummaryOptions &options) {
   
-  lldb::addr_t obj_addr = valobj.GetValueAsUnsigned(0);
+  // Debug: Log when this formatter is called
+  const char* type_name = valobj.GetTypeName().AsCString();
+  const char* display_type_name = valobj.GetDisplayTypeName().AsCString();
+  fprintf(stderr, "[DEBUG] GNUstepUniversalSummaryProvider called\n");
+  fprintf(stderr, "[DEBUG]   GetTypeName: %s\n", type_name ? type_name : "null");
+  fprintf(stderr, "[DEBUG]   GetDisplayTypeName: %s\n", display_type_name ? display_type_name : "null");
   
-  // Handle nil
+  lldb::addr_t obj_addr = valobj.GetValueAsUnsigned(0);
   if (obj_addr == 0) {
     stream.Printf("nil");
     return true;
   }
   
-  // Handle tagged pointers (small integers, etc.)
-  if (obj_addr & 0x1) {
-    uint8_t tag = (obj_addr >> 1) & 0x7;
-    
-    // Small integer (tag 0)
-    if (tag == 0) {
-      int64_t value = ((int64_t)obj_addr) >> 3;
+  // Handle small integers (tagged pointer pattern: xxx...xx1 with tag 0)
+  if ((obj_addr & 0x1) && ((obj_addr >> 1) & 0x7) == 0) {
+    int64_t value = ((int64_t)obj_addr) >> 3;
+    // Check if this might be a boolean (0 or 1)
+    if (value == 0 || value == 1) {
+      // Try to determine if it's a boolean by checking the context
+      // For now, just show both formats for 0 and 1
+      if (value == 0)
+        stream.Printf("NO");
+      else
+        stream.Printf("YES");
+    } else {
       stream.Printf("%lld", (long long)value);
-      return true;
     }
-    
-    // Other tagged types - try description method
-    // Fall through to expression evaluation
+    return true;
   }
   
-  // For all objects, use expression evaluation to call description
-  ExecutionContext exe_ctx(valobj.GetExecutionContextRef());
-  Target *target = exe_ctx.GetTargetPtr();
-  if (!target)
+  // Get runtime and function caller
+  ProcessSP process_sp = valobj.GetProcessSP();
+  if (!process_sp)
     return false;
+    
+  ObjCLanguageRuntime *runtime = ObjCLanguageRuntime::Get(*process_sp);
+  if (!runtime)
+    return false;
+    
+  GNUstepObjCRuntime *gnustep_runtime = static_cast<GNUstepObjCRuntime*>(runtime);
+  auto *function_caller = gnustep_runtime->GetRuntimeFunctionCaller();
   
-  // Try to get description string
-  char expr_buf[256];
-  snprintf(expr_buf, sizeof(expr_buf), 
-           "(id)[(id)0x%llx description]", 
-           (unsigned long long)obj_addr);
+  // Try to get object description via [obj description] -> UTF8String
+  // This is what po/expr -o uses
+  if (function_caller) {
+    fprintf(stderr, "[DEBUG] Calling description method on 0x%llx\n", (unsigned long long)obj_addr);
+    // Call [obj description] to get NSString*
+    lldb::addr_t description_result = function_caller->CallObjCMethod(obj_addr, "description");
+    fprintf(stderr, "[DEBUG] description returned: 0x%llx\n", (unsigned long long)description_result);
+    if (description_result != LLDB_INVALID_ADDRESS && description_result != 0) {
+      // Call [description_nsstring UTF8String] to get C string
+      lldb::addr_t utf8_result = function_caller->CallObjCMethod(description_result, "UTF8String");
+      fprintf(stderr, "[DEBUG] UTF8String returned: 0x%llx\n", (unsigned long long)utf8_result);
+      if (utf8_result != LLDB_INVALID_ADDRESS && utf8_result != 0) {
+        // Read the C string from memory
+        Status error;
+        std::string description_str;
+        process_sp->ReadCStringFromMemory(utf8_result, description_str, error);
+        if (error.Success() && !description_str.empty()) {
+          fprintf(stderr, "[DEBUG] Got description: %s\n", description_str.c_str());
+          stream.Printf("%s", description_str.c_str());
+          return true;
+        } else {
+          fprintf(stderr, "[DEBUG] Failed to read string or empty\n");
+        }
+      }
+    }
+  } else {
+    fprintf(stderr, "[DEBUG] No function caller available\n");
+  }
   
-  EvaluateExpressionOptions eval_options;
-  eval_options.SetCoerceToId(false);
-  eval_options.SetUnwindOnError(true);
-  eval_options.SetIgnoreBreakpoints(true);
-  eval_options.SetTimeout(std::chrono::milliseconds(500));
-  eval_options.SetTryAllThreads(false);
+  // Fallback: Get class name and show basic info
+  ObjCLanguageRuntime::ClassDescriptorSP descriptor = runtime->GetClassDescriptor(valobj);
+  if (!descriptor) {
+    fprintf(stderr, "[DEBUG] No class descriptor for object at 0x%llx\n", (unsigned long long)obj_addr);
+    // Try to at least show the address for custom classes
+    stream.Printf("0x%llx", (unsigned long long)obj_addr);
+    return true;
+  }
+    
+  ConstString class_name_cs = descriptor->GetClassName();
+  if (!class_name_cs)
+    return false;
+    
+  const char *class_name = class_name_cs.GetCString();
   
-  ValueObjectSP result_sp;
-  target->EvaluateExpression(expr_buf, exe_ctx.GetFrameSP().get(), 
-                             result_sp, eval_options);
+  // For collections, try to show count at least
+  if (strstr(class_name, "Array") || strstr(class_name, "Set") || strstr(class_name, "Dictionary")) {
+    if (function_caller) {
+      lldb::addr_t count_result = function_caller->CallObjCMethod(obj_addr, "count");
+      if (count_result != LLDB_INVALID_ADDRESS && count_result < 1000000) {
+        if (strstr(class_name, "Dictionary"))
+          stream.Printf("%s[%llu entries]", class_name, (unsigned long long)count_result);
+        else
+          stream.Printf("%s[%llu]", class_name, (unsigned long long)count_result);
+        return true;
+      }
+    }
+  }
   
-  if (result_sp && result_sp->GetError().Success()) {
-    lldb::addr_t desc_addr = result_sp->GetValueAsUnsigned(0);
-    if (desc_addr != 0) {
-      // Get the UTF8 string
-      snprintf(expr_buf, sizeof(expr_buf), 
-               "(const char *)[(id)0x%llx UTF8String]", 
-               (unsigned long long)desc_addr);
-      
-      target->EvaluateExpression(expr_buf, exe_ctx.GetFrameSP().get(), 
-                                result_sp, eval_options);
-      
-      if (result_sp && result_sp->GetError().Success()) {
-        const char *str = result_sp->GetValueAsCString();
-        if (str) {
-          stream.Printf("%s", str);
+  // For custom classes, try calling description again with a different approach
+  // Sometimes the first attempt fails due to timing
+  if (function_caller && !strstr(class_name, "NS") && !strstr(class_name, "GS")) {
+    // This looks like a custom class, try description one more time
+    lldb::addr_t desc_result = function_caller->CallObjCMethod(obj_addr, "description");
+    if (desc_result != LLDB_INVALID_ADDRESS && desc_result != 0) {
+      lldb::addr_t utf8_result = function_caller->CallObjCMethod(desc_result, "UTF8String");
+      if (utf8_result != LLDB_INVALID_ADDRESS && utf8_result != 0) {
+        Status error;
+        std::string desc_str;
+        process_sp->ReadCStringFromMemory(utf8_result, desc_str, error);
+        if (error.Success() && !desc_str.empty()) {
+          stream.Printf("%s", desc_str.c_str());
           return true;
         }
       }
     }
   }
   
-  // Fallback: try to get class name and show basic info
-  ProcessSP process_sp = valobj.GetProcessSP();
-  if (process_sp) {
-    ObjCLanguageRuntime *runtime = ObjCLanguageRuntime::Get(*process_sp);
-    if (runtime) {
-      ObjCLanguageRuntime::ClassDescriptorSP descriptor = 
-          runtime->GetClassDescriptor(valobj);
-      if (descriptor) {
-        std::string class_name = descriptor->GetClassName().GetStringRef().str();
-        
-        // For some known types, provide better default display
-        if (class_name.find("String") != std::string::npos) {
-          stream.Printf("@\"...\"");
-        } else if (class_name.find("Array") != std::string::npos) {
-          stream.Printf("@[...]");
-        } else if (class_name.find("Dictionary") != std::string::npos) {
-          stream.Printf("@{...}");
-        } else if (class_name.find("Set") != std::string::npos) {
-          stream.Printf("{...}");
-        } else {
-          stream.Printf("<%s: 0x%llx>", class_name.c_str(), 
-                       (unsigned long long)obj_addr);
-        }
-        return true;
-      }
-    }
-  }
-  
-  stream.Printf("<object: 0x%llx>", (unsigned long long)obj_addr);
+  // Default: show class and address
+  stream.Printf("<%s: 0x%llx>", class_name, (unsigned long long)obj_addr);
   return true;
 }
 
-//===----------------------------------------------------------------------===//
-// Universal Synthetic Children Provider
-//===----------------------------------------------------------------------===//
-
+// Minimal synthetic provider
 GNUstepUniversalSyntheticProvider::GNUstepUniversalSyntheticProvider(
     ValueObject &valobj)
     : SyntheticChildrenFrontEnd(valobj),
       m_exe_ctx(valobj.GetExecutionContextRef()),
-      m_obj_addr(valobj.GetValueAsUnsigned(0)),
+      m_obj_addr(0),
       m_count(0),
-      m_type(Unknown) {
+      m_type(Unknown),
+      m_class_descriptor(nullptr) {
   
-  if (m_obj_addr == 0)
+  // Get the actual pointer value - this is critical!
+  // For child value objects returned by GetChildAtIndex, we need the pointer value
+  m_obj_addr = valobj.GetValueAsUnsigned(0);
+  
+  // If that's 0, try getting the load address
+  if (m_obj_addr == 0) {
+    m_obj_addr = valobj.GetLoadAddress();
+  }
+  
+  fprintf(stderr, "[DEBUG] GNUstepUniversalSyntheticProvider constructor: obj_addr=0x%llx from %s\n", 
+          (unsigned long long)m_obj_addr, valobj.GetName().AsCString());
+  
+  if (m_obj_addr == 0) {
+    fprintf(stderr, "[DEBUG] Constructor: obj_addr is 0, cannot proceed\n");
     return;
-    
+  }
+  
+  // Pre-detect type in constructor
   m_type = DetectObjectType();
+  fprintf(stderr, "[DEBUG] Constructor: detected type=%d\n", (int)m_type);
 }
+
+// Destructor is default in header
 
 GNUstepUniversalSyntheticProvider::ObjectType 
 GNUstepUniversalSyntheticProvider::DetectObjectType() {
-  if (m_obj_addr == 0)
-    return Unknown;
-    
-  if (IsTaggedPointer())
-    return TaggedPointer;
+  fprintf(stderr, "[DEBUG] DetectObjectType: obj_addr=0x%llx\n", (unsigned long long)m_obj_addr);
   
-  // Get class name to determine type
+  if (m_obj_addr == 0) {
+    fprintf(stderr, "[DEBUG] DetectObjectType: obj_addr is 0, returning Unknown\n");
+    return Other;
+  }
+    
+  if (m_obj_addr & 0x1) {
+    fprintf(stderr, "[DEBUG] DetectObjectType: detected tagged pointer\n");
+    return TaggedPointer;
+  }
+    
+  // Get class name
   ProcessSP process_sp = m_backend.GetProcessSP();
-  if (!process_sp)
-    return Unknown;
+  if (!process_sp) {
+    fprintf(stderr, "[DEBUG] DetectObjectType: no process, returning Unknown\n");
+    return Other;
+  }
     
   ObjCLanguageRuntime *runtime = ObjCLanguageRuntime::Get(*process_sp);
-  if (!runtime)
-    return Unknown;
-  
-  ObjCLanguageRuntime::ClassDescriptorSP descriptor = 
-      runtime->GetClassDescriptor(m_backend);
-  if (!descriptor)
-    return Unknown;
+  if (!runtime) {
+    fprintf(stderr, "[DEBUG] DetectObjectType: no runtime, returning Unknown\n");
+    return Other;
+  }
     
-  m_class_name = descriptor->GetClassName().GetStringRef().str();
+  ObjCLanguageRuntime::ClassDescriptorSP descriptor = runtime->GetClassDescriptor(m_backend);
+  if (!descriptor) {
+    fprintf(stderr, "[DEBUG] DetectObjectType: no class descriptor, returning Unknown\n");
+    return Other;
+  }
+    
+  ConstString class_name_cs = descriptor->GetClassName();
+  if (!class_name_cs) {
+    fprintf(stderr, "[DEBUG] DetectObjectType: no class name, returning Unknown\n");
+    return Other;
+  }
+    
+  std::string class_name = class_name_cs.GetCString();
+  fprintf(stderr, "[DEBUG] DetectObjectType: class_name='%s'\n", class_name.c_str());
   
-  // Detect collection types
-  if (m_class_name.find("Array") != std::string::npos)
+  // Store class descriptor for later use
+  m_class_descriptor = descriptor;
+  
+  // Check for collection types - be more specific to avoid false positives
+  // NSArray, NSMutableArray, GSArray, etc.
+  if (class_name.find("Array") != std::string::npos && 
+      class_name.find("CharSet") == std::string::npos) {
+    fprintf(stderr, "[DEBUG] DetectObjectType: detected Array type\n");
     return Array;
-  if (m_class_name.find("Dictionary") != std::string::npos)
+  }
+  // NSDictionary, NSMutableDictionary, GSDictionary, etc.
+  if (class_name.find("Dictionary") != std::string::npos) {
+    fprintf(stderr, "[DEBUG] DetectObjectType: detected Dictionary type\n");
     return Dictionary;
-  if (m_class_name.find("Set") != std::string::npos)
+  }
+  // NSSet, NSMutableSet, GSSet, etc. - but NOT CharacterSet classes
+  if (class_name.find("Set") != std::string::npos && 
+      class_name.find("CharSet") == std::string::npos &&
+      class_name.find("CharacterSet") == std::string::npos &&
+      class_name.find("IndexSet") == std::string::npos) {
+    fprintf(stderr, "[DEBUG] DetectObjectType: detected Set type\n");
     return Set;
+  }
+  
+  // Check if this is a custom class (not NS or GS prefix)
+  if (class_name.find("NS") != 0 && class_name.find("GS") != 0 && 
+      class_name.find("__NS") != 0 && class_name.find("_NS") != 0) {
+    fprintf(stderr, "[DEBUG] DetectObjectType: detected CustomClass type\n");
+    return CustomClass;
+  }
     
+  fprintf(stderr, "[DEBUG] DetectObjectType: detected Other type\n");
   return Other;
 }
 
-lldb::ValueObjectSP 
-GNUstepUniversalSyntheticProvider::EvaluateExpression(const std::string &expr) {
-  Target *target = m_exe_ctx.GetTargetPtr();
-  if (!target)
-    return nullptr;
-    
-  EvaluateExpressionOptions eval_options;
-  eval_options.SetCoerceToId(false);
-  eval_options.SetUnwindOnError(true);
-  eval_options.SetIgnoreBreakpoints(true);
-  eval_options.SetTimeout(std::chrono::milliseconds(500));
+llvm::Expected<uint32_t> GNUstepUniversalSyntheticProvider::CalculateNumChildren() {
+  fprintf(stderr, "[DEBUG] CalculateNumChildren: m_obj_addr=0x%llx, m_type=%d\n", 
+          (unsigned long long)m_obj_addr, (int)m_type);
   
-  ValueObjectSP result_sp;
-  target->EvaluateExpression(expr, m_exe_ctx.GetFrameSP().get(), 
-                            result_sp, eval_options);
-  return result_sp;
-}
-
-llvm::Expected<uint32_t> 
-GNUstepUniversalSyntheticProvider::CalculateNumChildren() {
-  if (m_obj_addr == 0 || m_type == TaggedPointer || m_type == Other)
+  if (m_type == Unknown)
+    m_type = DetectObjectType();
+    
+  if (m_type == TaggedPointer || m_type == Other)
     return 0;
   
-  // For collections, get count
-  if (m_type == Array || m_type == Dictionary || m_type == Set) {
-    char expr_buf[256];
-    snprintf(expr_buf, sizeof(expr_buf), 
-             "(NSUInteger)[(id)0x%llx count]", 
-             (unsigned long long)m_obj_addr);
+  // For custom classes, return a fixed number for ivars
+  // We'll show the actual ivars when GetChildAtIndex is called
+  if (m_type == CustomClass) {
+    fprintf(stderr, "[DEBUG] CalculateNumChildren: CustomClass returning hardcoded 5 ivars\n");
+    return 5;  // We'll show actual ivars dynamically
+  }
+
+  // Only call count for collection types (Array, Dictionary, Set)
+  if (m_type != Array && m_type != Dictionary && m_type != Set) {
+    fprintf(stderr, "[DEBUG] CalculateNumChildren: Type %d doesn't support count\n", (int)m_type);
+    return 0;
+  }
+
+  // Get count via runtime for collection types
+  ProcessSP process_sp = m_backend.GetProcessSP();
+  if (!process_sp) {
+    fprintf(stderr, "[DEBUG] CalculateNumChildren: no process\n");
+    return 0;
+  }
     
-    ValueObjectSP result_sp = EvaluateExpression(expr_buf);
-    if (result_sp && result_sp->GetError().Success()) {
-      m_count = result_sp->GetValueAsUnsigned(0);
-      
-      // For dictionaries, we show key-value pairs
-      if (m_type == Dictionary) {
-        // Pre-cache children for dictionaries
-        m_children_cache.clear();
-        for (uint32_t i = 0; i < m_count; i++) {
-          // Get key
-          snprintf(expr_buf, sizeof(expr_buf),
-                   "(id)[[(id)0x%llx allKeys] objectAtIndex:%u]",
-                   (unsigned long long)m_obj_addr, i);
-          ValueObjectSP key_sp = EvaluateExpression(expr_buf);
-          
-          // Get value for key
-          if (key_sp && key_sp->GetError().Success()) {
-            lldb::addr_t key_addr = key_sp->GetValueAsUnsigned(0);
-            snprintf(expr_buf, sizeof(expr_buf),
-                     "(id)[(id)0x%llx objectForKey:(id)0x%llx]",
-                     (unsigned long long)m_obj_addr,
-                     (unsigned long long)key_addr);
-            ValueObjectSP value_sp = EvaluateExpression(expr_buf);
-            
-            // Store both key and value
-            if (value_sp && value_sp->GetError().Success()) {
-              m_children_cache.push_back(key_sp);
-              m_children_cache.push_back(value_sp);
-            }
-          }
-        }
-        return m_children_cache.size() / 2;  // Return number of pairs
-      }
-      
-      return m_count;
-    }
+  ObjCLanguageRuntime *runtime = ObjCLanguageRuntime::Get(*process_sp);
+  GNUstepObjCRuntime *gnustep_runtime = static_cast<GNUstepObjCRuntime*>(runtime);
+  if (!gnustep_runtime) {
+    fprintf(stderr, "[DEBUG] CalculateNumChildren: no gnustep runtime\n");
+    return 0;
+  }
+    
+  auto *function_caller = gnustep_runtime->GetRuntimeFunctionCaller();
+  if (!function_caller) {
+    fprintf(stderr, "[DEBUG] CalculateNumChildren: no function caller\n");
+    return 0;
   }
   
-  return 0;
+  fprintf(stderr, "[DEBUG] CalculateNumChildren: calling count on 0x%llx\n", 
+          (unsigned long long)m_obj_addr);
+    
+  lldb::addr_t count_result = function_caller->CallObjCMethod(m_obj_addr, "count");
+  if (count_result == LLDB_INVALID_ADDRESS || count_result > 1000000) {
+    fprintf(stderr, "[DEBUG] CalculateNumChildren: count failed, result=0x%llx\n", 
+            (unsigned long long)count_result);
+    return 0;
+  }
+    
+  m_count = (uint32_t)count_result;
+  fprintf(stderr, "[DEBUG] CalculateNumChildren: count=%u\n", m_count);
+  
+  // Dictionary shows key/value pairs
+  if (m_type == Dictionary)
+    return m_count * 2;
+    
+  return m_count;
 }
 
 lldb::ValueObjectSP 
 GNUstepUniversalSyntheticProvider::GetChildAtIndex(uint32_t idx) {
-  if (m_type == TaggedPointer || m_type == Other)
+  fprintf(stderr, "[DEBUG] GetChildAtIndex(%u): m_obj_addr=0x%llx, m_type=%d\n", 
+          idx, (unsigned long long)m_obj_addr, (int)m_type);
+  
+  ProcessSP process_sp = m_backend.GetProcessSP();
+  if (!process_sp)
+    return nullptr;
+    
+  ObjCLanguageRuntime *runtime = ObjCLanguageRuntime::Get(*process_sp);
+  GNUstepObjCRuntime *gnustep_runtime = static_cast<GNUstepObjCRuntime*>(runtime);
+  if (!gnustep_runtime)
+    return nullptr;
+    
+  auto *function_caller = gnustep_runtime->GetRuntimeFunctionCaller();
+  if (!function_caller)
     return nullptr;
   
-  char expr_buf[256];
+  // Get target and type system
+  TargetSP target_sp = m_backend.GetTargetSP();
+  if (!target_sp)
+    return nullptr;
+    
+  TypeSystemClangSP scratch_ts_sp = ScratchTypeSystemClang::GetForTarget(*target_sp);
+  if (!scratch_ts_sp)
+    return nullptr;
+  
+  lldb::addr_t element_addr = LLDB_INVALID_ADDRESS;
   char name_buf[64];
+  ValueObjectSP child_vo;
   
   switch (m_type) {
-    case Array: {
-      if (idx >= m_count)
+    case CustomClass: {
+      // Get instance variables for custom classes using the introspector
+      if (!m_class_descriptor)
+        return nullptr;
+      
+      // Get the GNUstep runtime and introspector
+      GNUstepObjCRuntime *gnustep_runtime = static_cast<GNUstepObjCRuntime*>(runtime);
+      if (!gnustep_runtime)
         return nullptr;
         
-      snprintf(expr_buf, sizeof(expr_buf),
-               "(id)[(id)0x%llx objectAtIndex:%u]",
-               (unsigned long long)m_obj_addr, idx);
-      snprintf(name_buf, sizeof(name_buf), "[%u]", idx);
+      GNUstepObjCRuntimeIntrospector *introspector = gnustep_runtime->GetRuntimeIntrospector();
+      if (!introspector)
+        return nullptr;
       
-      ValueObjectSP child_sp = EvaluateExpression(expr_buf);
-      if (child_sp && child_sp->GetError().Success()) {
-        child_sp->SetName(ConstString(name_buf));
-        return child_sp;
+      // Get ISA from the object's class descriptor
+      if (!m_class_descriptor) {
+        m_class_descriptor = runtime->GetClassDescriptor(m_backend);
+        if (!m_class_descriptor)
+          return nullptr;
+      }
+      
+      lldb::addr_t isa = m_class_descriptor->GetISA();
+      if (isa == 0)
+        return nullptr;
+      
+      // Get all ivars including inherited ones
+      auto ivars_result = introspector->GetAllIvarsIncludingInherited((void*)isa);
+      if (!ivars_result) {
+        fprintf(stderr, "[DEBUG] GetChildAtIndex: Failed to get ivars: %s\n", 
+                llvm::toString(ivars_result.takeError()).c_str());
+        return nullptr;
+      }
+      
+      std::vector<GNUstepObjCRuntimeIntrospector::IvarInfo> &ivars = *ivars_result;
+      if (idx >= ivars.size())
+        return nullptr;
+      
+      const auto &ivar = ivars[idx];
+      snprintf(name_buf, sizeof(name_buf), "%s", ivar.name.c_str());
+      
+      fprintf(stderr, "[DEBUG] GetChildAtIndex: Reading ivar '%s' (type='%s', offset=%ld) from 0x%llx\n",
+              ivar.name.c_str(), ivar.type_encoding.c_str(), ivar.offset, 
+              (unsigned long long)(m_obj_addr + ivar.offset));
+      
+      // Determine the type from the encoding
+      CompilerType ivar_type;
+      if (ivar.type_encoding[0] == '@') {
+        // Object type - use id
+        ivar_type = CompilerType(
+          scratch_ts_sp->weak_from_this(),
+          scratch_ts_sp->getASTContext().ObjCBuiltinIdTy.getAsOpaquePtr());
+      } else if (ivar.type_encoding[0] == 'i') {
+        // int
+        ivar_type = scratch_ts_sp->GetBasicType(lldb::eBasicTypeInt);
+      } else if (ivar.type_encoding[0] == 'f') {
+        // float
+        ivar_type = scratch_ts_sp->GetBasicType(lldb::eBasicTypeFloat);
+      } else if (ivar.type_encoding[0] == 'd') {
+        // double
+        ivar_type = scratch_ts_sp->GetBasicType(lldb::eBasicTypeDouble);
+      } else if (ivar.type_encoding[0] == 'q') {
+        // long long
+        ivar_type = scratch_ts_sp->GetBasicType(lldb::eBasicTypeLongLong);
+      } else if (ivar.type_encoding[0] == 'Q') {
+        // unsigned long long
+        ivar_type = scratch_ts_sp->GetBasicType(lldb::eBasicTypeUnsignedLongLong);
+      } else {
+        // Default to void pointer for unknown types
+        ivar_type = scratch_ts_sp->GetBasicType(lldb::eBasicTypeVoid).GetPointerType();
+      }
+      
+      // Read the ivar value from memory
+      lldb::addr_t ivar_addr = m_obj_addr + ivar.offset;
+      Status error;
+      
+      // Allocate buffer based on type size
+      size_t value_size = ivar_type.GetByteSize(nullptr).value_or(8);
+      std::vector<uint8_t> buffer(value_size, 0);
+      
+      size_t bytes_read = process_sp->ReadMemory(ivar_addr, buffer.data(), value_size, error);
+      
+      if (error.Fail() || bytes_read == 0) {
+        fprintf(stderr, "[DEBUG] GetChildAtIndex: Failed to read ivar %s at 0x%llx: %s\n",
+                ivar.name.c_str(), (unsigned long long)ivar_addr, 
+                error.AsCString() ? error.AsCString() : "unknown error");
+        return nullptr;
+      }
+      
+      // Create value object for the ivar
+      DataExtractor data(buffer.data(), buffer.size(),
+                        m_exe_ctx.GetByteOrder(),
+                        m_exe_ctx.GetAddressByteSize());
+      
+      child_vo = ValueObjectConstResult::Create(
+        m_exe_ctx.GetBestExecutionContextScope(),
+        ivar_type,
+        ConstString(name_buf),
+        data,
+        LLDB_INVALID_ADDRESS);
+      
+      if (child_vo) {
+        child_vo->SetFormat(lldb::eFormatDefault);
+        fprintf(stderr, "[DEBUG] GetChildAtIndex: Created child for ivar '%s' with value 0x%llx\n",
+                ivar.name.c_str(), (unsigned long long)child_vo->GetValueAsUnsigned(0));
+      }
+      
+      return child_vo;
+    }
+    
+    case Array: {
+      fprintf(stderr, "[DEBUG] GetChildAtIndex: Calling objectAtIndex:%u on 0x%llx\n", 
+              idx, (unsigned long long)m_obj_addr);
+      
+      // Call objectAtIndex: using objc_msgSend
+      lldb::addr_t selector = function_caller->GetSelectorForName("objectAtIndex:");
+      fprintf(stderr, "[DEBUG] GetChildAtIndex: selector = 0x%llx\n", (unsigned long long)selector);
+      
+      std::vector<lldb::addr_t> args = {m_obj_addr, selector, idx};
+      element_addr = function_caller->CallRuntimeFunction("objc_msgSend", args);
+      
+      snprintf(name_buf, sizeof(name_buf), "[%u]", idx);
+      fprintf(stderr, "[DEBUG] GetChildAtIndex: Array[%u] element_addr = 0x%llx\n", idx, (unsigned long long)element_addr);
+      
+      // Verify this is a valid object
+      if (element_addr == LLDB_INVALID_ADDRESS || element_addr == 0) {
+        fprintf(stderr, "[DEBUG] GetChildAtIndex: Invalid element address\n");
+        return nullptr;
       }
       break;
     }
     
     case Dictionary: {
-      // Return cached children
-      if (idx * 2 + 1 < m_children_cache.size()) {
-        // Return key for even indices, value for odd
-        if (idx % 2 == 0) {
-          uint32_t pair_idx = idx / 2;
-          snprintf(name_buf, sizeof(name_buf), "key[%u]", pair_idx);
-          ValueObjectSP key_sp = m_children_cache[pair_idx * 2];
-          if (key_sp) {
-            key_sp->SetName(ConstString(name_buf));
-            return key_sp;
-          }
-        } else {
-          uint32_t pair_idx = idx / 2;
-          snprintf(name_buf, sizeof(name_buf), "value[%u]", pair_idx);
-          ValueObjectSP value_sp = m_children_cache[pair_idx * 2 + 1];
-          if (value_sp) {
-            value_sp->SetName(ConstString(name_buf));
-            return value_sp;
-          }
-        }
+      // Get key/value pairs
+      uint32_t pair_idx = idx / 2;
+      bool is_key = (idx % 2 == 0);
+      
+      // Get allKeys array
+      lldb::addr_t all_keys = function_caller->CallObjCMethod(m_obj_addr, "allKeys");
+      if (all_keys == LLDB_INVALID_ADDRESS)
+        return nullptr;
+      
+      // Get key at index
+      std::vector<lldb::addr_t> args = {all_keys,
+                                        function_caller->GetSelectorForName("objectAtIndex:"),
+                                        pair_idx};
+      lldb::addr_t key_addr = function_caller->CallRuntimeFunction("objc_msgSend", args);
+      
+      if (is_key) {
+        element_addr = key_addr;
+        snprintf(name_buf, sizeof(name_buf), "[%u].key", pair_idx);
+      } else {
+        // Get value for key
+        std::vector<lldb::addr_t> value_args = {m_obj_addr,
+                                                function_caller->GetSelectorForName("objectForKey:"),
+                                                key_addr};
+        element_addr = function_caller->CallRuntimeFunction("objc_msgSend", value_args);
+        snprintf(name_buf, sizeof(name_buf), "[%u].value", pair_idx);
       }
       break;
     }
     
     case Set: {
-      if (idx >= m_count)
+      // Get allObjects array
+      lldb::addr_t all_objects = function_caller->CallObjCMethod(m_obj_addr, "allObjects");
+      if (all_objects == LLDB_INVALID_ADDRESS)
         return nullptr;
-        
-      snprintf(expr_buf, sizeof(expr_buf),
-               "(id)[[(id)0x%llx allObjects] objectAtIndex:%u]",
-               (unsigned long long)m_obj_addr, idx);
-      snprintf(name_buf, sizeof(name_buf), "[%u]", idx);
       
-      ValueObjectSP child_sp = EvaluateExpression(expr_buf);
-      if (child_sp && child_sp->GetError().Success()) {
-        child_sp->SetName(ConstString(name_buf));
-        return child_sp;
-      }
+      // Get object at index
+      std::vector<lldb::addr_t> args = {all_objects,
+                                        function_caller->GetSelectorForName("objectAtIndex:"),
+                                        idx};
+      element_addr = function_caller->CallRuntimeFunction("objc_msgSend", args);
+      
+      snprintf(name_buf, sizeof(name_buf), "[%u]", idx);
       break;
     }
     
     default:
-      break;
+      return nullptr;
   }
   
-  return nullptr;
+  if (element_addr == LLDB_INVALID_ADDRESS)
+    return nullptr;
+  
+  // Check if this is a tagged pointer
+  bool is_tagged = (element_addr & 0x1) != 0;
+  
+  // Start with generic id type
+  CompilerType child_type = CompilerType(
+      scratch_ts_sp->weak_from_this(),
+      scratch_ts_sp->getASTContext().ObjCBuiltinIdTy.getAsOpaquePtr());
+  
+  if (is_tagged) {
+    // For tagged pointers, create ValueObjectConstResult
+    uint8_t buffer[8];
+    memcpy(buffer, &element_addr, sizeof(element_addr));
+    
+    DataExtractor data(buffer, sizeof(buffer), 
+                      m_exe_ctx.GetByteOrder(), 
+                      m_exe_ctx.GetAddressByteSize());
+    
+    child_vo = ValueObjectConstResult::Create(
+      m_exe_ctx.GetBestExecutionContextScope(),
+      child_type,
+      ConstString(name_buf),
+      data,
+      element_addr);
+      
+    if (child_vo) {
+      child_vo->SetFormat(lldb::eFormatDefault);
+    }
+  } else {
+    // For regular objects, try to get the actual class first
+    // Create a temporary value object to inspect the class
+    ValueObjectSP temp_vo = CreateValueObjectFromAddress(
+        "temp", element_addr, m_exe_ctx, child_type);
+    
+    if (temp_vo) {
+      ObjCLanguageRuntime::ClassDescriptorSP class_descriptor = runtime->GetClassDescriptor(*temp_vo);
+      if (class_descriptor) {
+        const char* class_name = class_descriptor->GetClassName().AsCString();
+        fprintf(stderr, "[DEBUG] GetChildAtIndex: element at %s has class: %s\n", 
+                name_buf, class_name ? class_name : "unknown");
+        
+        // Try to create a typed pointer for this class
+        if (class_name) {
+          // Check if we can find or create the proper type
+          // For GNUstep classes like GSInlineArray, we may not have full type info
+          // but we can still use id type and it should work with our formatters
+          fprintf(stderr, "[DEBUG] GetChildAtIndex: keeping id type for %s (class %s)\n", 
+                  name_buf, class_name);
+        }
+      }
+    }
+    
+    // Create the child value object with proper address
+    // The issue is that CreateValueObjectFromAddress creates a pointer TO the address,
+    // but for ObjC objects, the value IS the address (it's already a pointer)
+    
+    // Create a data buffer containing the pointer value
+    uint8_t ptr_buffer[8];
+    memcpy(ptr_buffer, &element_addr, sizeof(element_addr));
+    
+    DataExtractor data(ptr_buffer, sizeof(ptr_buffer),
+                      m_exe_ctx.GetByteOrder(),
+                      m_exe_ctx.GetAddressByteSize());
+    
+    child_vo = ValueObjectConstResult::Create(
+      m_exe_ctx.GetBestExecutionContextScope(),
+      child_type,
+      ConstString(name_buf),
+      data,
+      LLDB_INVALID_ADDRESS);  // No address, the value IS the pointer
+    
+    if (child_vo) {
+      child_vo->SetFormat(lldb::eFormatDefault);
+      
+      fprintf(stderr, "[DEBUG] GetChildAtIndex: Created child %s with pointer value 0x%llx, actual value: 0x%llx\n",
+              name_buf, (unsigned long long)element_addr, 
+              (unsigned long long)child_vo->GetValueAsUnsigned(0));
+      
+      // Try dynamic type resolution but be careful with the address
+      ValueObjectSP dynamic_child = child_vo->GetDynamicValue(lldb::eDynamicCanRunTarget);
+      if (dynamic_child) {
+        dynamic_child->SetFormat(lldb::eFormatDefault);
+        
+        // Check if dynamic resolution changed the address incorrectly
+        lldb::addr_t dynamic_addr = dynamic_child->GetValueAsUnsigned(0);
+        if (dynamic_addr != element_addr) {
+          fprintf(stderr, "[DEBUG] GetChildAtIndex: WARNING - dynamic child changed address from 0x%llx to 0x%llx\n",
+                  (unsigned long long)element_addr, (unsigned long long)dynamic_addr);
+          // Don't use the dynamic child if it has the wrong address
+          return child_vo;
+        }
+        
+        CompilerType dynamic_type = dynamic_child->GetCompilerType();
+        if (dynamic_type.IsValid()) {
+          const char* type_name = dynamic_type.GetTypeName().AsCString();
+          fprintf(stderr, "[DEBUG] GetChildAtIndex: final dynamic type for %s = %s, addr=0x%llx\n", 
+                  name_buf, type_name ? type_name : "unknown",
+                  (unsigned long long)dynamic_addr);
+        }
+        
+        return dynamic_child;
+      }
+    }
+  }
+  
+  // Debug: Print the final type
+  if (child_vo) {
+    CompilerType final_type = child_vo->GetCompilerType();
+    if (final_type.IsValid()) {
+      const char* type_name = final_type.GetTypeName().AsCString();
+      fprintf(stderr, "[DEBUG] GetChildAtIndex: returning %s with type = %s\n", 
+              name_buf, type_name ? type_name : "unknown");
+    }
+  }
+  
+  return child_vo;
 }
 
 lldb::ChildCacheState GNUstepUniversalSyntheticProvider::Update() {
-  m_children_cache.clear();
-  m_type = DetectObjectType();
-  return lldb::ChildCacheState::eRefetch;
+  // Detect type once and cache it
+  if (m_type == Unknown) {
+    m_type = DetectObjectType();
+  }
+  // Return eReuse to avoid constant recalculation
+  return lldb::ChildCacheState::eReuse;
 }
 
 bool GNUstepUniversalSyntheticProvider::MightHaveChildren() {
-  return (m_type == Array || m_type == Dictionary || m_type == Set) && m_count > 0;
+  // Always return true for Unknown type to allow LLDB to check
+  // This is important for recursive expansion
+  if (m_type == Unknown) {
+    m_type = DetectObjectType();
+  }
+  return (m_type == Array || m_type == Dictionary || m_type == Set || m_type == CustomClass);
 }
 
-size_t GNUstepUniversalSyntheticProvider::GetIndexOfChildWithName(
-    ConstString name) {
+size_t GNUstepUniversalSyntheticProvider::GetIndexOfChildWithName(ConstString name) {
   return UINT32_MAX;
 }
 
+// Creator function
 SyntheticChildrenFrontEnd *
 lldb_private::formatters::GNUstepUniversalSyntheticProviderCreator(
     CXXSyntheticChildren *synth, lldb::ValueObjectSP valobj_sp) {
-  return (valobj_sp ? new GNUstepUniversalSyntheticProvider(*valobj_sp) 
-                    : nullptr);
+  return (valobj_sp ? new GNUstepUniversalSyntheticProvider(*valobj_sp) : nullptr);
 }

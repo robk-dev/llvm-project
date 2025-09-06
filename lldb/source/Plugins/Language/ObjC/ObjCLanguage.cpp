@@ -841,28 +841,106 @@ static void LoadGNUstepFormatters(TypeCategoryImplSP objc_category_sp) {
       .SetShowMembersOneLiner(false)
       .SetHideItemNames(false);
 
+  SyntheticChildren::Flags synth_flags;
+  synth_flags.SetCascades(true).SetSkipPointers(false).SetSkipReferences(false);
+
   // Register universal formatter for all GNUstep objects
-  // Using wildcard patterns to match all NS* and GS* classes
-  AddCXXSummary(objc_category_sp,
-                lldb_private::formatters::GNUstepUniversalSummaryProvider,
-                "GNUstep Universal summary provider", "NS.*", gnustep_flags);
+  // First register for common specific types to override Apple formatters
+  const char *common_types[] = {
+    "NSString", "NSMutableString",
+    "NSArray", "NSMutableArray", 
+    "NSDictionary", "NSMutableDictionary",
+    "NSSet", "NSMutableSet",
+    "NSNumber", "NSDecimalNumber",
+    "NSData", "NSMutableData",
+    "NSDate", "NSCalendar",
+    "NSURL", "NSUUID",
+    "NSError", "NSException",
+    "NSIndexSet", "NSMutableIndexSet",
+    "NSCharacterSet", "NSMutableCharacterSet",
+    nullptr
+  };
+  
+  for (const char **type = common_types; *type; ++type) {
+    AddCXXSummary(objc_category_sp,
+                  lldb_private::formatters::GNUstepUniversalSummaryProvider,
+                  "GNUstep Universal summary provider", *type, gnustep_flags);
+  }
 
-  AddCXXSummary(objc_category_sp,
-                lldb_private::formatters::GNUstepUniversalSummaryProvider,
-                "GNUstep Universal summary provider", "GS.*", gnustep_flags);
-
-  // Register universal synthetic provider for collections
+  // --------------------------------------------------------------------------
+  // ✅ Universal catch-alls (no per-class enumeration required)
+  // Bind to 'id' so any Obj-C object can fall back to our provider.
   AddCXXSynthetic(
       objc_category_sp,
       lldb_private::formatters::GNUstepUniversalSyntheticProviderCreator,
-      "GNUstep Universal synthetic children", "NS.*",
-      ScriptedSyntheticChildren::Flags());
+      "GNUstep Universal synthetic (id)", "id", synth_flags);
+
+  AddCXXSummary(objc_category_sp,
+                lldb_private::formatters::GNUstepUniversalSummaryProvider,
+                "GNUstep Universal summary (id)", "id", gnustep_flags);
+
+  // Regex for NS*/GS* classes - use regex syntax in the string itself
+  // LLDB will interpret strings starting with ^ as regex patterns
+  AddCXXSynthetic(
+      objc_category_sp,
+      lldb_private::formatters::GNUstepUniversalSyntheticProviderCreator,
+      "GNUstep Universal synthetic (NS|GS).*", "^(NS|GS).+", synth_flags, true);
+
+  AddCXXSummary(objc_category_sp,
+                lldb_private::formatters::GNUstepUniversalSummaryProvider,
+                "GNUstep Universal summary (NS|GS).*", "^(NS|GS).+", gnustep_flags, true);
+
+  // (Optional) Root-class cascades for legacy/alt runtimes.
+  AddCXXSynthetic(
+      objc_category_sp,
+      lldb_private::formatters::GNUstepUniversalSyntheticProviderCreator,
+      "GNUstep Universal synthetic (NSObject)", "NSObject", synth_flags);
+  AddCXXSummary(objc_category_sp,
+                lldb_private::formatters::GNUstepUniversalSummaryProvider,
+                "GNUstep Universal summary (NSObject)", "NSObject", gnustep_flags);
 
   AddCXXSynthetic(
       objc_category_sp,
       lldb_private::formatters::GNUstepUniversalSyntheticProviderCreator,
-      "GNUstep Universal synthetic children", "GS.*",
-      ScriptedSyntheticChildren::Flags());
+      "GNUstep Universal synthetic (Object)", "Object", synth_flags);
+  AddCXXSummary(objc_category_sp,
+                lldb_private::formatters::GNUstepUniversalSummaryProvider,
+                "GNUstep Universal summary (Object)", "Object", gnustep_flags);
+
+  // Register a catch-all for any class name that looks like an ObjC class
+  // Register BOTH base type and pointer type patterns since LLDB may use either
+  AddCXXSynthetic(
+      objc_category_sp,
+      lldb_private::formatters::GNUstepUniversalSyntheticProviderCreator,
+      "GNUstep Universal synthetic (catch-all base)", "^[A-Z][A-Za-z0-9_]+$", synth_flags, true);
+  AddCXXSummary(objc_category_sp,
+                lldb_private::formatters::GNUstepUniversalSummaryProvider,
+                "GNUstep Universal summary (catch-all base)", "^[A-Z][A-Za-z0-9_]+$", gnustep_flags, true);
+  
+  // Pointer type (e.g., "CustomAccount *")
+  AddCXXSynthetic(
+      objc_category_sp,
+      lldb_private::formatters::GNUstepUniversalSyntheticProviderCreator,
+      "GNUstep Universal synthetic (catch-all ptr)", "^[A-Z][A-Za-z0-9_]+ \\*$", synth_flags, true);
+  AddCXXSummary(objc_category_sp,
+                lldb_private::formatters::GNUstepUniversalSummaryProvider,
+                "GNUstep Universal summary (catch-all ptr)", "^[A-Z][A-Za-z0-9_]+ \\*$", gnustep_flags, true);
+  
+
+  // Register universal synthetic provider for collections (for backwards compatibility)
+  const char *collection_types[] = {
+    "NSArray", "NSMutableArray",
+    "NSDictionary", "NSMutableDictionary", 
+    "NSSet", "NSMutableSet",
+    nullptr
+  };
+  
+  for (const char **type = collection_types; *type; ++type) {
+    AddCXXSynthetic(
+        objc_category_sp,
+        lldb_private::formatters::GNUstepUniversalSyntheticProviderCreator,
+        "GNUstep Universal synthetic children", *type, synth_flags);
+  }
 }
 
 lldb::TypeCategoryImplSP ObjCLanguage::GetFormatters() {
