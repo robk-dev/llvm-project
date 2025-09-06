@@ -2,6 +2,7 @@ add_lldb_library(lldbPluginGNUstepObjCRuntime PLUGIN
   GNUstepObjCRuntime.cpp
   GNUstepObjCRuntimeIntrospector.cpp
   GNUstepObjCRuntimeUtilities.cpp
+  GNUstepObjCDeclVendor.cpp
   formatters/GNUstepUniversalFormatter.cpp
 
   LINK_LIBS
@@ -14,6 +15,7 @@ add_lldb_library(lldbPluginGNUstepObjCRuntime PLUGIN
     lldbUtility
     lldbPluginTypeSystemClang
     lldbPluginObjCRuntime
+    lldbPluginClangCommon
 
   LINK_COMPONENTS
     Support

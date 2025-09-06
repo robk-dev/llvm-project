@@ -62,6 +62,9 @@ private:
   
   // Helper methods
   lldb::ValueObjectSP EvaluateExpression(const std::string &expr);
+  lldb::ValueObjectSP GetArrayElementViaFunctionCaller(uint32_t idx);
+  lldb::ValueObjectSP GetSetElementViaFunctionCaller(uint32_t idx);
+  uint32_t GetCollectionCountViaFunctionCaller();
   ObjectType DetectObjectType();
   bool IsTaggedPointer() const { return (m_obj_addr & 0x1) != 0; }
 };

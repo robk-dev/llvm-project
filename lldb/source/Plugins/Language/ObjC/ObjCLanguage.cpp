@@ -842,7 +842,29 @@ static void LoadGNUstepFormatters(TypeCategoryImplSP objc_category_sp) {
       .SetHideItemNames(false);
 
   // Register universal formatter for all GNUstep objects
-  // Using wildcard patterns to match all NS* and GS* classes
+  // First register for common specific types to override Apple formatters
+  const char *common_types[] = {
+    "NSString", "NSMutableString",
+    "NSArray", "NSMutableArray", 
+    "NSDictionary", "NSMutableDictionary",
+    "NSSet", "NSMutableSet",
+    "NSNumber", "NSDecimalNumber",
+    "NSData", "NSMutableData",
+    "NSDate", "NSCalendar",
+    "NSURL", "NSUUID",
+    "NSError", "NSException",
+    "NSIndexSet", "NSMutableIndexSet",
+    "NSCharacterSet", "NSMutableCharacterSet",
+    nullptr
+  };
+  
+  for (const char **type = common_types; *type; ++type) {
+    AddCXXSummary(objc_category_sp,
+                  lldb_private::formatters::GNUstepUniversalSummaryProvider,
+                  "GNUstep Universal summary provider", *type, gnustep_flags);
+  }
+  
+  // Also register wildcard patterns for any other NS/GS classes
   AddCXXSummary(objc_category_sp,
                 lldb_private::formatters::GNUstepUniversalSummaryProvider,
                 "GNUstep Universal summary provider", "NS.*", gnustep_flags);
@@ -851,7 +873,35 @@ static void LoadGNUstepFormatters(TypeCategoryImplSP objc_category_sp) {
                 lldb_private::formatters::GNUstepUniversalSummaryProvider,
                 "GNUstep Universal summary provider", "GS.*", gnustep_flags);
 
-  // Register universal synthetic provider for collections
+  // CRITICAL: Register synthetic provider and summary for 'id' type
+  // This ensures ANY Objective-C object gets our provider, enabling recursive expansion
+  AddCXXSynthetic(
+      objc_category_sp,
+      lldb_private::formatters::GNUstepUniversalSyntheticProviderCreator,
+      "GNUstep Universal synthetic children for id", "id",
+      ScriptedSyntheticChildren::Flags());
+      
+  AddCXXSummary(objc_category_sp,
+                lldb_private::formatters::GNUstepUniversalSummaryProvider,
+                "GNUstep Universal summary for id", "id", gnustep_flags);
+  
+  // Register universal synthetic provider for collections (for backwards compatibility)
+  const char *collection_types[] = {
+    "NSArray", "NSMutableArray",
+    "NSDictionary", "NSMutableDictionary", 
+    "NSSet", "NSMutableSet",
+    nullptr
+  };
+  
+  for (const char **type = collection_types; *type; ++type) {
+    AddCXXSynthetic(
+        objc_category_sp,
+        lldb_private::formatters::GNUstepUniversalSyntheticProviderCreator,
+        "GNUstep Universal synthetic children", *type,
+        ScriptedSyntheticChildren::Flags());
+  }
+  
+  // Also register for wildcard patterns (covers all GNUstep variant classes)
   AddCXXSynthetic(
       objc_category_sp,
       lldb_private::formatters::GNUstepUniversalSyntheticProviderCreator,

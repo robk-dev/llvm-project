@@ -8,6 +8,7 @@
 
 #include "GNUstepObjCRuntime.h"
 #include "GNUstepObjCRuntimeUtilities.h"
+#include "GNUstepObjCDeclVendor.h"
 #include "formatters/GNUstepUniversalFormatter.h"
 #include "lldb/Core/PluginManager.h"
 #include "lldb/Expression/UtilityFunction.h"
@@ -1075,9 +1076,54 @@ GNUstepObjCRuntime::GetClassDescriptorFromISA(ObjCISA isa) {
   if (descriptor_sp)
     return descriptor_sp;
   
-  // Create a generic class descriptor for this ISA
-  // TODO: Replace with proper GNUstepClassDescriptor once integrated
-  descriptor_sp = ClassDescriptorSP();
+  // Use the introspector to get class information
+  if (!m_introspector_up)
+    return ClassDescriptorSP();
+    
+  std::string class_name = m_introspector_up->GetClassName(isa);
+  if (class_name.empty())
+    return ClassDescriptorSP();
+    
+  // Create a minimal working class descriptor
+  // We'll create a simple one inline that just provides the class name
+  class GNUstepMinimalClassDescriptor : public ObjCLanguageRuntime::ClassDescriptor {
+  private:
+    ObjCISA m_isa;
+    std::string m_class_name;
+    
+  public:
+    GNUstepMinimalClassDescriptor(ObjCISA isa, const std::string& name) 
+      : m_isa(isa), m_class_name(name) {}
+    
+    ConstString GetClassName() override { 
+      return ConstString(m_class_name); 
+    }
+    
+    ClassDescriptorSP GetSuperclass() override { return ClassDescriptorSP(); }
+    ClassDescriptorSP GetMetaclass() const override { return ClassDescriptorSP(); }
+    bool IsValid() override { return m_isa != 0; }
+    bool IsKVO() override { return false; }
+    bool IsCFType() override { return false; }
+    
+    bool GetTaggedPointerInfo(uint64_t *info_bits, uint64_t *value_bits,
+                             uint64_t *payload) override { return false; }
+    bool GetTaggedPointerInfoSigned(uint64_t *info_bits = nullptr,
+                                   int64_t *value_bits = nullptr,
+                                   uint64_t *payload = nullptr) override { return false; }
+                             
+    uint64_t GetInstanceSize() override { return 0; }
+    lldb::addr_t GetISA() override { return m_isa; }
+    
+    bool Describe(std::function<void(ObjCLanguageRuntime::ObjCISA)> const &,
+                  std::function<bool(const char *, const char *)> const &,
+                  std::function<bool(const char *, const char *)> const &,
+                  std::function<bool(const char *, const char *, lldb::addr_t,
+                                   uint64_t)> const &) const override {
+      return false;
+    }
+  };
+  
+  descriptor_sp = std::make_shared<GNUstepMinimalClassDescriptor>(isa, class_name);
   
   // Add to cache if valid
   if (descriptor_sp && descriptor_sp->IsValid()) {
@@ -1193,9 +1239,8 @@ void GNUstepObjCRuntime::InitializeRuntimeAPI() {
 DeclVendor *GNUstepObjCRuntime::GetDeclVendor() {
   if (!m_decl_vendor_up) {
     Log *log = GetLog(LLDBLog::Process | LLDBLog::Types);
-    // TODO: Re-implement DeclVendor functionality after cleanup
-    // m_decl_vendor_up = std::make_unique<GNUstepObjCDeclVendor>(*this);
-    LLDB_LOG(log, "DeclVendor temporarily disabled during refactoring");
+    m_decl_vendor_up = std::make_unique<GNUstepObjCDeclVendor>(*this);
+    LLDB_LOG(log, "GNUstepObjCDeclVendor created");
   }
   
   return m_decl_vendor_up.get();

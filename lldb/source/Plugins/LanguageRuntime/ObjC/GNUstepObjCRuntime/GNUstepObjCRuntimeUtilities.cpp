@@ -598,5 +598,19 @@ lldb::addr_t RuntimeFunctionCaller::CallRuntimeFunctionImpl(const char *function
   return return_value_sp->GetValueAsUnsigned(LLDB_INVALID_ADDRESS);
 }
 
+lldb::addr_t RuntimeFunctionCaller::GetSelectorForName(const char *selector_name) {
+  return CallRuntimeFunction("sel_getUid", selector_name);
+}
+
+lldb::addr_t RuntimeFunctionCaller::CallObjCMethod(lldb::addr_t object_addr, const char *selector_name) {
+  lldb::addr_t selector_addr = GetSelectorForName(selector_name);
+  if (selector_addr == LLDB_INVALID_ADDRESS) {
+    return LLDB_INVALID_ADDRESS;
+  }
+  
+  std::vector<lldb::addr_t> args = {object_addr, selector_addr};
+  return CallRuntimeFunction("objc_msgSend", args);
+}
+
 } // namespace gnustep_objc_runtime_utilities
 } // namespace lldb_private

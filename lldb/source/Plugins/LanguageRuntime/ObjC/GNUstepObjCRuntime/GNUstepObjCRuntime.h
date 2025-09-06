@@ -102,6 +102,11 @@ public:
     return m_introspector_up.get(); 
   }
 
+  // Get the runtime function caller
+  gnustep_objc_runtime_utilities::RuntimeFunctionCaller *GetRuntimeFunctionCaller() {
+    return m_runtime_caller.get();
+  }
+
   // Get cached runtime symbol addresses for IR rewriting
   std::map<std::string, lldb::addr_t> GetObjCRuntimeAddresses();
 
