@@ -844,6 +844,60 @@ static void LoadGNUstepFormatters(TypeCategoryImplSP objc_category_sp) {
   SyntheticChildren::Flags synth_flags;
   synth_flags.SetCascades(true).SetSkipPointers(false).SetSkipReferences(false);
 
+  
+  // Register universal formatter for all GNUstep objects
+  // First register for common specific types to override Apple formatters
+  const char *common_types[] = {"NSObject",
+                                "NSString",
+                                "NSMutableString",
+                                "NSArray",
+                                "NSMutableArray",
+                                "NSDictionary",
+                                "NSMutableDictionary",
+                                "NSSet",
+                                "NSMutableSet",
+                                "NSNumber",
+                                "NSDecimalNumber",
+                                "NSConstantIntegerNumber",
+                                "NSDate",
+                                "NSCalendar",
+                                "NSCalendarDate",
+                                "NSMutableCalendarDate",
+                                "NSURL",
+                                "NSLocale",
+                                "NSUUID",
+                                "NSError",
+                                "NSException",
+                                "NSIndexSet",
+                                "NSMutableIndexSet",
+                                "NSCharacterSet",
+                                "NSMutableCharacterSet",
+                                "NSOrderedSet",
+                                "NSMutableOrderedSet",
+                                "NSIndexPath",
+                                "NSMutableIndexPath",
+                                "NSTaggedPointerString",
+                                "NSMutableTagPointerString",
+                                "NSBundle",
+                                "NSMutableBundle",
+                                "NSData",
+                                "NSMutableData",
+                                "NSConcreteData",
+                                "NSMutableConcreteData",
+                                "NSMutableConstantIntegerNumber",
+                                "NSInteger",
+                                "NSUInteger",
+                                "NSConstantDoubleNumber",
+                                "NSMutableConstantDoubleNumber",
+                                "NSConstantFloatNumber",
+                                "NSMutableConstantFloatNumber",
+                                nullptr};
+
+  for (const char **type = common_types; *type; ++type) {
+    AddCXXSummary(objc_category_sp,
+                  lldb_private::formatters::GNUstepUniversalSummaryProvider,
+                  "GNUstep Universal summary provider", *type, gnustep_flags);
+  }
   // --------------------------------------------------------------------------
   // ✅ Universal catch-alls (no per-class enumeration required)
   // Bind to 'id' so any Obj-C object can fall back to our provider.
@@ -868,24 +922,6 @@ static void LoadGNUstepFormatters(TypeCategoryImplSP objc_category_sp) {
                 "GNUstep Universal summary (NS|GS).*", "^(NS|GS).+",
                 gnustep_flags, true);
 
-  // (Optional) Root-class cascades for legacy/alt runtimes.
-  AddCXXSynthetic(
-      objc_category_sp,
-      lldb_private::formatters::GNUstepUniversalSyntheticProviderCreator,
-      "GNUstep Universal synthetic (NSObject)", "NSObject", synth_flags);
-  AddCXXSummary(objc_category_sp,
-                lldb_private::formatters::GNUstepUniversalSummaryProvider,
-                "GNUstep Universal summary (NSObject)", "NSObject",
-                gnustep_flags);
-
-  AddCXXSynthetic(
-      objc_category_sp,
-      lldb_private::formatters::GNUstepUniversalSyntheticProviderCreator,
-      "GNUstep Universal synthetic (Object)", "Object", synth_flags);
-  AddCXXSummary(objc_category_sp,
-                lldb_private::formatters::GNUstepUniversalSummaryProvider,
-                "GNUstep Universal summary (Object)", "Object", gnustep_flags);
-
   // Register a catch-all for any class name that looks like an ObjC class
   // Register BOTH base type and pointer type patterns since LLDB may use either
   AddCXXSynthetic(
@@ -908,31 +944,6 @@ static void LoadGNUstepFormatters(TypeCategoryImplSP objc_category_sp) {
                 lldb_private::formatters::GNUstepUniversalSummaryProvider,
                 "GNUstep Universal summary (catch-all ptr)",
                 "^[A-Z][A-Za-z0-9_]+ \\*$", gnustep_flags, true);
-
-  // Register universal formatter for all GNUstep objects
-  // First register for common specific types to override Apple formatters
-  const char *common_types[] = {
-      "NSString", "NSMutableString", "NSArray", "NSMutableArray",
-      "NSDictionary", "NSMutableDictionary", "NSSet", "NSMutableSet",
-      "NSNumber", "NSDecimalNumber", "NSConstantIntegerNumber",
-      "NSDate", "NSCalendar", "NSCalendarDate", "NSMutableCalendarDate",
-      "NSURL", "NSUUID", "NSError", "NSException", "NSIndexSet",
-      "NSMutableIndexSet", "NSCharacterSet", "NSMutableCharacterSet",
-      "NSOrderedSet", "NSMutableOrderedSet", "NSScanner", "NSIndexPath",
-      "NSMutableIndexPath", "NSTaggedPointerString",
-      "NSMutableTagPointerString", "NSBundle", "NSMutableBundle", "NSData",
-      "NSMutableData", "NSConcreteData", "NSMutableConcreteData",
-       "NSMutableConstantIntegerNumber", "NSInteger", "NSUInteger",
-      "NSConstantDoubleNumber", "NSMutableConstantDoubleNumber",
-      "NSConstantFloatNumber", "NSMutableConstantFloatNumber", 
-      nullptr
-    };
-
-  for (const char **type = common_types; *type; ++type) {
-    AddCXXSummary(objc_category_sp,
-                  lldb_private::formatters::GNUstepUniversalSummaryProvider,
-                  "GNUstep Universal summary provider", *type, gnustep_flags);
-  }
 }
 
 lldb::TypeCategoryImplSP ObjCLanguage::GetFormatters() {

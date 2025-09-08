@@ -770,7 +770,7 @@ bool GNUstepObjCRuntime::IsModuleObjCLibrary(const lldb::ModuleSP &module_sp) {
   // Examples: libobjc.so.4.6, libgnustep-base.so.1.31, libobjc2.so.4
   // Windows: gnustep-base-1_31.dll, libobjc-4.6.dll
   return (strstr(module_name, "libobjc.") ||           // libobjc.so.4.6 (note the dot)
-          strstr(module_name, "libgnustep-base.") ||   // libgnustep-base.so.1.31  
+          strstr(module_name, "libgnustep-base.") ||   // libgnustep-base.so.1.31
           strstr(module_name, "libobjc2") ||           // libobjc2.so.4 or libobjc2
           strstr(module_name, "libBlocksRuntime") ||   // libBlocksRuntime for blocks support
           strstr(module_name, "gnustep-base-") ||      // Windows: gnustep-base-1_31.dll
@@ -1100,10 +1100,7 @@ GNUstepObjCRuntime::GetClassDescriptorFromISA(ObjCISA isa) {
   ClassDescriptorSP descriptor_sp = ObjCLanguageRuntime::GetClassDescriptorFromISA(isa);
   if (descriptor_sp)
     return descriptor_sp;
-  
-  // Don't enumerate all classes - just look up the one we need lazily
-  // This avoids calling objc_copyClassList for every single ISA lookup
-  
+
   // Use the introspector to get class information for this specific ISA
   if (!m_introspector_up)
     return ClassDescriptorSP();
@@ -1419,12 +1416,6 @@ void GNUstepObjCRuntime::InjectRuntimeFunctionDecls(TypeSystemClang &ts) {
                                  ast.IntTy,  /*encoding*/
                                  qt_bool     /*isExternalRep*/ };
     CreateExternCFunction(ts, tu, "CFStringCreateWithBytes", void_ptr, params, /*variadic=*/false);
-  }
-
-  // Add diagnostic utility function for field testing
-  {
-    // int __lldb_gnustep_diagnostic(void) - returns bitmask of what's installed
-    CreateExternCFunction(ts, tu, "__lldb_gnustep_diagnostic", ast.IntTy, {}, /*variadic=*/false);
   }
   
   LLDB_LOG(log, "[GNUstep] Runtime function prototypes injected successfully");

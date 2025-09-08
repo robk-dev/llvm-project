@@ -7,6 +7,7 @@
 #include "GNUstepUniversalFormatter.h"
 #include "../GNUstepObjCRuntime.h"
 #include "../GNUstepObjCRuntimeIntrospector.h"
+#include "../GNUstepObjCRuntimeUtilities.h"
 #include "lldb/DataFormatters/FormattersHelpers.h"
 #include "lldb/Target/Process.h"
 #include "lldb/ValueObject/ValueObject.h"
@@ -22,15 +23,13 @@ using namespace lldb_private::formatters;
 // Universal summary - get object description via runtime calls
 bool lldb_private::formatters::GNUstepUniversalSummaryProvider(
     ValueObject &valobj, Stream &stream, const TypeSummaryOptions &options) {
-  
-  const char* type_name = valobj.GetTypeName().AsCString();
-  const char* display_type_name = valobj.GetDisplayTypeName().AsCString();
-  
+
   lldb::addr_t obj_addr = valobj.GetValueAsUnsigned(0);
   if (obj_addr == 0) {
     stream.Printf("nil");
     return true;
   }
+  
   
   // Handle small integers (tagged pointer pattern: xxx...xx1 with tag 0)
   if ((obj_addr & 0x1) && ((obj_addr >> 1) & 0x7) == 0) {
@@ -77,11 +76,17 @@ bool lldb_private::formatters::GNUstepUniversalSummaryProvider(
         if (error.Success() && !description_str.empty()) {
           stream.Printf("%s", description_str.c_str());
           return true;
-        } else {
         }
       }
     }
-  } else {
+  }
+  
+  // Validate that this is a real object before trying to get its class
+  // Check if the address looks valid (not too low, not uninitialized stack)
+  if (obj_addr < 0x1000 || (obj_addr & 0xFFFF000000000000) == 0xFFFF000000000000) {
+    // Likely uninitialized or invalid pointer
+    stream.Printf("0x%llx", (unsigned long long)obj_addr);
+    return true;
   }
   
   // Fallback: Get class name and show basic info
@@ -224,6 +229,15 @@ GNUstepUniversalSyntheticProvider::DetectObjectType() {
 }
 
 llvm::Expected<uint32_t> GNUstepUniversalSyntheticProvider::CalculateNumChildren() {
+  Process *process = m_exe_ctx.GetProcessPtr();
+  if (!process)
+    return 0;
+    
+  // Check process state before accessing memory
+  ProcessStateGuard state_guard(process);
+  if (!state_guard.IsValid()) {
+    return 0;
+  }
   
   if (m_type == Unknown)
     m_type = DetectObjectType();
@@ -232,7 +246,40 @@ llvm::Expected<uint32_t> GNUstepUniversalSyntheticProvider::CalculateNumChildren
     return 0;
   
   if (m_type == CustomClass) {
-    return 5;  // We'll show actual ivars dynamically
+    // Get number of ivars using the class descriptor
+    ProcessSP process_sp = m_backend.GetProcessSP();
+    if (!process_sp)
+      return 0;
+      
+    ObjCLanguageRuntime *runtime = ObjCLanguageRuntime::Get(*process_sp);
+    if (!runtime)
+      return 0;
+      
+    GNUstepObjCRuntime *gnustep_runtime = static_cast<GNUstepObjCRuntime*>(runtime);
+    if (!gnustep_runtime)
+      return 0;
+      
+    GNUstepObjCRuntimeIntrospector *introspector = gnustep_runtime->GetRuntimeIntrospector();
+    if (!introspector)
+      return 0;
+      
+    // Get or create class descriptor
+    if (!m_class_descriptor) {
+      m_class_descriptor = runtime->GetClassDescriptor(m_backend);
+      if (!m_class_descriptor)
+        return 0;
+    }
+    
+    lldb::addr_t isa = m_class_descriptor->GetISA();
+    if (isa == 0)
+      return 0;
+      
+    // Get all ivars including inherited ones
+    auto ivars_result = introspector->GetAllIvarsIncludingInherited((void*)isa);
+    if (!ivars_result)
+      return 0;
+      
+    return ivars_result->size();
   }
 
   if (m_type != Array && m_type != Dictionary && m_type != Set) {
@@ -263,10 +310,8 @@ llvm::Expected<uint32_t> GNUstepUniversalSyntheticProvider::CalculateNumChildren
     
   m_count = (uint32_t)count_result;
   
-  if (m_type == Dictionary)
-    return m_count * 2;
-    
-  return m_count;
+  uint32_t final_count = (m_type == Dictionary) ? m_count * 2 : m_count;
+  return final_count;
 }
 
 lldb::ValueObjectSP 
@@ -275,6 +320,12 @@ GNUstepUniversalSyntheticProvider::GetChildAtIndex(uint32_t idx) {
   ProcessSP process_sp = m_backend.GetProcessSP();
   if (!process_sp)
     return nullptr;
+  
+  // Check process state before accessing memory
+  ProcessStateGuard state_guard(process_sp.get());
+  if (!state_guard.IsValid()) {
+    return nullptr;
+  }
     
   ObjCLanguageRuntime *runtime = ObjCLanguageRuntime::Get(*process_sp);
   GNUstepObjCRuntime *gnustep_runtime = static_cast<GNUstepObjCRuntime*>(runtime);
@@ -330,7 +381,7 @@ GNUstepUniversalSyntheticProvider::GetChildAtIndex(uint32_t idx) {
         return nullptr;
       }
       
-      std::vector<GNUstepObjCRuntimeIntrospector::IvarInfo> &ivars = *ivars_result;
+      const std::vector<GNUstepObjCRuntimeIntrospector::IvarInfo> &ivars = *ivars_result;
       if (idx >= ivars.size())
         return nullptr;
       
@@ -399,24 +450,21 @@ GNUstepUniversalSyntheticProvider::GetChildAtIndex(uint32_t idx) {
     }
     
     case Array: {
-      
-      // Call objectAtIndex: using objc_msgSend
+      // Call objectAtIndex: directly
       lldb::addr_t selector = function_caller->GetSelectorForName("objectAtIndex:");
-      
       std::vector<lldb::addr_t> args = {m_obj_addr, selector, idx};
       element_addr = function_caller->CallRuntimeFunction("objc_msgSend", args);
       
-      snprintf(name_buf, sizeof(name_buf), "[%u]", idx);
-      
-      // Verify this is a valid object
       if (element_addr == LLDB_INVALID_ADDRESS || element_addr == 0) {
         return nullptr;
       }
+      
+      snprintf(name_buf, sizeof(name_buf), "[%u]", idx);
       break;
     }
     
     case Dictionary: {
-      // Get key/value pairs
+      // Get key/value pairs directly
       uint32_t pair_idx = idx / 2;
       bool is_key = (idx % 2 == 0);
       
@@ -446,7 +494,7 @@ GNUstepUniversalSyntheticProvider::GetChildAtIndex(uint32_t idx) {
     }
     
     case Set: {
-      // Get allObjects array
+      // Get allObjects array and fetch element directly
       lldb::addr_t all_objects = function_caller->CallObjCMethod(m_obj_addr, "allObjects");
       if (all_objects == LLDB_INVALID_ADDRESS)
         return nullptr;
@@ -456,6 +504,10 @@ GNUstepUniversalSyntheticProvider::GetChildAtIndex(uint32_t idx) {
                                         function_caller->GetSelectorForName("objectAtIndex:"),
                                         idx};
       element_addr = function_caller->CallRuntimeFunction("objc_msgSend", args);
+      
+      if (element_addr == LLDB_INVALID_ADDRESS || element_addr == 0) {
+        return nullptr;
+      }
       
       snprintf(name_buf, sizeof(name_buf), "[%u]", idx);
       break;
@@ -560,11 +612,6 @@ GNUstepUniversalSyntheticProvider::GetChildAtIndex(uint32_t idx) {
 }
 
 lldb::ChildCacheState GNUstepUniversalSyntheticProvider::Update() {
-  // Detect type once and cache it
-  if (m_type == Unknown) {
-    m_type = DetectObjectType();
-  }
-  // Return eReuse to avoid constant recalculation
   return lldb::ChildCacheState::eReuse;
 }
 
@@ -580,6 +627,7 @@ bool GNUstepUniversalSyntheticProvider::MightHaveChildren() {
 size_t GNUstepUniversalSyntheticProvider::GetIndexOfChildWithName(ConstString name) {
   return UINT32_MAX;
 }
+
 
 // Creator function
 SyntheticChildrenFrontEnd *

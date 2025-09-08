@@ -17,6 +17,7 @@
 #include "lldb/DataFormatters/TypeSummary.h"
 #include "lldb/DataFormatters/TypeSynthetic.h"
 #include "Plugins/LanguageRuntime/ObjC/ObjCLanguageRuntime.h"
+#include "../GNUstepObjCRuntimeIntrospector.h"
 
 namespace lldb_private {
 namespace formatters {
@@ -60,7 +61,6 @@ private:
   
   ObjectType m_type;
   ObjCLanguageRuntime::ClassDescriptorSP m_class_descriptor;
-  std::vector<lldb::ValueObjectSP> m_children_cache;
   
   // Helper methods
   lldb::ValueObjectSP EvaluateExpression(const std::string &expr);

@@ -350,7 +350,8 @@ void SymbolResolver::FindSymbolsAcrossModules(const ConstString &symbol_name,
 
 /// RuntimeFunctionCaller implementation - consolidates 3 different implementations
 RuntimeFunctionCaller::RuntimeFunctionCaller(Process *process)
-    : m_process(process), m_symbol_cache(process) {}
+    : m_process(process), m_symbol_cache(process), 
+      m_formatter_cache(std::make_unique<FormatterCache>()) {}
 
 lldb::addr_t RuntimeFunctionCaller::GetRuntimeFunctionAddress(const char *function_name) {
   return m_symbol_cache.GetSymbolAddress(function_name);
@@ -416,6 +417,13 @@ lldb::addr_t RuntimeFunctionCaller::CallRuntimeFunction(const char *function_nam
   if (!m_process || !function_name || !string_arg) {
     return LLDB_INVALID_ADDRESS;
   }
+  
+  // Check process state before making runtime call
+  ProcessStateGuard state_guard(m_process);
+  if (!state_guard.IsValid()) {
+    logger.LogMessage("Process not in valid state for runtime call");
+    return LLDB_INVALID_ADDRESS;
+  }
 
   // Setup execution context
   ExecutionContext exe_ctx;
@@ -478,6 +486,13 @@ lldb::addr_t RuntimeFunctionCaller::CallRuntimeFunction(const std::string &funct
   if (!m_process || function_name.empty()) {
     return LLDB_INVALID_ADDRESS;
   }
+  
+  // Check process state before making runtime call
+  ProcessStateGuard state_guard(m_process);
+  if (!state_guard.IsValid()) {
+    logger.LogMessage("Process not in valid state for runtime call");
+    return LLDB_INVALID_ADDRESS;
+  }
 
   // Setup execution context
   ExecutionContext exe_ctx;
@@ -535,6 +550,16 @@ lldb::addr_t RuntimeFunctionCaller::CallRuntimeFunctionImpl(const char *function
                                                             ValueList &args,
                                                             ExecutionContext &exe_ctx,
                                                             Status &error) {
+  // Lock mutex for thread-safe runtime call
+  std::lock_guard<std::mutex> lock(m_runtime_mutex);
+  
+  // Double-check process state inside the lock
+  ProcessStateGuard state_guard(m_process);
+  if (!state_guard.IsValid()) {
+    error = Status::FromErrorString("Process state changed during runtime call");
+    return LLDB_INVALID_ADDRESS;
+  }
+  
   // Resolve function address
   lldb::addr_t func_addr = GetRuntimeFunctionAddress(function_name);
   if (func_addr == LLDB_INVALID_ADDRESS) {
@@ -599,17 +624,258 @@ lldb::addr_t RuntimeFunctionCaller::CallRuntimeFunctionImpl(const char *function
 }
 
 lldb::addr_t RuntimeFunctionCaller::GetSelectorForName(const char *selector_name) {
-  return CallRuntimeFunction("sel_getUid", selector_name);
+  if (!selector_name || !m_process)
+    return LLDB_INVALID_ADDRESS;
+    
+  // Check cache first
+  std::string sel_str(selector_name);
+  auto it = m_formatter_cache->selector_cache.find(sel_str);
+  if (it != m_formatter_cache->selector_cache.end()) {
+    // Cache hit - return cached selector
+    return it->second;
+  }
+  
+  // Cache miss - call runtime and cache result
+  lldb::addr_t selector = CallRuntimeFunction("sel_getUid", selector_name);
+  if (selector != LLDB_INVALID_ADDRESS) {
+    m_formatter_cache->selector_cache[sel_str] = selector;
+  }
+  
+  return selector;
 }
 
 lldb::addr_t RuntimeFunctionCaller::CallObjCMethod(lldb::addr_t object_addr, const char *selector_name) {
+  if (!selector_name || !m_process || object_addr == LLDB_INVALID_ADDRESS)
+    return LLDB_INVALID_ADDRESS;
+    
+  // Invalidate cache if needed
+  m_formatter_cache->InvalidateIfNeeded(m_process);
+  
+  // Check if this is a cacheable method (allKeys, allObjects, count)
+  std::string sel_str(selector_name);
+  bool is_cacheable = (sel_str == "allKeys" || sel_str == "allObjects" || 
+                       sel_str == "count" || sel_str == "allValues");
+  
+  if (is_cacheable) {
+    // Check method result cache
+    auto cache_key = std::make_pair(object_addr, sel_str);
+    auto it = m_formatter_cache->method_cache.find(cache_key);
+    if (it != m_formatter_cache->method_cache.end()) {
+      // Cache hit - return cached result
+      return it->second;
+    }
+  }
+  
+  // Get selector (will use cache if available)
   lldb::addr_t selector_addr = GetSelectorForName(selector_name);
   if (selector_addr == LLDB_INVALID_ADDRESS) {
     return LLDB_INVALID_ADDRESS;
   }
   
+  // Call the method
   std::vector<lldb::addr_t> args = {object_addr, selector_addr};
-  return CallRuntimeFunction("objc_msgSend", args);
+  lldb::addr_t result = CallRuntimeFunction("objc_msgSend", args);
+  
+  // Cache result if method is cacheable and call succeeded
+  // Don't cache: LLDB_INVALID_ADDRESS, null, or suspiciously low addresses
+  if (is_cacheable && result != LLDB_INVALID_ADDRESS && result != 0) {
+    // Additional validation: don't cache if the address looks invalid
+    // (e.g., too low to be a heap address)
+    if (result > 0x1000) {  // Basic sanity check for valid heap address
+      auto cache_key = std::make_pair(object_addr, sel_str);
+      m_formatter_cache->method_cache[cache_key] = result;
+    }
+  }
+  
+  return result;
+}
+
+std::vector<lldb::addr_t> RuntimeFunctionCaller::GetArrayElements(
+    lldb::addr_t array_addr, uint32_t start_idx, uint32_t count) {
+  
+  if (!m_process || array_addr == LLDB_INVALID_ADDRESS)
+    return {};
+    
+  // Invalidate cache if needed
+  m_formatter_cache->InvalidateIfNeeded(m_process);
+  
+  // Check if we have this array cached
+  auto& cache_entry = m_formatter_cache->collection_cache.array_cache[array_addr];
+  
+  // Determine batch boundaries
+  const uint32_t BATCH_SIZE = 20;
+  uint32_t batch_start = (start_idx / BATCH_SIZE) * BATCH_SIZE;
+  uint32_t batch_size = std::min(BATCH_SIZE, std::max(count, BATCH_SIZE));
+  
+  // Check if we already have this batch
+  if (cache_entry.HasElement(start_idx)) {
+    // Build result from cache
+    std::vector<lldb::addr_t> result;
+    for (uint32_t i = start_idx; i < start_idx + count; i++) {
+      lldb::addr_t elem = cache_entry.GetElement(i);
+      if (elem != LLDB_INVALID_ADDRESS) {
+        result.push_back(elem);
+        m_formatter_cache->collection_cache.stats.hits++;
+      } else {
+        break;  // No more cached elements
+      }
+    }
+    if (result.size() == count)
+      return result;  // Got everything from cache
+  }
+  
+  m_formatter_cache->collection_cache.stats.misses++;
+  m_formatter_cache->collection_cache.stats.batch_fetches++;
+  
+  // Need to fetch - try direct memory access first (GNUstep GSArray structure)
+  // This would require knowing the internal structure of GSArray
+  // For now, fall back to runtime calls
+  
+  // Fetch a batch of elements using objectAtIndex:
+  lldb::addr_t selector_addr = GetSelectorForName("objectAtIndex:");
+  if (selector_addr == LLDB_INVALID_ADDRESS)
+    return {};
+    
+  std::vector<lldb::addr_t> batch_elements;
+  batch_elements.reserve(batch_size);
+  
+  for (uint32_t i = batch_start; i < batch_start + batch_size; i++) {
+    std::vector<lldb::addr_t> args = {array_addr, selector_addr, i};
+    lldb::addr_t element = CallRuntimeFunction("objc_msgSend", args);
+    
+    if (element == LLDB_INVALID_ADDRESS)
+      break;  // Reached end of array or error
+      
+    batch_elements.push_back(element);
+  }
+  
+  // Cache the batch
+  if (!batch_elements.empty()) {
+    cache_entry.AddBatch(batch_start, std::move(batch_elements), m_process->GetStopID());
+    cache_entry.last_accessed_stop_id = m_process->GetStopID();
+  }
+  
+  // Return requested subset
+  std::vector<lldb::addr_t> result;
+  for (uint32_t i = start_idx; i < start_idx + count; i++) {
+    lldb::addr_t elem = cache_entry.GetElement(i);
+    if (elem != LLDB_INVALID_ADDRESS)
+      result.push_back(elem);
+    else
+      break;
+  }
+  
+  return result;
+}
+
+std::pair<std::vector<lldb::addr_t>, std::vector<lldb::addr_t>>
+RuntimeFunctionCaller::GetDictionaryKeysAndValues(lldb::addr_t dict_addr) {
+  
+  if (!m_process || dict_addr == LLDB_INVALID_ADDRESS)
+    return {{}, {}};
+    
+  // Invalidate cache if needed
+  m_formatter_cache->InvalidateIfNeeded(m_process);
+  
+  // Check cache
+  auto it = m_formatter_cache->collection_cache.dict_cache.find(dict_addr);
+  if (it != m_formatter_cache->collection_cache.dict_cache.end()) {
+    uint32_t current_stop = m_process->GetStopID();
+    // Allow cache to persist for a few stops
+    if (current_stop <= it->second.cached_at_stop_id + 5) {
+      m_formatter_cache->collection_cache.stats.hits++;
+      return {it->second.keys, it->second.values};
+    }
+  }
+  
+  m_formatter_cache->collection_cache.stats.misses++;
+  m_formatter_cache->collection_cache.stats.batch_fetches++;
+  
+  // Fetch all keys
+  lldb::addr_t all_keys = CallObjCMethod(dict_addr, "allKeys");
+  if (all_keys == LLDB_INVALID_ADDRESS)
+    return {{}, {}};
+    
+  // Get count of keys
+  lldb::addr_t count_result = CallObjCMethod(all_keys, "count");
+  if (count_result == LLDB_INVALID_ADDRESS || count_result > 10000)
+    return {{}, {}};
+    
+  uint32_t count = (uint32_t)count_result;
+  
+  std::vector<lldb::addr_t> keys;
+  std::vector<lldb::addr_t> values;
+  keys.reserve(count);
+  values.reserve(count);
+  
+  // Batch fetch keys
+  auto key_elements = GetArrayElements(all_keys, 0, count);
+  keys = std::move(key_elements);
+  
+  // Batch fetch values for each key
+  lldb::addr_t selector_addr = GetSelectorForName("objectForKey:");
+  if (selector_addr != LLDB_INVALID_ADDRESS) {
+    for (lldb::addr_t key : keys) {
+      std::vector<lldb::addr_t> args = {dict_addr, selector_addr, key};
+      lldb::addr_t value = CallRuntimeFunction("objc_msgSend", args);
+      values.push_back(value);
+    }
+  }
+  
+  // Cache the results
+  FormatterCache::CollectionCache::DictCacheEntry entry;
+  entry.keys = keys;
+  entry.values = values;
+  entry.cached_at_stop_id = m_process->GetStopID();
+  m_formatter_cache->collection_cache.dict_cache[dict_addr] = std::move(entry);
+  
+  return {keys, values};
+}
+
+std::vector<lldb::addr_t> RuntimeFunctionCaller::GetSetElements(lldb::addr_t set_addr) {
+  
+  if (!m_process || set_addr == LLDB_INVALID_ADDRESS)
+    return {};
+    
+  // Invalidate cache if needed
+  m_formatter_cache->InvalidateIfNeeded(m_process);
+  
+  // Check cache
+  auto it = m_formatter_cache->collection_cache.set_cache.find(set_addr);
+  if (it != m_formatter_cache->collection_cache.set_cache.end()) {
+    uint32_t current_stop = m_process->GetStopID();
+    // Allow cache to persist for a few stops
+    if (current_stop <= it->second.cached_at_stop_id + 5) {
+      m_formatter_cache->collection_cache.stats.hits++;
+      return it->second.elements;
+    }
+  }
+  
+  m_formatter_cache->collection_cache.stats.misses++;
+  m_formatter_cache->collection_cache.stats.batch_fetches++;
+  
+  // Get all objects from set
+  lldb::addr_t all_objects = CallObjCMethod(set_addr, "allObjects");
+  if (all_objects == LLDB_INVALID_ADDRESS)
+    return {};
+    
+  // Get count
+  lldb::addr_t count_result = CallObjCMethod(all_objects, "count");
+  if (count_result == LLDB_INVALID_ADDRESS || count_result > 10000)
+    return {};
+    
+  uint32_t count = (uint32_t)count_result;
+  
+  // Fetch all elements from the array
+  auto elements = GetArrayElements(all_objects, 0, count);
+  
+  // Cache the results
+  FormatterCache::CollectionCache::SetCacheEntry entry;
+  entry.elements = elements;
+  entry.cached_at_stop_id = m_process->GetStopID();
+  m_formatter_cache->collection_cache.set_cache[set_addr] = std::move(entry);
+  
+  return elements;
 }
 
 } // namespace gnustep_objc_runtime_utilities
