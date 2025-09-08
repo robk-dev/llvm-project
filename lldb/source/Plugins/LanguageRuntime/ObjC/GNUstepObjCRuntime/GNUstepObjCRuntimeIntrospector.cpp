@@ -51,7 +51,7 @@ GNUstepObjCRuntimeIntrospector::GNUstepObjCRuntimeIntrospector(Process *process)
   if (m_process) {
     m_address_size = m_process->GetAddressByteSize();
     m_byte_order = m_process->GetByteOrder();
-    
+
     // Create the consolidated runtime function caller
     m_runtime_caller = std::make_unique<RuntimeFunctionCaller>(m_process);
 
@@ -97,7 +97,6 @@ GNUstepObjCRuntimeIntrospector::GetClassName(lldb::addr_t isa_addr) {
   if (!m_process || isa_addr == LLDB_INVALID_ADDRESS) {
     return "";
   }
-
 
   // Check if this is a tagged pointer
   if (IsTaggedPointer(isa_addr)) {
@@ -226,7 +225,8 @@ GNUstepObjCRuntimeIntrospector::GetClassNameFromISA(lldb::addr_t isa_addr) {
 
 lldb::addr_t
 GNUstepObjCRuntimeIntrospector::FindClass(const std::string &class_name) {
-  // Consolidated implementation: use GetClassPointer which has better error handling
+  // Consolidated implementation: use GetClassPointer which has better error
+  // handling
   return GetClassPointer(class_name);
 }
 
@@ -366,20 +366,12 @@ lldb::addr_t GNUstepObjCRuntimeIntrospector::CallRuntimeFunctionImpl(
     const ValueList &args, ExecutionContext &exe_ctx, Status &error) const {
   using namespace gnustep_objc_runtime_utilities;
 
-  GNUStepLogger::ScopedLogger logger("CallRuntimeFunctionImpl", "[GNUstep]");
-  logger.LogMessage("Starting function call for {0}", function_name);
-
   // Get or create the function caller
   std::unique_ptr<FunctionCaller> &caller = GetOrCreateFunctionCaller(
       function_name, return_type, args, exe_ctx, error);
   if (!caller || error.Fail()) {
-    logger.LogMessage("Failed to get/create function caller for {0}: {1}",
-                      function_name,
-                      error.Fail() ? error.AsCString() : "null caller");
     return LLDB_INVALID_ADDRESS;
   }
-
-  logger.LogMessage("Got function caller for {0}", function_name);
 
   // Prepare for execution
   DiagnosticManager diagnostics;
@@ -596,7 +588,6 @@ lldb::ModuleSP GNUstepObjCRuntimeIntrospector::GetFoundationModule() const {
   return m_runtime_caller->FindFoundationModule();
 }
 
-
 lldb::addr_t GNUstepObjCRuntimeIntrospector::GetRuntimeFunctionAddress(
     const char *function_name) {
   if (!m_runtime_caller) {
@@ -715,44 +706,6 @@ GNUstepObjCRuntimeIntrospector::GetClassPointer(const std::string &class_name) {
       log,
       "[GNUstepIntrospector] GetClassPointer: objc_getClass('{0}') = 0x{1:x}",
       class_name, result);
-  return result;
-}
-
-lldb::addr_t GNUstepObjCRuntimeIntrospector::GetMetaClassPointer(
-    const std::string &class_name) {
-  if (!m_process || class_name.empty()) {
-    return LLDB_INVALID_ADDRESS;
-  }
-
-  // Runtime symbols handled by RuntimeFunctionCaller on-demand  
-  if (!GetRuntimeFunctionAddress("objc_getMetaClass")) {
-    return LLDB_INVALID_ADDRESS;
-  }
-
-  Log *log = GetLog(LLDBLog::Language);
-  LLDB_LOG(
-      log,
-      "[GNUstepIntrospector] GetMetaClassPointer: Looking for metaclass '{0}'",
-      class_name);
-
-  // Allocate class name string in target process memory using RAII helper
-  TargetStringAllocator string_alloc(m_process, class_name);
-  if (!string_alloc.IsValid()) {
-    LLDB_LOG(log,
-             "[GNUstepIntrospector] GetMetaClassPointer: Failed to allocate "
-             "memory for class name '{0}': {1}",
-             class_name, string_alloc.GetError().AsCString());
-    return LLDB_INVALID_ADDRESS;
-  }
-
-  // Call objc_getMetaClass(class_name) with properly allocated string
-  std::vector<lldb::addr_t> args = {string_alloc.GetAddress()};
-  lldb::addr_t result = CallRuntimeFunction("objc_getMetaClass", args);
-
-  LLDB_LOG(log,
-           "[GNUstepIntrospector] GetMetaClassPointer: "
-           "objc_getMetaClass('{0}') = 0x{1:x}",
-           class_name, result);
   return result;
 }
 
@@ -916,139 +869,18 @@ GNUstepObjCRuntimeIntrospector::GetClassMethods(lldb::addr_t class_ptr) {
 
 lldb::addr_t GNUstepObjCRuntimeIntrospector::CallRuntimeFunction(
     const std::string &function_name, const std::vector<lldb::addr_t> &args) {
-  
+
   if (!m_runtime_caller) {
     return LLDB_INVALID_ADDRESS;
   }
 
   // Delegate to the consolidated runtime function caller
-  lldb::addr_t result = m_runtime_caller->CallRuntimeFunction(function_name, args);
+  lldb::addr_t result =
+      m_runtime_caller->CallRuntimeFunction(function_name, args);
   return result;
 }
 
 // Runtime class enumeration methods for dynamic formatter registration
-
-std::vector<std::string> GNUstepObjCRuntimeIntrospector::GetAllClassNames() {
-  std::vector<std::string> class_names;
-  
-  if (!m_process) {
-    return class_names;
-  }
-  
-  // Runtime symbols handled by RuntimeFunctionCaller on-demand
-  if (!GetRuntimeFunctionAddress("objc_copyClassList")) {
-    return class_names;
-  }
-  
-  ExecutionContext exe_ctx;
-  if (!SetupRuntimeExecutionContext(m_process, exe_ctx)) {
-    return class_names;
-  }
-  
-  TypeSystemClangSP scratch_ts_sp = ScratchTypeSystemClang::GetForTarget(m_process->GetTarget());
-  if (!scratch_ts_sp) {
-    return class_names;
-  }
-  
-  // Call objc_copyClassList(&count) to get all classes
-  ValueList arg_values;
-  
-  // Allocate space for the count parameter
-  Status error;
-  lldb::addr_t count_addr = m_process->AllocateMemory(4, ePermissionsReadable | ePermissionsWritable, error);
-  if (error.Fail() || count_addr == LLDB_INVALID_ADDRESS) {
-    return class_names;
-  }
-  
-  Value count_value;
-  count_value.SetValueType(Value::ValueType::LoadAddress);
-  count_value.SetCompilerType(scratch_ts_sp->GetBasicType(eBasicTypeUnsignedInt).GetPointerType());
-  count_value.GetScalar() = count_addr;
-  arg_values.PushValue(count_value);
-  
-  // Call objc_copyClassList
-  CompilerType return_type = scratch_ts_sp->GetBasicType(eBasicTypeVoid).GetPointerType();
-  lldb::addr_t class_list_ptr = CallRuntimeFunctionImpl("objc_copyClassList", return_type, arg_values, exe_ctx, error);
-  
-  if (error.Fail() || class_list_ptr == LLDB_INVALID_ADDRESS) {
-    m_process->DeallocateMemory(count_addr);
-    return class_names;
-  }
-  
-  // Read the count
-  uint32_t class_count = 0;
-  size_t bytes_read = m_process->ReadMemory(count_addr, &class_count, sizeof(class_count), error);
-  if (error.Fail() || bytes_read != sizeof(class_count)) {
-    m_process->DeallocateMemory(count_addr);
-    return class_names;
-  }
-  
-  // Read the class list
-  for (uint32_t i = 0; i < class_count && i < 1000; ++i) { // Limit to prevent runaway
-    lldb::addr_t class_ptr_addr = class_list_ptr + (i * m_address_size);
-    lldb::addr_t class_ptr = 0;
-    
-    bytes_read = m_process->ReadMemory(class_ptr_addr, &class_ptr, m_address_size, error);
-    if (!error.Fail() && bytes_read == m_address_size) {
-      std::string class_name = GetClassName(class_ptr);
-      if (!class_name.empty()) {
-        class_names.push_back(class_name);
-      }
-    }
-  }
-  
-  // Free the allocated memory  
-  if (GetRuntimeFunctionAddress("free")) {
-    CallRuntimeFunction("free", { class_list_ptr });
-  }
-  
-  m_process->DeallocateMemory(count_addr);
-  return class_names;
-}
-
-std::vector<std::string> GNUstepObjCRuntimeIntrospector::GetFoundationClassNames() {
-  std::vector<std::string> foundation_classes;
-  std::vector<std::string> all_classes = GetAllClassNames();
-  
-  for (const std::string& class_name : all_classes) {
-    // Include Foundation classes (NS*, GS*) and other common patterns
-    if (class_name.find("NS") == 0 || 
-        class_name.find("GS") == 0 ||
-        class_name.find("__NS") == 0 ||
-        class_name.find("__CF") == 0) {
-      foundation_classes.push_back(class_name);
-    }
-  }
-  
-  return foundation_classes;
-}
-
-std::vector<std::string> GNUstepObjCRuntimeIntrospector::GetSubclassesOf(const std::string &base_class_name) {
-  std::vector<std::string> subclasses;
-  std::vector<std::string> all_classes = GetAllClassNames();
-  
-  lldb::addr_t base_class_ptr = GetClassPointer(base_class_name);
-  if (base_class_ptr == LLDB_INVALID_ADDRESS) {
-    return subclasses;
-  }
-  
-  for (const std::string& class_name : all_classes) {
-    lldb::addr_t class_ptr = GetClassPointer(class_name);
-    if (class_ptr != LLDB_INVALID_ADDRESS) {
-      // Check if this class is a subclass of the base class
-      // Simple approach: check if base_class_name appears in the class hierarchy
-      if (class_name.find(base_class_name) != std::string::npos) {
-        subclasses.push_back(class_name);
-      }
-    }
-  }
-  
-  return subclasses;
-}
-
-bool GNUstepObjCRuntimeIntrospector::ClassExists(const std::string &class_name) {
-  return GetClassPointer(class_name) != LLDB_INVALID_ADDRESS;
-}
 
 // === Enhanced Runtime API Implementation (merged from GNUstepRuntimeV2API) ===
 
@@ -1066,7 +898,8 @@ llvm::Error CreateError(const char *format, ...) {
 
 } // anonymous namespace
 
-llvm::Expected<std::string> GNUstepObjCRuntimeIntrospector::ReadCStringFromTarget(lldb::addr_t addr) {
+llvm::Expected<std::string>
+GNUstepObjCRuntimeIntrospector::ReadCStringFromTarget(lldb::addr_t addr) {
   if (addr == 0 || addr == LLDB_INVALID_ADDRESS) {
     return CreateError("Invalid address");
   }
@@ -1082,7 +915,8 @@ llvm::Expected<std::string> GNUstepObjCRuntimeIntrospector::ReadCStringFromTarge
   return std::string(buffer);
 }
 
-llvm::Expected<std::vector<uint8_t>> GNUstepObjCRuntimeIntrospector::ReadMemory(lldb::addr_t addr, size_t size) {
+llvm::Expected<std::vector<uint8_t>>
+GNUstepObjCRuntimeIntrospector::ReadMemory(lldb::addr_t addr, size_t size) {
   if (addr == 0 || addr == LLDB_INVALID_ADDRESS) {
     return CreateError("Invalid address");
   }
@@ -1101,64 +935,66 @@ llvm::Expected<std::vector<uint8_t>> GNUstepObjCRuntimeIntrospector::ReadMemory(
 llvm::Expected<std::vector<GNUstepObjCRuntimeIntrospector::IvarInfo>>
 GNUstepObjCRuntimeIntrospector::GetAllIvarsIncludingInherited(Class cls) {
   std::vector<IvarInfo> all_ivars;
-  
-  if (!cls || cls == (void*)LLDB_INVALID_ADDRESS) {
+
+  if (!cls || cls == (void *)LLDB_INVALID_ADDRESS) {
     return CreateError("Invalid class pointer");
   }
-  
+
   // Check if we have the runtime functions available
   // Runtime symbols handled by RuntimeFunctionCaller on-demand
-  if (!GetRuntimeFunctionAddress("class_copyIvarList") || 
+  if (!GetRuntimeFunctionAddress("class_copyIvarList") ||
       !GetRuntimeFunctionAddress("ivar_getName") ||
-      !GetRuntimeFunctionAddress("ivar_getTypeEncoding") || 
+      !GetRuntimeFunctionAddress("ivar_getTypeEncoding") ||
       !GetRuntimeFunctionAddress("ivar_getOffset")) {
     return CreateError("Runtime functions not available");
   }
-  
+
   // Walk up the class hierarchy and collect ivars
   lldb::addr_t current_class = (lldb::addr_t)cls;
-  
+
   while (current_class && current_class != LLDB_INVALID_ADDRESS) {
-    
+
     // Call class_copyIvarList through runtime function pointer
     // We need to allocate memory in the target process for the output count
     Status error;
-    lldb::addr_t count_addr = m_process->AllocateMemory(sizeof(unsigned int), 
-                                                         ePermissionsReadable | ePermissionsWritable, 
-                                                         error);
+    lldb::addr_t count_addr = m_process->AllocateMemory(
+        sizeof(unsigned int), ePermissionsReadable | ePermissionsWritable,
+        error);
     if (error.Fail() || count_addr == LLDB_INVALID_ADDRESS) {
       continue;
     }
-    
+
     // Initialize count to 0
     unsigned int zero = 0;
     m_process->WriteMemory(count_addr, &zero, sizeof(unsigned int), error);
-    
+
     std::vector<lldb::addr_t> args = {current_class, count_addr};
-    
+
     // We need to use CallRuntimeFunction to get the ivar list
-    lldb::addr_t ivar_list_ptr = CallRuntimeFunction("class_copyIvarList", args);
-    
+    lldb::addr_t ivar_list_ptr =
+        CallRuntimeFunction("class_copyIvarList", args);
+
     // Read the count back from target memory
     unsigned int ivar_count = 0;
     m_process->ReadMemory(count_addr, &ivar_count, sizeof(unsigned int), error);
-    
+
     // Free the count memory
     m_process->DeallocateMemory(count_addr);
-    
-    if (ivar_list_ptr && ivar_list_ptr != LLDB_INVALID_ADDRESS && ivar_count > 0) {
-      
+
+    if (ivar_list_ptr && ivar_list_ptr != LLDB_INVALID_ADDRESS &&
+        ivar_count > 0) {
+
       // Read the ivar array
       for (unsigned int i = 0; i < ivar_count; i++) {
         // Read the Ivar pointer from the array
         Status error;
         lldb::addr_t ivar_ptr = m_process->ReadPointerFromMemory(
             ivar_list_ptr + (i * m_address_size), error);
-        
+
         if (error.Fail() || ivar_ptr == 0 || ivar_ptr == LLDB_INVALID_ADDRESS) {
           continue;
         }
-        
+
         // Get ivar name
         args = {ivar_ptr};
         lldb::addr_t name_ptr = CallRuntimeFunction("ivar_getName", args);
@@ -1169,9 +1005,10 @@ GNUstepObjCRuntimeIntrospector::GetAllIvarsIncludingInherited(Class cls) {
             ivar_name = *name_result;
           }
         }
-        
+
         // Get ivar type encoding
-        lldb::addr_t type_ptr = CallRuntimeFunction("ivar_getTypeEncoding", args);
+        lldb::addr_t type_ptr =
+            CallRuntimeFunction("ivar_getTypeEncoding", args);
         std::string type_encoding;
         if (type_ptr && type_ptr != LLDB_INVALID_ADDRESS) {
           auto type_result = ReadCStringFromTarget(type_ptr);
@@ -1179,70 +1016,68 @@ GNUstepObjCRuntimeIntrospector::GetAllIvarsIncludingInherited(Class cls) {
             type_encoding = *type_result;
           }
         }
-        
+
         // Get ivar offset
         lldb::addr_t offset = CallRuntimeFunction("ivar_getOffset", args);
-        
-        
+
         IvarInfo info;
         info.name = ivar_name;
         info.type_encoding = type_encoding;
         info.offset = (ptrdiff_t)offset;
         all_ivars.push_back(info);
       }
-      
+
       // Free the ivar list
       if (GetRuntimeFunctionAddress("free")) {
         args = {ivar_list_ptr};
         CallRuntimeFunction("free", args);
       }
     }
-    
+
     // Get superclass
     args = {current_class};
     current_class = CallRuntimeFunction("class_getSuperclass", args);
   }
-  
+
   return all_ivars;
 }
 
 llvm::Expected<std::vector<GNUstepObjCRuntimeIntrospector::Class>>
 GNUstepObjCRuntimeIntrospector::GetAllClasses() {
   std::vector<Class> classes;
-  
+
   if (!m_process) {
     return CreateError("No process available");
   }
-  
+
   // Runtime symbols handled by RuntimeFunctionCaller on-demand
   if (!GetRuntimeFunctionAddress("objc_copyClassList")) {
     return CreateError("objc_copyClassList not available");
   }
-  
+
   // Allocate memory for count
   Status error;
-  lldb::addr_t count_addr = m_process->AllocateMemory(sizeof(unsigned int),
-                                                       ePermissionsReadable | ePermissionsWritable,
-                                                       error);
+  lldb::addr_t count_addr = m_process->AllocateMemory(
+      sizeof(unsigned int), ePermissionsReadable | ePermissionsWritable, error);
   if (error.Fail() || count_addr == LLDB_INVALID_ADDRESS) {
     return CreateError("Failed to allocate memory for count");
   }
-  
+
   // Initialize count to 0
   unsigned int zero = 0;
   m_process->WriteMemory(count_addr, &zero, sizeof(unsigned int), error);
-  
+
   // Call objc_copyClassList
   std::vector<lldb::addr_t> args = {count_addr};
   lldb::addr_t class_list_ptr = CallRuntimeFunction("objc_copyClassList", args);
-  
+
   // Read the count
   unsigned int count = 0;
   m_process->ReadMemory(count_addr, &count, sizeof(unsigned int), error);
-  
+
   // Free the count memory
   m_process->DeallocateMemory(count_addr);
-  
+
   if (class_list_ptr && class_list_ptr != LLDB_INVALID_ADDRESS && count > 0) {
     // Read the class pointers
     for (unsigned int i = 0; i < count; i++) {
@@ -1252,38 +1087,38 @@ GNUstepObjCRuntimeIntrospector::GetAllClasses() {
         classes.push_back((Class)class_ptr);
       }
     }
-    
+
     // Free the class list
     if (GetRuntimeFunctionAddress("free")) {
       args = {class_list_ptr};
       CallRuntimeFunction("free", args);
     }
   }
-  
+
   return classes;
 }
 
 llvm::Expected<std::vector<std::pair<lldb::addr_t, std::string>>>
 GNUstepObjCRuntimeIntrospector::GetAllClassesWithISAs() {
-  // Use session-based caching since the class list doesn't change during debugging
-  // unless new classes are dynamically loaded (which is rare)
+  // Use session-based caching since the class list doesn't change during
+  // debugging unless new classes are dynamically loaded (which is rare)
   if (m_all_classes_cached) {
     // Cache is valid for the entire session, return cached data
     static int cache_hits = 0;
     cache_hits++;
-    if (cache_hits % 100 == 1) {  // Only log every 100th hit to reduce noise
+    if (cache_hits % 100 == 1) { // Only log every 100th hit to reduce noise
     }
     return m_all_classes_cache;
   }
-  
+
   // Cache doesn't exist, enumerate classes once for the session
   std::vector<std::pair<lldb::addr_t, std::string>> class_info;
-  
+
   auto classes_result = GetAllClasses();
   if (!classes_result) {
     return classes_result.takeError();
   }
-  
+
   for (Class cls : *classes_result) {
     lldb::addr_t isa = (lldb::addr_t)cls;
     std::string name = GetClassName(isa);
@@ -1291,10 +1126,10 @@ GNUstepObjCRuntimeIntrospector::GetAllClassesWithISAs() {
       class_info.push_back({isa, name});
     }
   }
-  
+
   // Update cache - valid for entire session
   m_all_classes_cache = class_info;
   m_all_classes_cached = true;
-  
+
   return class_info;
 }

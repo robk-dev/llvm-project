@@ -14,10 +14,10 @@
 #ifndef LLDB_SOURCE_PLUGINS_LANGUAGERUNTIME_OBJC_GNUSTEPOBJCRUNTIME_GNUSTEPUNIVERSALFORMATTER_H
 #define LLDB_SOURCE_PLUGINS_LANGUAGERUNTIME_OBJC_GNUSTEPOBJCRUNTIME_GNUSTEPUNIVERSALFORMATTER_H
 
+#include "GNUstepObjCRuntimeIntrospector.h"
+#include "Plugins/LanguageRuntime/ObjC/ObjCLanguageRuntime.h"
 #include "lldb/DataFormatters/TypeSummary.h"
 #include "lldb/DataFormatters/TypeSynthetic.h"
-#include "Plugins/LanguageRuntime/ObjC/ObjCLanguageRuntime.h"
-#include "../GNUstepObjCRuntimeIntrospector.h"
 
 namespace lldb_private {
 namespace formatters {
@@ -30,17 +30,17 @@ bool GNUstepUniversalSummaryProvider(ValueObject &valobj, Stream &stream,
 class GNUstepUniversalSyntheticProvider : public SyntheticChildrenFrontEnd {
 public:
   GNUstepUniversalSyntheticProvider(ValueObject &valobj);
-  
+
   ~GNUstepUniversalSyntheticProvider() override = default;
-  
+
   llvm::Expected<uint32_t> CalculateNumChildren() override;
-  
+
   lldb::ValueObjectSP GetChildAtIndex(uint32_t idx) override;
-  
+
   lldb::ChildCacheState Update() override;
-  
+
   bool MightHaveChildren() override;
-  
+
   size_t GetIndexOfChildWithName(ConstString name) override;
 
 private:
@@ -48,7 +48,7 @@ private:
   lldb::addr_t m_obj_addr;
   std::string m_class_name;
   uint32_t m_count;
-  
+
   enum ObjectType {
     Unknown,
     TaggedPointer,
@@ -58,10 +58,10 @@ private:
     Other,
     CustomClass
   };
-  
+
   ObjectType m_type;
   ObjCLanguageRuntime::ClassDescriptorSP m_class_descriptor;
-  
+
   // Helper methods
   lldb::ValueObjectSP EvaluateExpression(const std::string &expr);
   lldb::ValueObjectSP GetArrayElementViaFunctionCaller(uint32_t idx);

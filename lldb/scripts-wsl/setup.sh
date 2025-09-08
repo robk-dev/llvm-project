@@ -28,22 +28,6 @@ BUILD_DIR="${PROJECT_ROOT}/build"
 BUILD_TYPE="RelWithDebInfo"
 PARALLEL_JOBS=${PARALLEL_JOBS:-$(nproc)}
 
-# Python configuration for WSL (force Linux Python, not Windows)
-# Auto-detect Python version from system
-PYTHON3_EXEC="/usr/bin/python3"
-PYTHON3_VERSION=$($PYTHON3_EXEC -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
-PYTHON3_INC="/usr/include/python${PYTHON3_VERSION}"
-PYTHON3_LIB="/usr/lib/x86_64-linux-gnu/libpython${PYTHON3_VERSION}.so"
-
-# Verify Python dev files exist
-if [ ! -d "$PYTHON3_INC" ]; then
-    print_error "Python ${PYTHON3_VERSION} headers not found at $PYTHON3_INC"
-    print_error "Install with: sudo apt-get install python${PYTHON3_VERSION}-dev"
-    exit 1
-fi
-
-print_success "Found Python ${PYTHON3_VERSION} headers at $PYTHON3_INC"
-
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -70,6 +54,22 @@ print_error() {
 print_warning() {
     echo -e "${YELLOW}⚠ $1${NC}"
 }
+
+# Python configuration for WSL (force Linux Python, not Windows)
+# Auto-detect Python version from system
+PYTHON3_EXEC="/usr/bin/python3"
+PYTHON3_VERSION=$($PYTHON3_EXEC -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+PYTHON3_INC="/usr/include/python${PYTHON3_VERSION}"
+PYTHON3_LIB="/usr/lib/x86_64-linux-gnu/libpython${PYTHON3_VERSION}.so"
+
+# Verify Python dev files exist
+if [ ! -d "$PYTHON3_INC" ]; then
+    print_error "Python ${PYTHON3_VERSION} headers not found at $PYTHON3_INC"
+    print_error "Install with: sudo apt-get install python${PYTHON3_VERSION}-dev"
+    exit 1
+fi
+
+print_success "Found Python ${PYTHON3_VERSION} headers at $PYTHON3_INC"
 
 # Check prerequisites
 check_prerequisites() {

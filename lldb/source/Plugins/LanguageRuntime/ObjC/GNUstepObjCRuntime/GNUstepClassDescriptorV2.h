@@ -20,43 +20,41 @@ namespace lldb_private {
 
 class GNUstepClassDescriptorV2 : public ObjCLanguageRuntime::ClassDescriptor {
 public:
-  GNUstepClassDescriptorV2(GNUstepObjCRuntime &runtime, ObjCLanguageRuntime::ObjCISA isa, 
+  GNUstepClassDescriptorV2(GNUstepObjCRuntime &runtime,
+                           ObjCLanguageRuntime::ObjCISA isa,
                            const std::string &name);
-  
+
   ~GNUstepClassDescriptorV2() override = default;
 
   ConstString GetClassName() override { return ConstString(m_class_name); }
-  
+
   ObjCLanguageRuntime::ClassDescriptorSP GetSuperclass() override;
-  
+
   ObjCLanguageRuntime::ClassDescriptorSP GetMetaclass() const override;
-  
+
   bool IsValid() override { return m_isa != 0; }
-  
+
+  // GNUstep doesn't use KVO or CF types
   bool IsKVO() override { return false; }
-  
   bool IsCFType() override { return false; }
-  
-  bool GetTaggedPointerInfo(uint64_t *info_bits = nullptr,
-                           uint64_t *value_bits = nullptr,
-                           uint64_t *payload = nullptr) override {
+
+  // Tagged pointer methods - not applicable to class descriptors
+  bool GetTaggedPointerInfo(uint64_t *, uint64_t *, uint64_t *) override {
     return false;
   }
-  
-  bool GetTaggedPointerInfoSigned(uint64_t *info_bits = nullptr,
-                                  int64_t *value_bits = nullptr,
-                                  uint64_t *payload = nullptr) override {
+  bool GetTaggedPointerInfoSigned(uint64_t *, int64_t *, uint64_t *) override {
     return false;
   }
-  
+
   uint64_t GetInstanceSize() override;
-  
+
   ObjCLanguageRuntime::ObjCISA GetISA() override { return m_isa; }
-  
+
   // The critical method - properly implement this to enumerate ivars
   bool Describe(
       std::function<void(ObjCLanguageRuntime::ObjCISA)> const &superclass_func,
-      std::function<bool(const char *, const char *)> const &instance_method_func,
+      std::function<bool(const char *, const char *)> const
+          &instance_method_func,
       std::function<bool(const char *, const char *)> const &class_method_func,
       std::function<bool(const char *, const char *, lldb::addr_t,
                          uint64_t)> const &ivar_func) const override;
@@ -67,7 +65,7 @@ private:
   std::string m_class_name;
   mutable std::once_flag m_ivars_fetched;
   mutable std::vector<GNUstepObjCRuntimeIntrospector::IvarInfo> m_ivars;
-  
+
   void FetchIvars() const;
 };
 

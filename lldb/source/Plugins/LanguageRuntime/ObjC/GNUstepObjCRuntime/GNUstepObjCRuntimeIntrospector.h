@@ -14,7 +14,6 @@
 #include "lldb/Target/Process.h"
 #include "lldb/lldb-private.h"
 #include "llvm/Support/Error.h"
-#include <atomic>
 #include <memory>
 #include <mutex>
 #include <unordered_map>
@@ -53,7 +52,6 @@ public:
   // Check if this looks like a valid GNUstep runtime
   bool IsValidGNUstepRuntime();
 
-
   // CRITICAL: Direct method introspection using runtime.h functions
   // These avoid expression evaluation during interface declaration to break
   // recursion
@@ -72,10 +70,6 @@ public:
 
   // Get class pointer by name using objc_getClass (direct runtime call)
   lldb::addr_t GetClassPointer(const std::string &class_name);
-
-  // Get metaclass pointer by name using objc_getMetaClass (direct runtime call)
-  lldb::addr_t GetMetaClassPointer(const std::string &class_name);
-
 
   // Get runtime function address by name with caching
   lldb::addr_t GetRuntimeFunctionAddress(const char *function_name);
@@ -99,20 +93,6 @@ public:
   lldb::addr_t CallRuntimeFunction(const std::string &function_name,
                                    const std::vector<lldb::addr_t> &args);
 
-  // Runtime class enumeration methods for dynamic formatter registration
-  
-  // Get all class names currently registered with the runtime
-  std::vector<std::string> GetAllClassNames();
-  
-  // Get all classes that are subclasses of a given base class (e.g., "NSString")
-  std::vector<std::string> GetSubclassesOf(const std::string &base_class_name);
-  
-  // Check if a class name exists in the runtime
-  bool ClassExists(const std::string &class_name);
-  
-  // Get all Foundation class names (classes starting with NS, GS, etc.)
-  std::vector<std::string> GetFoundationClassNames();
-
   // === Enhanced Runtime API (merged from GNUstepRuntimeV2API) ===
 
   // Runtime type aliases matching libobjc2
@@ -132,113 +112,20 @@ public:
     std::string defining_class_name;
   };
 
-  // Information about a property
-  struct PropertyInfo {
-    std::string name;
-    std::string attributes;
-    Class defining_class;
-    std::string defining_class_name;
-  };
-
-  // Complete class information including hierarchy
-  struct ClassInfo {
-    std::string name;
-    Class class_ptr;
-    Class superclass_ptr;
-    std::string superclass_name;
-    size_t instance_size;
-
-    // Complete hierarchy from this class to NSObject
-    std::vector<Class> hierarchy;
-    std::vector<std::string> hierarchy_names;
-
-    // All ivars including inherited
-    std::vector<IvarInfo> all_ivars;
-
-    // All methods including inherited
-    std::vector<MethodInfo> all_methods;
-
-    // All properties including inherited
-    std::vector<PropertyInfo> all_properties;
-
-    // Ivars defined only in this class
-    std::vector<IvarInfo> declared_ivars;
-
-    // Methods defined only in this class
-    std::vector<MethodInfo> declared_methods;
-
-    // Properties defined only in this class
-    std::vector<PropertyInfo> declared_properties;
-
-    bool is_meta_class;
-    bool is_root_class;
-  };
-
   // === Core Enhanced Runtime Methods ===
 
   // Get all runtime classes as Class pointers
   llvm::Expected<std::vector<Class>> GetAllClasses();
-  
+
   // Get all runtime classes with their ISA addresses and names
-  llvm::Expected<std::vector<std::pair<lldb::addr_t, std::string>>> GetAllClassesWithISAs();
-
-  // Get all Foundation classes with full ClassInfo
-  llvm::Expected<std::vector<ClassInfo>> GetAllFoundationClasses();
-
-  // Get complete class hierarchy from class to root
-  llvm::Expected<std::vector<Class>> GetClassHierarchy(Class cls);
-
-  // Get complete class hierarchy with names
-  llvm::Expected<std::vector<std::pair<Class, std::string>>>
-  GetClassHierarchyWithNames(Class cls);
+  llvm::Expected<std::vector<std::pair<lldb::addr_t, std::string>>>
+  GetAllClassesWithISAs();
 
   // Get all ivars including inherited ones
   llvm::Expected<std::vector<IvarInfo>>
   GetAllIvarsIncludingInherited(Class cls);
 
-  // Get all methods including inherited ones
-  llvm::Expected<std::vector<MethodInfo>>
-  GetAllMethodsIncludingInherited(Class cls);
-
-  // Get all class methods from metaclass (for class method discovery)
-  llvm::Expected<std::vector<MethodInfo>>
-  GetAllClassMethods(const std::string &class_name);
-
-  // Get all properties including inherited ones
-  llvm::Expected<std::vector<PropertyInfo>>
-  GetAllPropertiesIncludingInherited(Class cls);
-
-  // Get comprehensive class information
-  llvm::Expected<ClassInfo> GetObjCClassInfo(const std::string &class_name);
-
-  // Get class information from pointer
-  llvm::Expected<ClassInfo> GetClassInfoFromPointer(Class cls);
-
   // Find a class by name (enhanced version returning Class pointer)
-
-  // Get class of an object (or metaclass of a class)
-  llvm::Expected<Class> GetObjectClass(void *obj);
-
-  // Get class name of an object
-  llvm::Expected<std::string> GetObjectClassName(lldb::addr_t obj_addr);
-
-  // Check if a class is a Foundation class
-  bool IsFoundationClass(const std::string &class_name);
-
-  // Check if a class responds to a selector
-  bool ClassRespondsToSelector(const std::string &class_name,
-                               const std::string &selector_name);
-
-  // Get instance method for selector
-  llvm::Expected<MethodInfo>
-  GetInstanceMethod(const std::string &class_name,
-                    const std::string &selector_name);
-
-  // Get runtime version information
-  std::string GetRuntimeVersion() const;
-
-  // Free memory allocated by runtime functions
-  bool CallFreeFunction(lldb::addr_t ptr);
 
 private:
   Process *m_process;
@@ -248,11 +135,8 @@ private:
   // Consolidated runtime function caller
   std::unique_ptr<RuntimeFunctionCaller> m_runtime_caller;
 
-
-
   // Thread safety for enhanced functionality
   mutable std::recursive_mutex m_mutex;
-
 
   // Cache for function callers to avoid repeated compilation
   struct FunctionCallerCache {
@@ -290,7 +174,6 @@ private:
 
   // === Enhanced Private Methods (merged from GNUstepRuntimeV2API) ===
 
-
   // Call a runtime function in target process with comprehensive error handling
   template <typename ReturnType>
   llvm::Expected<ReturnType>
@@ -304,12 +187,6 @@ private:
   llvm::Expected<std::vector<uint8_t>> ReadMemory(lldb::addr_t addr,
                                                   size_t size);
 
-  // Cache for class information
-  void CacheClassInfo(const ClassInfo &info);
-
-  // Get cached class info
-  llvm::Expected<ClassInfo> GetCachedClassInfo(const std::string &name);
-
   // Direct memory reading approach for class enumeration
   llvm::Expected<std::vector<Class>> GetAllClassesDirect();
 
@@ -317,11 +194,6 @@ private:
   lldb::ModuleSP m_objc_module;
   lldb::ModuleSP m_foundation_module;
 
-  // Caches for performance
-  std::unordered_map<std::string, ClassInfo> m_class_cache;
-  std::unordered_map<Class, std::string> m_class_name_cache;
-  std::vector<std::string> m_foundation_classes;
-  
   // Cache for all runtime classes to avoid repeated objc_copyClassList calls
   mutable std::vector<std::pair<lldb::addr_t, std::string>> m_all_classes_cache;
   mutable bool m_all_classes_cached = false;

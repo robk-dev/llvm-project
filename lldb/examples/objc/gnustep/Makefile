@@ -30,11 +30,7 @@ LDFLAGS = -L/home/robk/code/llvm-project/lldb/gnustep-install/lib \
 LIBS = -lgnustep-base -lobjc -lBlocksRuntime -lpthread -lm
 
 # Source files
-SOURCES = simple_test.m custom_class_test.m foundation_test.m string_test.m \
-          test_nsstring_formatter.m test_nsnumber_formatter.m array_test.m \
-          simple_array_test.m test_nsnumber_comprehensive.m test_nsarray_comprehensive.m \
-          dictionary_test.m nsset_test.m test_collections_formatter.m test_method_enum.m \
-          test_indexset.m test_decimalnumber.m test_characterset.m
+SOURCES = simple_test.m custom_class_test.m
 EXECUTABLES = $(SOURCES:.m=)
 
 .PHONY: all clean symbols

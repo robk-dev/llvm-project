@@ -238,7 +238,7 @@ run_api_tests() {
     cd "$api_test_dir" || exit 1
     
     # Test each main program individually
-    local test_programs=("main.m" "test_collections.m" "test_new_formatters.m")
+    local test_programs=("main.m")
     local test_results=()
     
     for program in "${test_programs[@]}"; do

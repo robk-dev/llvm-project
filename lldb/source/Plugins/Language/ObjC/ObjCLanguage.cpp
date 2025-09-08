@@ -35,7 +35,7 @@
 #include "NSString.h"
 
 // GNUstep universal formatter
-#include "Plugins/LanguageRuntime/ObjC/GNUstepObjCRuntime/formatters/GNUstepUniversalFormatter.h"
+#include "Plugins/LanguageRuntime/ObjC/GNUstepObjCRuntime/GNUstepUniversalFormatter.h"
 
 using namespace lldb;
 using namespace lldb_private;

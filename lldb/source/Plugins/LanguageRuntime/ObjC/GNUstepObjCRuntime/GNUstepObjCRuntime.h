@@ -9,26 +9,26 @@
 #ifndef LLDB_SOURCE_PLUGINS_LANGUAGERUNTIME_OBJC_GNUSTEPOBJCRUNTIME_H
 #define LLDB_SOURCE_PLUGINS_LANGUAGERUNTIME_OBJC_GNUSTEPOBJCRUNTIME_H
 
+// LLDB includes
 #include "../ObjCLanguageRuntime.h"
 #include "lldb/Core/ModuleList.h"
 #include "lldb/Expression/UtilityFunction.h"
 #include "lldb/Symbol/DeclVendor.h"
 #include "lldb/lldb-private.h"
 
+// Local includes
 #include "GNUstepObjCRuntimeIntrospector.h"
 #include "GNUstepObjCRuntimeUtilities.h"
 
-#include <chrono>
-#include <unordered_map>
-
-#include <map>
+// Standard library includes
+#include <memory>
 #include <string>
+#include <unordered_map>
 
 namespace lldb_private {
 
 // Forward declarations
 class ExecutionContext;
-class TypeSystemClang;
 
 class GNUstepObjCRuntime : public ObjCLanguageRuntime {
 public:
@@ -79,7 +79,6 @@ public:
   llvm::Expected<std::unique_ptr<UtilityFunction>>
   CreateObjectChecker(std::string name, ExecutionContext &exe_ctx) override;
 
-
   void UpdateISAToDescriptorMapIfNeeded() override;
 
   // ClassDescriptor support
@@ -94,22 +93,25 @@ public:
   // Constructor (public for make_unique)
   GNUstepObjCRuntime(Process *process);
 
-  // Get the runtime introspector 
-  GNUstepObjCRuntimeIntrospector *GetRuntimeIntrospector() { 
-    return m_introspector_up.get(); 
+  /// Get the runtime introspector for direct runtime access
+  /// \return Pointer to the introspector instance
+  GNUstepObjCRuntimeIntrospector *GetRuntimeIntrospector() {
+    return m_introspector_up.get();
   }
 
-  // Get the runtime function caller
-  gnustep_objc_runtime_utilities::RuntimeFunctionCaller *GetRuntimeFunctionCaller() {
+  /// Get the runtime function caller for making runtime calls
+  /// \return Pointer to the function caller instance
+  gnustep_objc_runtime_utilities::RuntimeFunctionCaller *
+  GetRuntimeFunctionCaller() {
     return m_runtime_caller.get();
   }
-
 
   // Override from LanguageRuntime - this is the critical hook that IRForTarget
   // uses
 
 private:
-  // Helper method to call runtime functions with string arguments (delegates to utilities)
+  // Helper method to call runtime functions with string arguments (delegates to
+  // utilities)
   lldb::addr_t CallRuntimeFunction(const char *function_name,
                                    const char *string_arg);
 
@@ -123,24 +125,11 @@ private:
   bool m_in_dynamic_type_check = false;
   bool m_updating_isa_to_descriptor = false;
   // Consolidated runtime function caller
-  std::unique_ptr<gnustep_objc_runtime_utilities::RuntimeFunctionCaller> m_runtime_caller;
+  std::unique_ptr<gnustep_objc_runtime_utilities::RuntimeFunctionCaller>
+      m_runtime_caller;
 
-  // Caching for performance
-  struct ObjectDescriptionCache {
-    std::unordered_map<lldb::addr_t, std::string> descriptions;
-    std::chrono::steady_clock::time_point last_invalidation =
-        std::chrono::steady_clock::now();
-
-    void InvalidateIfStale() {
-      auto now = std::chrono::steady_clock::now();
-      auto age = std::chrono::duration_cast<std::chrono::seconds>(
-          now - last_invalidation);
-      if (age.count() > 30) { // Invalidate after 30 seconds
-        descriptions.clear();
-        last_invalidation = now;
-      }
-    }
-  } m_object_description_cache;
+  // Simple cache for object descriptions
+  std::unordered_map<lldb::addr_t, std::string> m_object_description_cache;
 
   // Symbol resolution now handled entirely by runtime introspection
 };
