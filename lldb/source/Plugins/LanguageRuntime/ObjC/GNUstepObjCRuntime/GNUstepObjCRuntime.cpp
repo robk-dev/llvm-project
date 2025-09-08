@@ -32,9 +32,6 @@
 #include "lldb/Utility/LLDBLog.h"
 #include "lldb/Utility/Log.h"
 #include "Plugins/TypeSystem/Clang/TypeSystemClang.h"
-#include "clang/AST/ASTContext.h"
-#include "clang/AST/Decl.h"
-#include <atomic>
 
 using namespace lldb;
 using namespace lldb_private;
@@ -141,23 +138,6 @@ void GNUstepObjCRuntime::ModulesDidLoad(const ModuleList &module_list) {
   }
 }
 
-void GNUstepObjCRuntime::DidLaunch() {
-  Log *log = GetLog(LLDBLog::Language | LLDBLog::Types);
-  LLDB_LOG(log, "[GNUstep] DidLaunch: Process launched, registering formatters only");
-  
-  // Formatters are registered in ObjCLanguage.cpp via LoadGNUstepFormatters()
-  // Expression evaluation hooks will be installed lazily when needed
-  // This prevents hanging with NSNumber literals during process launch
-}
-
-void GNUstepObjCRuntime::DidAttach(ArchSpec &arch_spec) {
-  Log *log = GetLog(LLDBLog::Language | LLDBLog::Types);
-  LLDB_LOG(log, "[GNUstep] DidAttach: Process attached, registering formatters only");
-  
-  // Formatters are registered in ObjCLanguage.cpp via LoadGNUstepFormatters()
-  // Expression evaluation hooks will be installed lazily when needed
-  // This prevents hanging with NSNumber literals during process attach
-}
 
 llvm::Error GNUstepObjCRuntime::GetObjectDescription(Stream &str,
                                                 ValueObject &object) {
@@ -956,58 +936,6 @@ extern "C" void
                                               eLanguageTypeC, exe_ctx);
 }
 
-llvm::Expected<std::unique_ptr<UtilityFunction>>
-GNUstepObjCRuntime::CreateSubscriptUtilityFunctions(ExecutionContext &exe_ctx) {
-  Log *log = GetLog(LLDBLog::Process | LLDBLog::Types);
-  LLDB_LOG(log, "GNUstepObjCRuntime::CreateSubscriptUtilityFunctions called");
-  
-  // Create utility functions that implement modern subscript syntax by forwarding to older methods
-  // This enables po fruits[0] and po dict[@"key"] to work by translating to [fruits objectAtIndex:0]
-  const char *subscript_functions = R"(
-extern "C" void *objc_lookup_class(const char *);
-extern "C" void *class_getMethodImplementation(void *cls, void *sel);
-extern "C" void *sel_getUid(const char *);
-extern "C" void *objc_msgSend(void *self, void *sel, ...);
-
-// Implement objectAtIndexedSubscript: by calling objectAtIndex:
-extern "C" void* 
-__lldb_objc_objectAtIndexedSubscript(void *self, void *_cmd, long idx) {
-  if (!self) return (void *)0;
-  
-  // Get the selector for objectAtIndex:
-  void *sel_objectAtIndex = sel_getUid("objectAtIndex:");
-  if (!sel_objectAtIndex) return (void *)0;
-  
-  // Forward the call to the older objectAtIndex: method
-  return objc_msgSend(self, sel_objectAtIndex, idx);
-}
-
-// Implement objectForKeyedSubscript: by calling objectForKey:
-extern "C" void*
-__lldb_objc_objectForKeyedSubscript(void *self, void *_cmd, void *key) {
-  if (!self) return (void *)0;
-  
-  // Get the selector for objectForKey:
-  void *sel_objectForKey = sel_getUid("objectForKey:");
-  if (!sel_objectForKey) return (void *)0;
-  
-  // Forward the call to the older objectForKey: method
-  return objc_msgSend(self, sel_objectForKey, key);
-}
-
-// Entry point function for the utility
-void __lldb_objc_subscript_utilities() {
-  // This function exists only to satisfy the utility function loader
-  // The actual work is done by the functions above
-}
-)";
-
-  LLDB_LOG(log, "GNUstepObjCRuntime::CreateSubscriptUtilityFunctions: Generated subscript utility functions");
-
-  // Create the utility function that LLDB can execute
-  return GetTargetRef().CreateUtilityFunction(subscript_functions, "__lldb_objc_subscript_utilities",
-                                              eLanguageTypeC, exe_ctx);
-}
 
 void GNUstepObjCRuntime::UpdateISAToDescriptorMapIfNeeded() {
   Log *log = GetLog(LLDBLog::Process | LLDBLog::Types);
@@ -1193,37 +1121,6 @@ GNUstepObjCRuntime::GetClassDescriptorFromClassName(ConstString class_name) {
   return ClassDescriptorSP();
 }
 
-void GNUstepObjCRuntime::InitializeRuntimeAPI() {
-  Log *log = GetLog(LLDBLog::Process | LLDBLog::Types);
-  LLDB_LOG(log, "GNUstepObjCRuntime::InitializeRuntimeAPI - Initializing runtime API");
-  
-  if (!m_process) {
-    LLDB_LOG(log, "No process available for runtime API");
-    return;
-  }
-  
-  // Use the merged runtime introspector for Foundation class enumeration
-  if (m_introspector_up) {
-    LLDB_LOG(log, "Runtime introspector available for Foundation class detection");
-    
-    // Use the merged functionality to get Foundation classes
-    auto foundation_classes = m_introspector_up->GetFoundationClassNames();
-    LLDB_LOG(log, "Found {0} Foundation classes", foundation_classes.size());
-    
-    // Log first few Foundation classes for debugging
-    size_t count = 0;
-    for (const auto &cls : foundation_classes) {
-      if (count++ < 10) {
-        LLDB_LOG(log, "  Foundation class: {0}", cls);
-      }
-    }
-    
-    // Install subscript method mapping for GNUstep
-    InstallSubscriptMethodMapping();
-  } else {
-    LLDB_LOG(log, "Runtime introspector not available, using fallback mechanisms");
-  }
-}
 
 DeclVendor *GNUstepObjCRuntime::GetDeclVendor() {
   if (!m_decl_vendor_up) {
@@ -1235,191 +1132,7 @@ DeclVendor *GNUstepObjCRuntime::GetDeclVendor() {
   return m_decl_vendor_up.get();
 }
 
-void GNUstepObjCRuntime::InstallSubscriptMethodMapping() {
-  Log *log = GetLog(LLDBLog::Process | LLDBLog::Types);
-  
-  // Check if NSArray responds to objectAtIndex:
-  // If it does, we can safely map subscript calls to traditional methods
-  ExecutionContext exe_ctx(m_process);
-  
-  // Enhanced check using our runtime API for better reliability
-  if (m_introspector_up) {
-    // TODO: Re-implement using merged introspector functionality
-    // bool array_supports_index = m_introspector_up->ClassRespondsToSelector("NSArray", "objectAtIndex:");
-    // bool dict_supports_key = m_introspector_up->ClassRespondsToSelector("NSDictionary", "objectForKey:");
-    bool array_supports_index = true; // Assume Foundation classes support standard methods
-    bool dict_supports_key = true;
-    
-    if (array_supports_index && dict_supports_key) {
-      LLDB_LOG(log, "GNUstep classes support traditional methods via runtime API, subscript mapping enabled");
-      m_subscript_mapping_enabled = true;
-      
-      // Expression evaluation hooks no longer needed
-      
-      return;
-    }
-    
-    LLDB_LOG(log, "Runtime API check failed: NSArray->objectAtIndex: %s, NSDictionary->objectForKey: %s",
-             array_supports_index ? "YES" : "NO", dict_supports_key ? "YES" : "NO");
-  }
-  
-  // Fallback to expression evaluation if runtime API is not available
-  std::string check_expr = R"(
-    (BOOL)[(Class)objc_getClass("NSArray") respondsToSelector:@selector(objectAtIndex:)] &&
-    (BOOL)[(Class)objc_getClass("NSDictionary") respondsToSelector:@selector(objectForKey:)]
-  )";
-  
-  EvaluateExpressionOptions options = MakeSafeExpressionOptions();
-  
-  ValueObjectSP result_sp;
-  Status error;
-  UserExpression::Evaluate(exe_ctx, options, check_expr.c_str(), 
-                           "", result_sp, nullptr);
-  
-  if (error.Success() && result_sp && result_sp->GetValueAsUnsigned(0)) {
-    LLDB_LOG(log, "GNUstep classes support traditional methods via expression evaluation, subscript mapping enabled");
-    m_subscript_mapping_enabled = true;
-    
-    // Expression evaluation hooks no longer needed
-  } else {
-    LLDB_LOG(log, "Could not verify GNUstep method support, subscript mapping disabled");
-    m_subscript_mapping_enabled = false;
-  }
-}
 
-// Helper function to create extern "C" function declarations
-static clang::FunctionDecl *
-CreateExternCFunction(TypeSystemClang &ts,
-                      clang::DeclContext *dc,
-                      llvm::StringRef name,
-                      clang::QualType result_qt,
-                      llvm::ArrayRef<clang::QualType> param_qts,
-                      bool is_variadic) {
-  clang::ASTContext &ast = ts.getASTContext();
-  clang::IdentifierInfo &ii = ast.Idents.get(name);
-  
-  clang::FunctionProtoType::ExtProtoInfo epi;
-  epi.Variadic = is_variadic;
-  clang::QualType fn_ty = ast.getFunctionType(result_qt, param_qts, epi);
-  
-  auto *fd = clang::FunctionDecl::Create(ast, dc,
-              clang::SourceLocation(), clang::SourceLocation(),
-              &ii, fn_ty, /*TInfo*/nullptr,
-              clang::SC_Extern);
-  fd->setImplicit(true);
-  dc->addDecl(fd);
-  return fd;
-}
-
-void GNUstepObjCRuntime::InjectRuntimeFunctionDecls(TypeSystemClang &ts) {
-  Log *log = GetLog(LLDBLog::Language | LLDBLog::Types);
-  LLDB_LOG(log, "[GNUstep] Injecting runtime function prototypes into scratch AST");
-  
-  clang::ASTContext &ast = ts.getASTContext();
-  clang::DeclContext *tu = ast.getTranslationUnitDecl();
-
-  // --- typedefs: id, Class, SEL, IMP (all as void*)
-  clang::QualType void_ty = ast.VoidTy;
-  clang::QualType void_ptr = ast.getPointerType(void_ty);
-
-  auto make_typedef = [&](llvm::StringRef name, clang::QualType qt) {
-    clang::IdentifierInfo &ii = ast.Idents.get(name);
-    auto *td = clang::TypedefDecl::Create(ast, tu,
-                  clang::SourceLocation(), clang::SourceLocation(),
-                  &ii, ast.getTrivialTypeSourceInfo(qt));
-    tu->addDecl(td);
-    return ast.getTypedefType(td);
-  };
-  
-  clang::QualType qt_id    = make_typedef("id", void_ptr);
-  clang::QualType qt_Class = make_typedef("Class", void_ptr);
-  clang::QualType qt_SEL   = make_typedef("SEL", void_ptr);
-  clang::QualType qt_IMP   = make_typedef("IMP", void_ptr);
-
-  clang::QualType qt_char   = ast.CharTy;
-  clang::QualType qt_ccharp = ast.getPointerType(ast.getConstType(qt_char));
-  clang::QualType qt_bool   = ast.BoolTy;
-
-  // id objc_msgSend(id, SEL, ...);
-  {
-    clang::QualType params[] = { qt_id, qt_SEL };
-    CreateExternCFunction(ts, tu, "objc_msgSend", qt_id, params, /*variadic=*/true);
-  }
-
-  // Optional companions:
-  // void objc_msgSend_stret(void*, id, SEL, ...);
-  {
-    clang::QualType params[] = { void_ptr, qt_id, qt_SEL };
-    CreateExternCFunction(ts, tu, "objc_msgSend_stret", void_ty, params, /*variadic=*/true);
-  }
-  // double objc_msgSend_fpret(id, SEL, ...);
-  {
-    clang::QualType params[] = { qt_id, qt_SEL };
-    CreateExternCFunction(ts, tu, "objc_msgSend_fpret", ast.DoubleTy, params, /*variadic=*/true);
-  }
-
-  // Class objc_getClass(const char *);
-  {
-    clang::QualType params[] = { qt_ccharp };
-    CreateExternCFunction(ts, tu, "objc_getClass", qt_Class, params, /*variadic=*/false);
-  }
-  // Class objc_lookup_class(const char *);
-  {
-    clang::QualType params[] = { qt_ccharp };
-    CreateExternCFunction(ts, tu, "objc_lookup_class", qt_Class, params, /*variadic=*/false);
-  }
-
-  // SEL sel_getUid(const char *);
-  {
-    clang::QualType params[] = { qt_ccharp };
-    CreateExternCFunction(ts, tu, "sel_getUid", qt_SEL, params, /*variadic=*/false);
-  }
-  // SEL sel_registerName(const char *);
-  {
-    clang::QualType params[] = { qt_ccharp };
-    CreateExternCFunction(ts, tu, "sel_registerName", qt_SEL, params, /*variadic=*/false);
-  }
-
-  // id object_getClass(id);
-  {
-    clang::QualType params[] = { qt_id };
-    CreateExternCFunction(ts, tu, "object_getClass", qt_id, params, /*variadic=*/false);
-  }
-
-  // IMP class_getMethodImplementation(Class, SEL);
-  {
-    clang::QualType params[] = { qt_Class, qt_SEL };
-    CreateExternCFunction(ts, tu, "class_getMethodImplementation", qt_IMP, params, /*variadic=*/false);
-  }
-
-  // bool class_addMethod(Class, SEL, IMP, const char *);
-  {
-    clang::QualType params[] = { qt_Class, qt_SEL, qt_IMP, qt_ccharp };
-    CreateExternCFunction(ts, tu, "class_addMethod", qt_bool, params, /*variadic=*/false);
-  }
-
-  // ARC helpers (declare even if they map to 0 at runtime)
-  {
-    clang::QualType params1[] = { qt_id };
-    CreateExternCFunction(ts, tu, "objc_retain", qt_id, params1, false);
-    CreateExternCFunction(ts, tu, "objc_release", void_ty, params1, false);
-    CreateExternCFunction(ts, tu, "objc_autoreleaseReturnValue", qt_id, params1, false);
-    CreateExternCFunction(ts, tu, "objc_retainAutoreleasedReturnValue", qt_id, params1, false);
-  }
-
-  // And declare CFStringCreateWithBytes so the IR rewriter can always see a prototype:
-  {
-    // CF types are pointers here; signature aligned with what IRForTarget expects.
-    clang::QualType params[] = { void_ptr, /*alloc*/
-                                 ast.getPointerType(ast.UnsignedCharTy), /*bytes*/
-                                 ast.LongTy, /*numBytes*/
-                                 ast.IntTy,  /*encoding*/
-                                 qt_bool     /*isExternalRep*/ };
-    CreateExternCFunction(ts, tu, "CFStringCreateWithBytes", void_ptr, params, /*variadic=*/false);
-  }
-  
-  LLDB_LOG(log, "[GNUstep] Runtime function prototypes injected successfully");
-}
 
 lldb::addr_t GNUstepObjCRuntime::CallRuntimeFunction(const char *function_name, const char *string_arg) {
   if (!m_runtime_caller) {

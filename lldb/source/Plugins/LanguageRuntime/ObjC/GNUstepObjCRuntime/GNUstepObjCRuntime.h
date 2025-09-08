@@ -79,9 +79,6 @@ public:
   llvm::Expected<std::unique_ptr<UtilityFunction>>
   CreateObjectChecker(std::string name, ExecutionContext &exe_ctx) override;
 
-  // Create utility functions for modern subscript syntax support
-  llvm::Expected<std::unique_ptr<UtilityFunction>>
-  CreateSubscriptUtilityFunctions(ExecutionContext &exe_ctx);
 
   void UpdateISAToDescriptorMapIfNeeded() override;
 
@@ -111,10 +108,6 @@ public:
   // Override from LanguageRuntime - this is the critical hook that IRForTarget
   // uses
 
-  // Process lifecycle hooks to ensure expression evaluation is ready
-  void DidLaunch();
-  void DidAttach(ArchSpec &arch_spec);
-
 private:
   // Helper method to call runtime functions with string arguments (delegates to utilities)
   lldb::addr_t CallRuntimeFunction(const char *function_name,
@@ -124,7 +117,6 @@ private:
   std::unique_ptr<DeclVendor> m_decl_vendor_up;
   bool m_has_read_objc_library = false;
   bool m_gnustep_library_loaded = false;
-  bool m_subscript_mapping_enabled = false;
 
   // Reentrancy protection flags
   bool m_in_object_description = false;
@@ -151,16 +143,6 @@ private:
   } m_object_description_cache;
 
   // Symbol resolution now handled entirely by runtime introspection
-
-
-  // Initialize runtime API
-  void InitializeRuntimeAPI();
-
-  // Install subscript method mapping
-  void InstallSubscriptMethodMapping();
-
-  // Expression evaluation helpers no longer needed - runtime handles symbols
-  void InjectRuntimeFunctionDecls(TypeSystemClang &ts);
 };
 
 } // namespace lldb_private
