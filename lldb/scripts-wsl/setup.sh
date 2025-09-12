@@ -28,6 +28,39 @@ BUILD_DIR="${PROJECT_ROOT}/build"
 BUILD_TYPE="RelWithDebInfo"
 PARALLEL_JOBS=${PARALLEL_JOBS:-$(nproc)}
 
+# GNUstep configuration
+GNUSTEP_BUILD_DIR="${PROJECT_ROOT}/gnustep-build"
+GNUSTEP_INSTALL_DIR="${PROJECT_ROOT}/gnustep-install"
+
+# GNUstep build dependencies
+GNUSTEP_DEPS=(
+    "build-essential"
+    "cmake"
+    "ninja-build"
+    "clang"
+    "libclang-dev"
+    "libblocksruntime-dev"
+    "libkqueue-dev"
+    "libpthread-workqueue-dev"
+    "gobjc"
+    "libxml2-dev"
+    "libxslt1-dev"
+    "libffi-dev"
+    "libicu-dev"
+    "libbsd-dev"
+    "libssl-dev"
+    "libgnutls28-dev"
+    "libunwind-dev"
+    "uuid-dev"
+    "git"
+    "pkg-config"
+    "ccache"
+    "autoconf"
+    "automake"
+    "libtool"
+    "make"
+)
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -75,7 +108,7 @@ print_success "Found Python ${PYTHON3_VERSION} headers at $PYTHON3_INC"
 check_prerequisites() {
     print_stage "Checking Prerequisites"
     
-    # Check for required packages
+    # Check for critical tools (these should have been installed by install_gnustep_dependencies)
     local missing_deps=""
     
     if ! command -v ninja &> /dev/null; then
@@ -98,18 +131,23 @@ check_prerequisites() {
         missing_deps="$missing_deps swig"
     fi
     
+    if ! command -v git &> /dev/null; then
+        missing_deps="$missing_deps git"
+    fi
+    
     if [ ! -z "$missing_deps" ]; then
-        print_error "Missing dependencies: $missing_deps"
-        echo "Please install with: sudo apt-get install $missing_deps"
+        print_error "Missing critical dependencies: $missing_deps"
+        echo "Install with: sudo apt-get install $missing_deps"
+        echo "Or run without --skip-deps to auto-install dependencies"
         exit 1
     fi
     
-    print_success "All prerequisites installed"
+    print_success "All critical prerequisites are available"
     
-    # Check disk space (need at least 30GB)
+    # Check disk space (need at least 35GB for LLVM + GNUstep)
     local available_space=$(df "$PROJECT_ROOT" | awk 'NR==2 {print int($4/1048576)}')
-    if [ "$available_space" -lt 30 ]; then
-        print_error "Insufficient disk space: ${available_space}GB available, need at least 30GB"
+    if [ "$available_space" -lt 35 ]; then
+        print_error "Insufficient disk space: ${available_space}GB available, need at least 35GB"
     fi
     print_success "Disk space: ${available_space}GB available"
     
@@ -122,6 +160,30 @@ check_prerequisites() {
     else
         print_success "RAM: ${available_ram}GB available"
     fi
+}
+
+# Install GNUstep build dependencies
+install_gnustep_dependencies() {
+    print_stage "Installing GNUstep Build Dependencies"
+    
+    print_warning "Updating package list..."
+    sudo apt-get update
+    
+    print_warning "Installing GNUstep build dependencies..."
+    local missing_deps=""
+    
+    for dep in "${GNUSTEP_DEPS[@]}"; do
+        if ! dpkg -l | grep -q "^ii.*$dep"; then
+            missing_deps="$missing_deps $dep"
+        fi
+    done
+    
+    if [ ! -z "$missing_deps" ]; then
+        echo "Installing missing dependencies: $missing_deps"
+        sudo apt-get install -y $missing_deps
+    fi
+    
+    print_success "GNUstep build dependencies installed"
 }
 
 # Build Stage 1: Clang and LLD
@@ -264,71 +326,362 @@ verify_build() {
 create_helpers() {
     print_stage "Creating Helper Scripts"
     
-    # Create environment setup script
+    # Create basic LLDB environment setup script (for compatibility)
     cat > "$BUILD_DIR/setup_env.sh" << 'EOF'
 #!/bin/bash
-# Source this file to set up LLDB environment
+# Basic LLDB environment setup
 export PATH="$(dirname "${BASH_SOURCE[0]}")/bin:$PATH"
 export LD_LIBRARY_PATH="$(dirname "${BASH_SOURCE[0]}")/lib:$LD_LIBRARY_PATH"
 echo "LLDB environment configured:"
 echo "  LLDB: $(which lldb)"
 echo "  Clang: $(which clang)"
+echo ""
+echo "💡 For full development environment (LLDB + GNUstep), use:"
+echo "   source $(dirname "${BASH_SOURCE[0]}")/setup_dev_env.sh"
 EOF
     chmod +x "$BUILD_DIR/setup_env.sh"
     
-    # Create test script
-    cat > "$BUILD_DIR/test_lldb.sh" << 'EOF'
+    # Create simple test reference script (points to dev.sh)
+    cat > "$BUILD_DIR/test_lldb.sh" << EOF
 #!/bin/bash
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/setup_env.sh"
+# LLDB Testing Script - Use dev.sh for full functionality
+SCRIPT_DIR="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
+LLDB_DIR="\$SCRIPT_DIR/../lldb"
 
-echo "Testing LLDB with GNUstep..."
-cd "$SCRIPT_DIR/../lldb/examples"
-make clean
-make custom_class_test
+echo "🚀 For LLDB testing with GNUstep examples, use the dev.sh script:"
 echo ""
-echo "Starting LLDB test session..."
-echo "Commands to try:"
-echo "  b main"
-echo "  run"
-echo "  po @123"
-echo "  po @\"test\""
-echo "  quit"
+echo "  cd \$LLDB_DIR"
+echo "  ./dev.sh build-example custom_class_test"
+echo "  ./dev.sh debug custom_class_test"
 echo ""
-lldb ./build-examples/custom_class_test
+echo "Or for full test suite:"
+echo "  ./dev.sh test"
+echo ""
+echo "To manually use this LLDB build:"
+echo "  source \$SCRIPT_DIR/setup_dev_env.sh"
+echo "  lldb [your_program]"
 EOF
     chmod +x "$BUILD_DIR/test_lldb.sh"
     
     print_success "Helper scripts created"
 }
 
+# Clone a repository with error handling
+clone_repository() {
+    local repo_url="$1"
+    local target_dir="$2"
+    
+    if [ -d "$target_dir" ]; then
+        print_success "Repository already exists: $target_dir"
+        cd "$target_dir"
+        print_warning "Updating repository..."
+        git fetch origin
+        git reset --hard origin/master
+    else
+        print_warning "Cloning repository: $repo_url"
+        git clone "$repo_url" "$target_dir"
+        cd "$target_dir"
+    fi
+}
+
+# Build libobjc2 with debugging symbols using Stage 1 clang
+build_libobjc2() {
+    print_stage "Building libobjc2 with Debug Symbols"
+    
+    local libobjc2_source_dir="$PROJECT_ROOT/libobjc2"
+    local libobjc2_build_dir="$GNUSTEP_BUILD_DIR/libobjc2"
+    
+    # Clone or update libobjc2
+    clone_repository "https://github.com/gnustep/libobjc2.git" "$libobjc2_source_dir"
+    
+    # Create build directory
+    rm -rf "$libobjc2_build_dir"
+    mkdir -p "$libobjc2_build_dir"
+    cd "$libobjc2_build_dir"
+    
+    # Configure with Stage 1 clang
+    print_warning "Configuring libobjc2 build with Stage 1 clang..."
+    cmake "$libobjc2_source_dir" \
+        -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+        -DCMAKE_C_FLAGS="-g -O0 -fno-omit-frame-pointer -DDEBUG=1 -ffunction-sections -fdata-sections" \
+        -DCMAKE_CXX_FLAGS="-g -O0 -fno-omit-frame-pointer -DDEBUG=1 -ffunction-sections -fdata-sections" \
+        -DCMAKE_SHARED_LINKER_FLAGS="-lstdc++" \
+        -DCMAKE_INSTALL_PREFIX="$GNUSTEP_INSTALL_DIR" \
+        -DCMAKE_C_COMPILER="$STAGE1_BUILD_DIR/bin/clang" \
+        -DCMAKE_CXX_COMPILER="$STAGE1_BUILD_DIR/bin/clang++" \
+        -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY \
+        -DGNUSTEP_INSTALL_TYPE=NONE \
+        -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+        -GNinja
+    
+    # Build
+    print_warning "Building libobjc2 (this may take 10-15 minutes)..."
+    ninja -j${PARALLEL_JOBS}
+    
+    # Install
+    print_warning "Installing libobjc2..."
+    ninja install
+    
+    # Verify installation
+    if [ -f "$GNUSTEP_INSTALL_DIR/lib/libobjc.so" ]; then
+        print_success "libobjc2 built and installed successfully"
+    else
+        print_error "libobjc2 installation verification failed"
+        return 1
+    fi
+}
+
+# Build GNUstep make (tools-make) with Stage 1 clang
+build_gnustep_make() {
+    print_stage "Building GNUstep Make"
+    
+    local tools_make_source_dir="$PROJECT_ROOT/tools-make"
+    
+    # Clone or update tools-make
+    clone_repository "https://github.com/gnustep/tools-make.git" "$tools_make_source_dir"
+    
+    # Configure with Stage 1 clang
+    print_warning "Configuring gnustep-make with Stage 1 clang..."
+    CC="$STAGE1_BUILD_DIR/bin/clang" \
+    CXX="$STAGE1_BUILD_DIR/bin/clang++" \
+    ./configure --prefix="$GNUSTEP_INSTALL_DIR"
+    
+    # Build and install
+    print_warning "Building gnustep-make..."
+    make -j${PARALLEL_JOBS}
+    
+    print_warning "Installing gnustep-make..."
+    make install
+    
+    # Verify installation
+    if [ -f "$GNUSTEP_INSTALL_DIR/share/GNUstep/Makefiles/aggregate.make" ]; then
+        print_success "gnustep-make built and installed successfully"
+        export GNUSTEP_MAKEFILES="$GNUSTEP_INSTALL_DIR/share/GNUstep/Makefiles"
+    else
+        print_error "gnustep-make installation verification failed"
+        return 1
+    fi
+}
+
+# Build GNUstep base (libs-base) with Stage 1 clang
+build_gnustep_base() {
+    print_stage "Building GNUstep Base with Debug Symbols"
+    
+    local libs_base_source_dir="$PROJECT_ROOT/libs-base"
+    
+    # Clone or update libs-base
+    clone_repository "https://github.com/gnustep/libs-base.git" "$libs_base_source_dir"
+    
+    # Clean any previous build
+    print_warning "Cleaning previous build..."
+    if [ -f "GNUmakefile" ]; then
+        make clean || print_warning "Clean failed (may not be critical)"
+    fi
+    
+    # Set up environment variables for debugging builds
+    export GNUSTEP_MAKEFILES="$GNUSTEP_INSTALL_DIR/share/GNUstep/Makefiles"
+    export ADDITIONAL_OBJCFLAGS="-g -O0 -fno-omit-frame-pointer -DDEBUG=1 -fobjc-runtime=gnustep-2.1 -fconstant-string-class=NSConstantString -fno-objc-arc -I$GNUSTEP_INSTALL_DIR/include"
+    export ADDITIONAL_CFLAGS="-g -O0 -fno-omit-frame-pointer -DDEBUG=1 -I$GNUSTEP_INSTALL_DIR/include"
+    export ADDITIONAL_CPPFLAGS="-I$GNUSTEP_INSTALL_DIR/include"
+    export ADDITIONAL_LDFLAGS="-g -L$GNUSTEP_INSTALL_DIR/lib -Wl,-rpath,$GNUSTEP_INSTALL_DIR/lib -lobjc"
+    export debug=yes
+    export strip=no
+    export shared=yes
+    
+    # Set compilers to Stage 1 clang
+    export CC="$STAGE1_BUILD_DIR/bin/clang"
+    export CXX="$STAGE1_BUILD_DIR/bin/clang++"
+    export OBJC="$STAGE1_BUILD_DIR/bin/clang"
+    export OBJCXX="$STAGE1_BUILD_DIR/bin/clang++"
+    export LDCC="$STAGE1_BUILD_DIR/bin/clang"
+    
+    # Set up library paths
+    export PKG_CONFIG_PATH="$GNUSTEP_INSTALL_DIR/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+    export LD_LIBRARY_PATH="$GNUSTEP_INSTALL_DIR/lib:${LD_LIBRARY_PATH:-}"
+    export PATH="$GNUSTEP_INSTALL_DIR/bin:${PATH:-}"
+    
+    # Configure gnustep-base
+    print_warning "Configuring gnustep-base..."
+    if [ ! -f "configure" ]; then
+        print_warning "Running autoreconf to generate configure script..."
+        autoreconf -if
+    fi
+    
+    if [ ! -f "GNUmakefile" ]; then
+        CFLAGS="-g -O0 -fno-omit-frame-pointer -DDEBUG=1 -I$GNUSTEP_INSTALL_DIR/include" \
+        CXXFLAGS="-g -O0 -fno-omit-frame-pointer -DDEBUG=1 -I$GNUSTEP_INSTALL_DIR/include" \
+        OBJCFLAGS="-g -O0 -fno-omit-frame-pointer -DDEBUG=1 -fobjc-runtime=gnustep-2.1 -fconstant-string-class=NSConstantString -fno-objc-arc -I$GNUSTEP_INSTALL_DIR/include" \
+        CPPFLAGS="-I$GNUSTEP_INSTALL_DIR/include" \
+        LDFLAGS="-L$GNUSTEP_INSTALL_DIR/lib -Wl,-rpath,$GNUSTEP_INSTALL_DIR/lib -lobjc" \
+        RUNTIME_VERSION="gnustep-2.1" \
+        ./configure \
+            --prefix="$GNUSTEP_INSTALL_DIR" \
+            --enable-debug \
+            --disable-strip \
+            --enable-objc-nonfragile-abi \
+            --disable-mixedabi \
+            --with-installation-domain=SYSTEM \
+            --with-library-combo=ng-gnu-gnu \
+            --enable-libffi \
+            --enable-static=no \
+            --enable-shared=yes
+    fi
+    
+    # Build with debug symbols
+    print_warning "Building gnustep-base with debug symbols (this may take 20-30 minutes)..."
+    make -j${PARALLEL_JOBS} debug=yes strip=no ADDITIONAL_OBJCFLAGS="-fno-objc-arc"
+    
+    # Install
+    print_warning "Installing gnustep-base..."
+    make install debug=yes strip=no ADDITIONAL_OBJCFLAGS="-fno-objc-arc"
+    
+    # Verify installation
+    local base_lib=""
+    for pattern in \
+        "$GNUSTEP_INSTALL_DIR/lib/libgnustep-base.so" \
+        "$GNUSTEP_INSTALL_DIR/lib/libgnustep-base.so."* \
+        "$GNUSTEP_INSTALL_DIR/System/Library/Libraries/libgnustep-base.so" \
+        "$GNUSTEP_INSTALL_DIR/System/Library/Libraries/libgnustep-base.so."*; do
+        for f in $pattern; do
+            if [ -f "$f" ]; then 
+                base_lib="$f"
+                break 2
+            fi
+        done
+    done
+    
+    if [ -n "$base_lib" ]; then
+        print_success "gnustep-base built and installed successfully"
+    else
+        print_error "gnustep-base installation verification failed"
+        return 1
+    fi
+}
+
+# Build GNUstep with Stage 1 Clang
+build_gnustep_with_stage1_clang() {
+    print_stage "Building GNUstep Environment with Stage 1 Clang"
+    
+    # Verify Stage 1 clang exists
+    if [ ! -f "$STAGE1_BUILD_DIR/bin/clang" ]; then
+        print_error "Stage 1 clang not found at $STAGE1_BUILD_DIR/bin/clang"
+        print_error "Stage 1 must be built before building GNUstep"
+        return 1
+    fi
+    
+    # Set LLVM_BUILD_DIR for GNUstep functions
+    export LLVM_BUILD_DIR="$STAGE1_BUILD_DIR"
+    
+    # Create GNUstep build and install directories
+    mkdir -p "$GNUSTEP_BUILD_DIR"
+    mkdir -p "$GNUSTEP_INSTALL_DIR"
+    
+    # Build components in order
+    build_libobjc2
+    build_gnustep_make  
+    build_gnustep_base
+    
+    # Create GNUstep environment setup script
+    create_gnustep_environment_script
+    
+    print_success "GNUstep environment built successfully with Stage 1 clang"
+}
+
+# Create combined environment setup script
+create_gnustep_environment_script() {
+    print_stage "Creating Combined Development Environment Script"
+    
+    local env_script="$BUILD_DIR/setup_dev_env.sh"
+    
+    cat > "$env_script" << EOF
+#!/bin/bash
+# Combined LLDB + GNUstep Development Environment Setup
+# Source this script to set up the complete environment for LLDB and GNUstep development
+
+echo "🚀 Setting up LLDB + GNUstep Development Environment..."
+
+# LLDB environment
+export PATH="$BUILD_DIR/bin:\${PATH:-}"
+export LD_LIBRARY_PATH="$BUILD_DIR/lib:\${LD_LIBRARY_PATH:-}"
+
+# GNUstep environment
+export LD_LIBRARY_PATH="$GNUSTEP_INSTALL_DIR/lib:\${LD_LIBRARY_PATH:-}"
+export PKG_CONFIG_PATH="$GNUSTEP_INSTALL_DIR/lib/pkgconfig:\${PKG_CONFIG_PATH:-}"
+export GNUSTEP_MAKEFILES="$GNUSTEP_INSTALL_DIR/share/GNUstep/Makefiles"
+export GNUSTEP_SYSTEM_ROOT="$GNUSTEP_INSTALL_DIR"
+export GNUSTEP_INSTALLATION_DIR="$GNUSTEP_INSTALL_DIR"
+export GNUSTEP_FLATTENED=yes
+
+# Prefer Stage 1 clang if available, otherwise use LLDB build clang
+if [ -f "$STAGE1_BUILD_DIR/bin/clang" ]; then
+    export PATH="$STAGE1_BUILD_DIR/bin:\${PATH:-}"
+    echo "✅ Using Stage 1 clang: $STAGE1_BUILD_DIR/bin/clang"
+elif [ -f "$BUILD_DIR/bin/clang" ]; then
+    echo "✅ Using LLDB build clang: $BUILD_DIR/bin/clang"
+else
+    echo "⚠️  Using system clang"
+fi
+
+# Verify tools are available
+if [ -f "$BUILD_DIR/bin/lldb" ]; then
+    echo "✅ Custom LLDB: $BUILD_DIR/bin/lldb"
+else
+    echo "⚠️  Custom LLDB not found at $BUILD_DIR/bin/lldb"
+fi
+
+if [ -f "$GNUSTEP_INSTALL_DIR/lib/libobjc.so" ]; then
+    echo "✅ GNUstep Runtime: $GNUSTEP_INSTALL_DIR/lib/libobjc.so"
+else
+    echo "⚠️  GNUstep Runtime not found"
+fi
+
+echo "🔧 Combined Environment Configured"
+echo "📁 LLDB Build: $BUILD_DIR"
+echo "📁 GNUstep Install: $GNUSTEP_INSTALL_DIR"
+echo "🎯 Ready for Objective-C development and debugging!"
+echo ""
+echo "💡 Quick commands:"
+echo "   lldb/dev.sh build-example custom_class_test"
+echo "   lldb/dev.sh debug custom_class_test"
+EOF
+    
+    chmod +x "$env_script"
+    print_success "Combined environment script created: $env_script"
+}
+
 # Show final instructions
 show_instructions() {
     print_stage "Build Complete!"
     
-    echo -e "${GREEN}Your two-stage LLDB build is ready!${NC}"
+    echo -e "${GREEN}Your two-stage LLDB build with GNUstep environment is ready!${NC}"
     echo ""
     echo "Build locations:"
     echo "  Stage 1 (Bootstrap): $STAGE1_BUILD_DIR"
     echo "  Final Build:         $BUILD_DIR"
+    echo "  GNUstep Install:     $GNUSTEP_INSTALL_DIR"
     echo ""
     echo "Binaries:"
     echo "  LLDB:        $BUILD_DIR/bin/lldb"
     echo "  lldb-server: $BUILD_DIR/bin/lldb-server"
     echo "  Clang:       $BUILD_DIR/bin/clang"
     echo ""
-    echo "To use:"
-    echo "  1. Source environment: source $BUILD_DIR/setup_env.sh"
-    echo "  2. Test LLDB:         $BUILD_DIR/test_lldb.sh"
+    echo "GNUstep Libraries:"
+    echo "  libobjc2:    $GNUSTEP_INSTALL_DIR/lib/libobjc.so"
+    echo "  gnustep-base: $GNUSTEP_INSTALL_DIR/lib/libgnustep-base.so"
     echo ""
-    echo "For development:"
-    echo "  cd $BUILD_DIR && ninja lldb lldb-server  # Incremental rebuild"
+    echo "To use manually:"
+    echo "  source $BUILD_DIR/setup_dev_env.sh"
     echo ""
-    echo -e "${BLUE}Built with:${NC}"
-    echo "  • Stage 1 clang (bootstrap compiler)"
-    echo "  • Python support enabled (WSL Python)"
-    echo "  • Shared libraries for fast rebuilds"
-    echo "  • GNUstep ObjC runtime plugin"
+    echo "For incremental rebuilds:"
+    echo "  cd lldb"
+    echo "  ./dev.sh build"
+    echo ""
+    echo "For development and testing:"
+    echo "  cd lldb"
+    echo "  ./dev.sh build-example custom_class_test"
+    echo "  ./dev.sh debug custom_class_test"
+    echo ""
+    echo -e "${GREEN}🎉 Ready for Objective-C debugging!${NC}"
 }
 
 # Main execution
@@ -336,6 +689,7 @@ main() {
     # Parse arguments
     SKIP_STAGE1=false
     SKIP_STAGE2=false
+    SKIP_DEPS=false
     CLEAN_BUILD=false
     
     while [[ $# -gt 0 ]]; do
@@ -348,6 +702,10 @@ main() {
                 SKIP_STAGE2=true
                 shift
                 ;;
+            --skip-deps)
+                SKIP_DEPS=true
+                shift
+                ;;
             --clean)
                 CLEAN_BUILD=true
                 shift
@@ -358,6 +716,7 @@ main() {
                 echo "Options:"
                 echo "  --skip-stage1   Skip building stage 1 (use existing)"
                 echo "  --skip-stage2   Skip building stage 2 (stage 1 only)"
+                echo "  --skip-deps     Skip installing system dependencies"
                 echo "  --clean         Clean build directories before starting"
                 echo "  --help          Show this help"
                 echo ""
@@ -374,10 +733,16 @@ main() {
     # Clean if requested
     if $CLEAN_BUILD; then
         print_warning "Cleaning build directories..."
-        rm -rf "$STAGE1_BUILD_DIR" "$BUILD_DIR"
+        rm -rf "$STAGE1_BUILD_DIR" "$BUILD_DIR" "$GNUSTEP_BUILD_DIR"
     fi
     
     # Run build stages
+    if ! $SKIP_DEPS; then
+        install_gnustep_dependencies
+    else
+        print_success "Skipping dependency installation"
+    fi
+    
     check_prerequisites
     
     if ! $SKIP_STAGE1; then
@@ -393,11 +758,15 @@ main() {
         build_stage2
         verify_build
         create_helpers
-        show_instructions
+        
+        # Build GNUstep after successful LLDB build
+        build_gnustep_with_stage1_clang
+        
     else
         print_success "Skipping Stage 2"
     fi
     
+    show_instructions
     print_success "Build script completed successfully!"
 }
 
