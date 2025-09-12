@@ -216,7 +216,7 @@ cd /home/robk/code/llvm-project/lldb/examples
 ```bash
 # Test GNUstep compilation and execution directly
 cd /home/robk/code/llvm-project/lldb/test/API/lang/objc/gnustep
-OBJC=/home/robk/code/llvm-project/build/bin/clang make
+OBJC=/home/robk/code/llvm-project/build-stage1/bin/clang make
 ./a.out
 # Should output: "All test objects created successfully"
 ```
