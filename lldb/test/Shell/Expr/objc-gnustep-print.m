@@ -141,3 +141,11 @@ int main() {
 // PO: (lldb) po t
 // PO: <TestObj: described>
 // PO-NOT: warning: `po` was unsuccessful
+
+//
+// RUN: %lldb -b -o "b objc-gnustep-print.m:104" -o "run" -o "step" \
+// RUN:     -- %t | FileCheck %s --check-prefix=STEP
+//
+// STEP: (lldb) step
+// STEP: stop reason = step in
+// STEP-NEXT: frame #0: {{.*}}-[TestObj check_ivars_zeroed](self=
