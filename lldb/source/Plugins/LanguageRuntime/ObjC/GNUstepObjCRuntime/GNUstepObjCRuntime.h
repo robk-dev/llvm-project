@@ -17,9 +17,12 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/Error.h"
 
+#include <memory>
 #include <optional>
 
 namespace lldb_private {
+
+class GNUstepTaggedPointerVendor;
 
 class GNUstepObjCRuntime : public lldb_private::ObjCLanguageRuntime {
 public:
@@ -99,11 +102,23 @@ public:
 
   void UpdateISAToDescriptorMapIfNeeded() override;
 
+  TaggedPointerVendor *GetTaggedPointerVendor() override;
+
+  ClassDescriptorSP GetClassDescriptor(ValueObject &in_value) override;
+
+  ClassDescriptorSP GetClassDescriptorFromISA(ObjCISA isa) override;
+
 protected:
   // Call CreateInstance instead.
   GNUstepObjCRuntime(Process *process);
 
   lldb::ModuleSP m_objc_module_sp;
+
+  std::unique_ptr<GNUstepTaggedPointerVendor> m_tagged_pointer_vendor_up;
+
+  /// Set when new modules arrive; cleared once the ISA-to-descriptor map has
+  /// been refreshed, so the symbol sweep only reruns after module changes.
+  bool m_isa_map_dirty = true;
 };
 
 } // namespace lldb_private
