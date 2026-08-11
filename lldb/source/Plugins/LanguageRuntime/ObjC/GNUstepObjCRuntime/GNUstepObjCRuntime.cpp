@@ -8,6 +8,7 @@
 
 #include "GNUstepObjCRuntime.h"
 #include "GNUstepObjCClassDescriptor.h"
+#include "GNUstepThreadPlanStepThroughObjCTrampoline.h"
 
 #include "Plugins/TypeSystem/Clang/TypeSystemClang.h"
 
@@ -22,10 +23,14 @@
 #include "lldb/Symbol/Symbol.h"
 #include "lldb/Symbol/SymbolContext.h"
 #include "lldb/Symbol/Type.h"
+#include "lldb/Target/ABI.h"
 #include "lldb/Target/ExecutionContext.h"
 #include "lldb/Target/Process.h"
+#include "lldb/Target/RegisterContext.h"
 #include "lldb/Target/Target.h"
 #include "lldb/Target/Thread.h"
+#include "lldb/Target/ThreadPlanRunToAddress.h"
+#include "lldb/Target/ThreadPlanStepOut.h"
 #include "lldb/Utility/ArchSpec.h"
 #include "lldb/Utility/ConstString.h"
 #include "lldb/Utility/LLDBLog.h"
@@ -485,8 +490,217 @@ GNUstepObjCRuntime::CreateObjectChecker(std::string name,
 ThreadPlanSP
 GNUstepObjCRuntime::GetStepThroughTrampolinePlan(Thread &thread,
                                                  bool stop_others) {
-  // TODO: Implement this properly to avoid stepping into things like PLT stubs
+  // Only act when stopped at the first instruction of a known libobjc2
+  // dispatch entry point (where the argument registers still hold the
+  // receiver and selector). Match by resolving each entry point's address by
+  // name rather than by the symbol at the PC: libobjc2's hand-written
+  // assembly places local labels (e.g. __objc_block_trampoline_end_sret) at
+  // the same address as objc_msgSend, so the symbol found at an address is
+  // not reliably the dispatch symbol.
+  Process *process = thread.GetProcess().get();
+  if (!process)
+    return {};
+  const addr_t pc = thread.GetRegisterContext()->GetPC();
+  Target &target = GetTargetRef();
+
+  const DispatchEntryPoint *entry = FindDispatchEntryPoint(pc);
+  if (!entry)
+    return {};
+  const bool is_stret = entry->is_stret;
+  const bool is_sender = entry->is_sender;
+
+  ABISP abi_sp = process->GetABI();
+  if (!abi_sp)
+    return {};
+  TypeSystemClangSP scratch_ts_sp =
+      ScratchTypeSystemClang::GetForTarget(target);
+  if (!scratch_ts_sp)
+    return {};
+  CompilerType void_ptr_type =
+      scratch_ts_sp->GetBasicType(eBasicTypeVoid).GetPointerType();
+  Value void_ptr_value;
+  void_ptr_value.SetValueType(Value::ValueType::Scalar);
+  void_ptr_value.SetCompilerType(void_ptr_type);
+
+  ValueList argument_values;
+  argument_values.PushValue(void_ptr_value);
+  argument_values.PushValue(void_ptr_value);
+  argument_values.PushValue(void_ptr_value);
+  if (!abi_sp->GetArgumentValues(thread, argument_values))
+    return {};
+
+  // With struct return the sret pointer occupies the first argument slot.
+  const uint32_t receiver_idx = is_stret ? 1 : 0;
+  const uint32_t sel_idx = is_stret ? 2 : 1;
+  addr_t receiver =
+      argument_values.GetValueAtIndex(receiver_idx)->GetScalar().ULongLong();
+  const addr_t selector =
+      argument_values.GetValueAtIndex(sel_idx)->GetScalar().ULongLong();
+
+  if (is_sender) {
+    // objc_msg_lookup_sender takes `id *receiver`.
+    llvm::Expected<addr_t> pointee = process->ReadPointerFromMemory(receiver);
+    if (!pointee) {
+      llvm::consumeError(pointee.takeError());
+      return {};
+    }
+    receiver = *pointee;
+  }
+
+  // A message to nil does not dispatch anywhere, so there is no
+  // implementation to run to. Declining to provide a plan at all would leave
+  // the thread stopped on the dispatch function's first instruction: harmless
+  // when the runtime carries no line information for its hand-written
+  // assembly, but with a runtime built from source it drops the user into
+  // objc_msgSend.S. Step back out to the sender instead, which is where a nil
+  // send returns to and what the user asked to step over.
+  if (receiver == 0 || receiver == LLDB_INVALID_ADDRESS) {
+    const bool continue_to_next_branch = true;
+    const bool gather_return_value = false;
+    auto step_out_sp = std::make_shared<ThreadPlanStepOut>(
+        thread, stop_others, eVoteNo, eVoteNoOpinion, /*frame_idx=*/0,
+        continue_to_next_branch, gather_return_value);
+    // Nothing further should be stepped through on the way out; the enclosing
+    // step-in plan decides where to stop once we are back in the sender.
+    step_out_sp->ClearShouldStopHereCallbacks();
+    return step_out_sp;
+  }
+
+  // Consult the method cache before running anything in the inferior.
+  // Tagged pointers skip the cache: their ISA is not the object's first word.
+  addr_t isa = LLDB_INVALID_ADDRESS;
+  if (!(m_tagged_pointer_vendor_up &&
+        m_tagged_pointer_vendor_up->IsPossibleTaggedPointer(receiver))) {
+    isa = llvm::expectedToOptional(process->ReadPointerFromMemory(receiver))
+              .value_or(LLDB_INVALID_ADDRESS);
+  }
+  if (isa != LLDB_INVALID_ADDRESS) {
+    const addr_t cached_imp = LookupInMethodCache(isa, selector);
+    if (cached_imp != LLDB_INVALID_ADDRESS) {
+      Address imp_addr;
+      imp_addr.SetOpcodeLoadAddress(cached_imp, &target);
+      return std::make_shared<ThreadPlanRunToAddress>(thread, imp_addr,
+                                                      stop_others);
+    }
+  }
+
+  if (!GetMsgLookupFunctionCaller(thread))
+    return {};
+
+  // FunctionCaller writes each argument at the width of its Scalar, and one
+  // made from an addr_t is 64 bits, so narrow them to the target's pointers.
+  const bool narrow = process->GetAddressByteSize() == 4;
+  auto pointer_scalar = [narrow](addr_t addr) {
+    return narrow ? Scalar(static_cast<uint32_t>(addr)) : Scalar(addr);
+  };
+  ValueList lookup_args;
+  Value receiver_value = void_ptr_value;
+  receiver_value.GetScalar() = pointer_scalar(receiver);
+  lookup_args.PushValue(receiver_value);
+  Value selector_value = void_ptr_value;
+  selector_value.GetScalar() = pointer_scalar(selector);
+  lookup_args.PushValue(selector_value);
+
+  return std::make_shared<GNUstepThreadPlanStepThroughObjCTrampoline>(
+      thread, *this, lookup_args, isa, selector);
+}
+
+const GNUstepObjCRuntime::DispatchEntryPoint *
+GNUstepObjCRuntime::FindDispatchEntryPoint(lldb::addr_t pc) {
+  if (!m_dispatch_entry_points_resolved) {
+    m_dispatch_entry_points_resolved = true;
+    // Dispatch entry points exported by libobjc2 (objc_msgSend.S,
+    // sendmsg2.c). The `_super` variants are omitted: super sends compile to
+    // a lookup plus a direct call, and the direct call steps normally.
+    static const struct {
+      const char *name;
+      bool is_stret;
+      bool is_sender;
+    } kEntryPoints[] = {
+        {"objc_msgSend", false, false},
+        {"objc_msgSend_fpret", false, false},
+        {"objc_msgSend_stret", true, false},
+        {"objc_msg_lookup", false, false},
+        {"objc_msg_lookup_sender", false, true},
+    };
+    Target &target = GetTargetRef();
+    for (const auto &ep : kEntryPoints) {
+      SymbolContextList sc_list;
+      target.GetImages().FindSymbolsWithNameAndType(ConstString(ep.name),
+                                                    eSymbolTypeCode, sc_list);
+      for (const SymbolContext &sc : sc_list) {
+        if (!sc.symbol)
+          continue;
+        const addr_t addr = sc.symbol->GetLoadAddress(&target);
+        if (addr != LLDB_INVALID_ADDRESS) {
+          m_dispatch_entry_points.push_back({addr, ep.is_stret, ep.is_sender});
+          break;
+        }
+      }
+    }
+  }
+
+  for (const DispatchEntryPoint &ep : m_dispatch_entry_points)
+    if (ep.address == pc)
+      return &ep;
   return nullptr;
+}
+
+FunctionCaller *GNUstepObjCRuntime::GetMsgLookupFunctionCaller(Thread &thread) {
+  // Build (once) a utility function that resolves a method implementation by
+  // calling libobjc2's objc_msg_lookup, and a FunctionCaller to invoke it.
+  // This mirrors AppleObjCTrampolineHandler's dispatch-lookup utility and is
+  // the JIT path that works from inside a step's PreResume action.
+  static const char *g_lookup_name = "$__lldb_gnustep_objc_msg_lookup";
+  static const char *g_lookup_code = R"(
+extern "C" void *objc_msg_lookup(void *receiver, void *selector);
+
+extern "C" void *$__lldb_gnustep_objc_msg_lookup(void *receiver,
+                                                 void *selector) {
+  return objc_msg_lookup(receiver, selector);
+}
+)";
+
+  if (m_msg_lookup_caller)
+    return m_msg_lookup_caller;
+
+  ThreadSP thread_sp(thread.shared_from_this());
+  ExecutionContext exe_ctx(thread_sp);
+  Log *log = GetLog(LLDBLog::Step);
+
+  auto utility_fn_or_error = exe_ctx.GetTargetRef().CreateUtilityFunction(
+      g_lookup_code, g_lookup_name, eLanguageTypeC, exe_ctx);
+  if (!utility_fn_or_error) {
+    LLDB_LOG_ERROR(log, utility_fn_or_error.takeError(),
+                   "[GNUstep] failed to build objc_msg_lookup utility: {0}");
+    return nullptr;
+  }
+  m_msg_lookup_utility_up = std::move(*utility_fn_or_error);
+
+  TypeSystemClangSP scratch_ts_sp =
+      ScratchTypeSystemClang::GetForTarget(GetTargetRef());
+  if (!scratch_ts_sp)
+    return nullptr;
+  CompilerType void_ptr_type =
+      scratch_ts_sp->GetBasicType(eBasicTypeVoid).GetPointerType();
+
+  Value void_ptr_value;
+  void_ptr_value.SetValueType(Value::ValueType::Scalar);
+  void_ptr_value.SetCompilerType(void_ptr_type);
+  ValueList args;
+  args.PushValue(void_ptr_value);
+  args.PushValue(void_ptr_value);
+
+  Status error;
+  m_msg_lookup_caller = m_msg_lookup_utility_up->MakeFunctionCaller(
+      void_ptr_type, args, thread_sp, error);
+  if (error.Fail()) {
+    LLDB_LOG(log, "[GNUstep] failed to make objc_msg_lookup caller: {0}",
+             error.AsCString());
+    m_msg_lookup_caller = nullptr;
+    return nullptr;
+  }
+  return m_msg_lookup_caller;
 }
 
 void GNUstepObjCRuntime::UpdateISAToDescriptorMapIfNeeded() {
