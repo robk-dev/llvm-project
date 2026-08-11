@@ -17,9 +17,12 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/Error.h"
 
+#include <memory>
 #include <optional>
 
 namespace lldb_private {
+
+class GNUstepTaggedPointerVendor;
 
 class GNUstepObjCRuntime : public lldb_private::ObjCLanguageRuntime {
 public:
@@ -93,17 +96,39 @@ public:
   llvm::Expected<std::unique_ptr<UtilityFunction>>
   CreateObjectChecker(std::string name, ExecutionContext &exe_ctx) override;
 
+  /// Reported by `statistics dump` and the SB API, as AppleObjCRuntimeV2
+  /// does. libobjc2 implements the GNUstep Objective-C ABI version 2.
+  StructuredData::ObjectSP GetLanguageSpecificData(SymbolContext sc) override;
+
   ObjCRuntimeVersions GetRuntimeVersion() const override {
     return ObjCRuntimeVersions::eGNUstep_libobjc2;
   }
 
   void UpdateISAToDescriptorMapIfNeeded() override;
 
+  TaggedPointerVendor *GetTaggedPointerVendor() override;
+
+  ClassDescriptorSP GetClassDescriptor(ValueObject &in_value) override;
+
+  ClassDescriptorSP GetClassDescriptorFromISA(ObjCISA isa) override;
+
 protected:
   // Call CreateInstance instead.
   GNUstepObjCRuntime(Process *process);
 
+  /// Finds a complete Objective-C interface type named \p class_name in the
+  /// target's debug info. Used to attach a real type to a dynamic value when
+  /// the base class's symbol-name-keyed cache misses (the gnustep-2.x class
+  /// symbol is not named after the class).
+  lldb::TypeSP LookupClassTypeInDebugInfo(ConstString class_name);
+
   lldb::ModuleSP m_objc_module_sp;
+
+  std::unique_ptr<GNUstepTaggedPointerVendor> m_tagged_pointer_vendor_up;
+
+  /// Set when new modules arrive; cleared once the ISA-to-descriptor map has
+  /// been refreshed, so the symbol sweep only reruns after module changes.
+  bool m_isa_map_dirty = true;
 };
 
 } // namespace lldb_private

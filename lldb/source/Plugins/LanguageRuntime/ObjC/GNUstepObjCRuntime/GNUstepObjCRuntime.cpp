@@ -7,17 +7,26 @@
 //===----------------------------------------------------------------------===//
 
 #include "GNUstepObjCRuntime.h"
+#include "GNUstepObjCClassDescriptor.h"
 
 #include "Plugins/TypeSystem/Clang/TypeSystemClang.h"
 
 #include "lldb/Core/Module.h"
+#include "lldb/Core/ModuleList.h"
 #include "lldb/Core/PluginManager.h"
 #include "lldb/Expression/UtilityFunction.h"
+#include "lldb/Symbol/Symbol.h"
+#include "lldb/Symbol/SymbolContext.h"
+#include "lldb/Symbol/Type.h"
 #include "lldb/Target/ExecutionContext.h"
 #include "lldb/Target/Process.h"
 #include "lldb/Target/Target.h"
 #include "lldb/Utility/ArchSpec.h"
 #include "lldb/Utility/ConstString.h"
+#include "lldb/Utility/LLDBLog.h"
+#include "lldb/Utility/Log.h"
+#include "lldb/Utility/RegularExpression.h"
+#include "lldb/Utility/StructuredData.h"
 #include "lldb/ValueObject/ValueObject.h"
 
 using namespace lldb;
@@ -100,7 +109,9 @@ LanguageRuntime *GNUstepObjCRuntime::CreateInstance(Process *process,
 GNUstepObjCRuntime::~GNUstepObjCRuntime() = default;
 
 GNUstepObjCRuntime::GNUstepObjCRuntime(Process *process)
-    : ObjCLanguageRuntime(process), m_objc_module_sp(nullptr) {
+    : ObjCLanguageRuntime(process), m_objc_module_sp(nullptr),
+      m_tagged_pointer_vendor_up(
+          std::make_unique<GNUstepTaggedPointerVendor>(*process)) {
   ReadObjCLibraryIfNeeded(process->GetTarget().GetImages());
 }
 
@@ -128,7 +139,54 @@ bool GNUstepObjCRuntime::GetDynamicTypeAndAddress(
     ValueObject &in_value, DynamicValueType use_dynamic,
     TypeAndOrName &class_type_or_name, Address &address,
     Value::ValueType &value_type, llvm::ArrayRef<uint8_t> &local_buffer) {
-  return false;
+  class_type_or_name.Clear();
+  value_type = Value::ValueType::Scalar;
+
+  if (!CouldHaveDynamicValue(in_value))
+    return false;
+
+  ClassDescriptorSP objc_class_sp(GetNonKVOClassDescriptor(in_value));
+  if (!objc_class_sp)
+    return false;
+
+  ConstString class_name(objc_class_sp->GetClassName());
+  if (!class_name)
+    return false;
+
+  const addr_t object_ptr = in_value.GetPointerValue().address;
+  address.SetRawAddress(object_ptr);
+  class_type_or_name.SetName(class_name);
+
+  // Upgrade the bare class name to a real type when the inferior's debug
+  // info defines the class. LookupInCompleteClassCache keys on an
+  // eSymbolTypeObjCClass symbol named exactly after the class, which the
+  // Apple ABI emits but the gnustep-2.x ABI does not (its class symbol is
+  // "._OBJC_CLASS_<name>"), so on a cache miss query the debug info directly.
+  TypeSP type_sp(objc_class_sp->GetType());
+  if (!type_sp) {
+    type_sp = LookupInCompleteClassCache(class_name);
+    if (!type_sp)
+      type_sp = LookupClassTypeInDebugInfo(class_name);
+    if (type_sp)
+      objc_class_sp->SetType(type_sp);
+  }
+  if (type_sp)
+    class_type_or_name.SetTypeSP(type_sp);
+
+  return !class_type_or_name.IsEmpty();
+}
+
+lldb::TypeSP
+GNUstepObjCRuntime::LookupClassTypeInDebugInfo(ConstString class_name) {
+  TypeQuery query(class_name.GetStringRef(), TypeQueryOptions::e_exact_match);
+  TypeResults results;
+  GetTargetRef().GetImages().FindTypes(nullptr, query, results);
+  for (const TypeSP &type_sp : results.GetTypeMap().Types()) {
+    if (type_sp && TypeSystemClang::IsObjCObjectOrInterfaceType(
+                       type_sp->GetForwardCompilerType()))
+      return type_sp;
+  }
+  return TypeSP();
 }
 
 TypeAndOrName
@@ -205,7 +263,76 @@ GNUstepObjCRuntime::GetStepThroughTrampolinePlan(Thread &thread,
 }
 
 void GNUstepObjCRuntime::UpdateISAToDescriptorMapIfNeeded() {
-  // TODO: Support lazily named and dynamically loaded Objective-C classes
+  if (!m_process)
+    return;
+  const uint32_t stop_id = m_process->GetStopID();
+  if (!m_isa_map_dirty) {
+    m_isa_to_descriptor_stop_id = stop_id;
+    return;
+  }
+
+  // The gnustep-2.x ABI emits every compiled class as a `._OBJC_CLASS_<name>`
+  // data symbol whose address is the class object itself (the ISA of its
+  // instances), so the map can be seeded from symbol tables alone - without
+  // running any code in the inferior. Classes created dynamically at runtime
+  // are handled by the create-on-miss path in GetClassDescriptorFromISA.
+  Target &target = GetTargetRef();
+  const ModuleList &images = target.GetImages();
+
+  SymbolContextList sc_list;
+  RegularExpression regex(llvm::StringRef("^\\._OBJC_CLASS_"));
+  images.FindSymbolsMatchingRegExAndType(regex, eSymbolTypeAny, sc_list);
+
+  static constexpr llvm::StringLiteral g_class_prefix("._OBJC_CLASS_");
+  for (const SymbolContext &sc : sc_list) {
+    if (!sc.symbol)
+      continue;
+    const addr_t isa = sc.symbol->GetAddress().GetLoadAddress(&target);
+    if (isa == 0 || isa == LLDB_INVALID_ADDRESS || ISAIsCached(isa))
+      continue;
+    llvm::StringRef name = sc.symbol->GetName().GetStringRef();
+    name.consume_front(g_class_prefix);
+    auto descriptor_sp = std::make_shared<GNUstepObjCClassDescriptor>(
+        m_process->shared_from_this(), isa);
+    if (descriptor_sp->IsValid())
+      AddClass(isa, descriptor_sp, name.str().c_str());
+  }
+
+  m_isa_map_dirty = false;
+  m_isa_to_descriptor_stop_id = stop_id;
+}
+
+ObjCLanguageRuntime::TaggedPointerVendor *
+GNUstepObjCRuntime::GetTaggedPointerVendor() {
+  return m_tagged_pointer_vendor_up.get();
+}
+
+ObjCLanguageRuntime::ClassDescriptorSP
+GNUstepObjCRuntime::GetClassDescriptor(ValueObject &in_value) {
+  const addr_t ptr = in_value.GetPointerValue().address;
+  if (ptr != LLDB_INVALID_ADDRESS && m_tagged_pointer_vendor_up &&
+      m_tagged_pointer_vendor_up->IsPossibleTaggedPointer(ptr))
+    return m_tagged_pointer_vendor_up->GetClassDescriptor(ptr);
+  return ObjCLanguageRuntime::GetClassDescriptor(in_value);
+}
+
+ObjCLanguageRuntime::ClassDescriptorSP
+GNUstepObjCRuntime::GetClassDescriptorFromISA(ObjCISA isa) {
+  if (ClassDescriptorSP descriptor_sp =
+          ObjCLanguageRuntime::GetClassDescriptorFromISA(isa))
+    return descriptor_sp;
+
+  // The symbol sweep only sees classes with static definitions. Fall back to
+  // parsing the class structure directly so classes registered at runtime
+  // (e.g. via objc_allocateClassPair) resolve as well.
+  if (!m_process || isa == 0 || isa == LLDB_INVALID_ADDRESS)
+    return ClassDescriptorSP();
+  auto descriptor_sp = std::make_shared<GNUstepObjCClassDescriptor>(
+      m_process->shared_from_this(), isa);
+  if (!descriptor_sp->IsValid())
+    return ClassDescriptorSP();
+  AddClass(isa, descriptor_sp, descriptor_sp->GetClassName().GetCString());
+  return descriptor_sp;
 }
 
 bool GNUstepObjCRuntime::IsModuleObjCLibrary(const ModuleSP &module_sp) {
@@ -222,6 +349,15 @@ bool GNUstepObjCRuntime::ReadObjCLibrary(const ModuleSP &module_sp) {
   return true;
 }
 
+StructuredData::ObjectSP
+GNUstepObjCRuntime::GetLanguageSpecificData(SymbolContext sc) {
+  auto dict_up = std::make_unique<StructuredData::Dictionary>();
+  dict_up->AddItem("Objective-C runtime version",
+                   std::make_unique<StructuredData::UnsignedInteger>(2));
+  return dict_up;
+}
+
 void GNUstepObjCRuntime::ModulesDidLoad(const ModuleList &module_list) {
   ReadObjCLibraryIfNeeded(module_list);
+  m_isa_map_dirty = true;
 }
