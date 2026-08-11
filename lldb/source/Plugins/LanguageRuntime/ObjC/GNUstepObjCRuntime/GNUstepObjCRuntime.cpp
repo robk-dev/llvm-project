@@ -11,9 +11,13 @@
 
 #include "Plugins/TypeSystem/Clang/TypeSystemClang.h"
 
+#include "lldb/Core/Address.h"
 #include "lldb/Core/Module.h"
 #include "lldb/Core/ModuleList.h"
 #include "lldb/Core/PluginManager.h"
+#include "lldb/Core/Value.h"
+#include "lldb/Expression/DiagnosticManager.h"
+#include "lldb/Expression/FunctionCaller.h"
 #include "lldb/Expression/UtilityFunction.h"
 #include "lldb/Symbol/Symbol.h"
 #include "lldb/Symbol/SymbolContext.h"
@@ -21,6 +25,7 @@
 #include "lldb/Target/ExecutionContext.h"
 #include "lldb/Target/Process.h"
 #include "lldb/Target/Target.h"
+#include "lldb/Target/Thread.h"
 #include "lldb/Utility/ArchSpec.h"
 #include "lldb/Utility/ConstString.h"
 #include "lldb/Utility/LLDBLog.h"
@@ -28,6 +33,8 @@
 #include "lldb/Utility/RegularExpression.h"
 #include "lldb/Utility/StructuredData.h"
 #include "lldb/ValueObject/ValueObject.h"
+
+#include <limits>
 
 using namespace lldb;
 using namespace lldb_private;
@@ -115,17 +122,237 @@ GNUstepObjCRuntime::GNUstepObjCRuntime(Process *process)
   ReadObjCLibraryIfNeeded(process->GetTarget().GetImages());
 }
 
+FunctionCaller *
+GNUstepObjCRuntime::GetObjectDescriptionCaller(ExecutionContext &exe_ctx) {
+  // gnustep-base's _NSPrintForDebugger (Source/NSDebug.m) is exactly:
+  //
+  //   if (object && [object respondsToSelector: @selector(description)])
+  //     return [[object description] UTF8String];
+  //   return NULL;
+  //
+  // Every runtime function it needs is OBJC_PUBLIC in libobjc2, so rather
+  // than depending on Foundation exporting that hook - it does from
+  // libgnustep-base.so but not from the MSVC gnustep-base DLL, which is why
+  // this used to need a shim on Windows - reproduce it here. As a bonus this
+  // makes `po` work against a bare libobjc2 with no Foundation at all, for
+  // any object implementing -description.
+  //
+  // object_getClass() rather than a raw isa read, because it also resolves
+  // tagged pointers (classForObject) and skips libobjc2's hidden classes.
+  static const char *g_description_name = "$__lldb_gnustep_object_description";
+  static const char *g_description_code = R"(
+extern "C" {
+void *object_getClass(void *object);
+void *sel_registerName(const char *name);
+signed char class_respondsToSelector(void *cls, void *sel);
+void *objc_msg_lookup(void *receiver, void *selector);
+}
+
+extern "C" const char *$__lldb_gnustep_object_description(void *object) {
+  if (!object)
+    return 0;
+  void *description_sel = sel_registerName("description");
+  if (!class_respondsToSelector(object_getClass(object), description_sel))
+    return 0;
+  void *(*description_imp)(void *, void *) =
+      (void *(*)(void *, void *))objc_msg_lookup(object, description_sel);
+  if (!description_imp)
+    return 0;
+  void *description = description_imp(object, description_sel);
+  if (!description)
+    return 0;
+  void *utf8_sel = sel_registerName("UTF8String");
+  if (!class_respondsToSelector(object_getClass(description), utf8_sel))
+    return 0;
+  const char *(*utf8_imp)(void *, void *) =
+      (const char *(*)(void *, void *))objc_msg_lookup(description, utf8_sel);
+  if (!utf8_imp)
+    return 0;
+  return utf8_imp(description, utf8_sel);
+}
+)";
+
+  std::lock_guard<std::mutex> guard(m_description_mutex);
+  if (m_description_caller)
+    return m_description_caller;
+  // A wrapper that failed to compile will fail again - the runtime does not
+  // provide something it calls - so don't pay for that on every `po`.
+  // Anything that fails later may be transient and is retried.
+  if (m_description_failed)
+    return nullptr;
+
+  Log *log = GetLog(LLDBLog::Expressions);
+
+  if (!m_description_utility_up) {
+    auto utility_fn_or_error = exe_ctx.GetTargetRef().CreateUtilityFunction(
+        g_description_code, g_description_name, eLanguageTypeC, exe_ctx);
+    if (!utility_fn_or_error) {
+      LLDB_LOG_ERROR(log, utility_fn_or_error.takeError(),
+                     "failed to build object description utility: {0}");
+      m_description_failed = true;
+      return nullptr;
+    }
+    m_description_utility_up = std::move(*utility_fn_or_error);
+  }
+
+  TypeSystemClangSP scratch_ts_sp =
+      ScratchTypeSystemClang::GetForTarget(GetTargetRef());
+  if (!scratch_ts_sp)
+    return nullptr;
+
+  Value void_ptr_value;
+  void_ptr_value.SetValueType(Value::ValueType::Scalar);
+  void_ptr_value.SetCompilerType(
+      scratch_ts_sp->GetBasicType(eBasicTypeVoid).GetPointerType());
+  ValueList args;
+  args.PushValue(void_ptr_value);
+
+  Status error;
+  m_description_caller = m_description_utility_up->MakeFunctionCaller(
+      scratch_ts_sp->GetCStringType(true), args, exe_ctx.GetThreadSP(), error);
+  if (error.Fail()) {
+    LLDB_LOG(log, "failed to make object description caller: {0}",
+             error.AsCString());
+    m_description_caller = nullptr;
+    return nullptr;
+  }
+  return m_description_caller;
+}
+
 llvm::Error GNUstepObjCRuntime::GetObjectDescription(Stream &str,
                                                      ValueObject &valobj) {
-  return llvm::createStringError(
-      "LLDB's GNUStep runtime does not support object description");
+  CompilerType compiler_type(valobj.GetCompilerType());
+  bool is_signed;
+  // ObjC objects can only be pointers (or numbers that actually represent
+  // pointers but haven't been typecast).
+  if (!compiler_type.IsIntegerType(is_signed) && !compiler_type.IsPointerType())
+    return llvm::createStringError("not a pointer type");
+
+  Value val;
+  if (!valobj.ResolveValue(val.GetScalar()))
+    return llvm::createStringError("pointer value could not be resolved");
+
+  // Value objects may not have a process in their ExecutionContextRef. But
+  // we need one in the context we pass down to eventually call description.
+  ExecutionContext exe_ctx;
+  if (valobj.GetProcessSP()) {
+    exe_ctx = ExecutionContext(valobj.GetExecutionContextRef());
+  } else {
+    exe_ctx.SetContext(valobj.GetTargetSP(), true);
+    if (!exe_ctx.HasProcessScope())
+      return llvm::createStringError("no process");
+  }
+  return GetObjectDescription(str, val, exe_ctx.GetBestExecutionContextScope());
 }
 
 llvm::Error
 GNUstepObjCRuntime::GetObjectDescription(Stream &strm, Value &value,
                                          ExecutionContextScope *exe_scope) {
-  return llvm::createStringError(
-      "LLDB's GNUStep runtime does not support object description");
+  ExecutionContext exe_ctx;
+  exe_scope->CalculateExecutionContext(exe_ctx);
+  Process *process = exe_ctx.GetProcessPtr();
+  if (!process)
+    return llvm::createStringError("no process");
+
+  Target *target = exe_ctx.GetTargetPtr();
+  TypeSystemClangSP scratch_ts_sp =
+      ScratchTypeSystemClang::GetForTarget(*target);
+  if (!scratch_ts_sp)
+    return llvm::createStringError("no scratch type system");
+
+  // The call thunk is compiled as plain C (no ObjC machinery needed in the
+  // expression parser), so pass the object as `void *` and read back a
+  // `const char *`.
+  CompilerType void_ptr_type =
+      scratch_ts_sp->GetBasicType(eBasicTypeVoid).GetPointerType();
+  value.SetCompilerType(void_ptr_type);
+  // FunctionCaller writes the argument at the width of its Scalar, which for
+  // an address held in an integer is the integer's, not the pointer's.
+  const uint64_t object_addr = value.GetScalar().ULongLong();
+  if (process->GetAddressByteSize() == 4) {
+    if (object_addr > std::numeric_limits<uint32_t>::max())
+      return llvm::createStringError("value is not an address");
+    value.GetScalar() = Scalar(static_cast<uint32_t>(object_addr));
+  } else {
+    value.GetScalar() = Scalar(object_addr);
+  }
+
+  ValueList arg_value_list;
+  arg_value_list.PushValue(value);
+
+  CompilerType return_compiler_type = scratch_ts_sp->GetCStringType(true);
+  Value ret;
+  ret.SetCompilerType(return_compiler_type);
+
+  if (!exe_ctx.GetFramePtr()) {
+    Thread *thread = exe_ctx.GetThreadPtr();
+    if (thread == nullptr) {
+      exe_ctx.SetThreadSP(process->GetThreadList().GetSelectedThread());
+      thread = exe_ctx.GetThreadPtr();
+    }
+    if (thread)
+      exe_ctx.SetFrameSP(thread->GetSelectedFrame(DoNoSelectMostRelevantFrame));
+  }
+
+  DiagnosticManager diagnostics;
+  lldb::addr_t wrapper_struct_addr = LLDB_INVALID_ADDRESS;
+
+  // Building the caller needs a thread, so this has to follow the frame
+  // selection above. MakeFunctionCaller already compiled the wrapper into
+  // the inferior, so only a fresh argument struct is needed per call.
+  FunctionCaller *caller = GetObjectDescriptionCaller(exe_ctx);
+  if (!caller)
+    return llvm::createStringError(
+        "could not build the object description function");
+
+  if (!caller->WriteFunctionArguments(exe_ctx, wrapper_struct_addr,
+                                      arg_value_list, diagnostics)) {
+    // The argument block is allocated before the arguments are written, so
+    // it may exist even though writing them failed.
+    if (wrapper_struct_addr != LLDB_INVALID_ADDRESS)
+      caller->DeallocateFunctionResults(exe_ctx, wrapper_struct_addr);
+    return llvm::createStringError(
+        "could not write the object description arguments");
+  }
+
+  EvaluateExpressionOptions options;
+  options.SetUnwindOnError(true);
+  options.SetTryAllThreads(true);
+  options.SetStopOthers(true);
+  options.SetIgnoreBreakpoints(true);
+  options.SetTimeout(process->GetUtilityExpressionTimeout());
+  options.SetIsForUtilityExpr(true);
+
+  ExpressionResults results = caller->ExecuteFunction(
+      exe_ctx, &wrapper_struct_addr, options, diagnostics, ret);
+  caller->DeallocateFunctionResults(exe_ctx, wrapper_struct_addr);
+  if (results != eExpressionCompleted)
+    return llvm::createStringError(
+        "could not evaluate the object description in the inferior");
+
+  addr_t result_ptr = ret.GetScalar().ULongLong(LLDB_INVALID_ADDRESS);
+  if (result_ptr == 0 || result_ptr == LLDB_INVALID_ADDRESS)
+    return llvm::createStringError("object returned no description");
+
+  // -description returns inferior memory, so a string that never terminates
+  // would otherwise be read until the host runs out of it. No real
+  // description approaches this.
+  static constexpr size_t g_max_description_length = 1024 * 1024;
+
+  char buf[512];
+  size_t cstr_len = 0;
+  size_t full_buffer_len = sizeof(buf) - 1;
+  size_t curr_len = full_buffer_len;
+  while (curr_len == full_buffer_len && cstr_len < g_max_description_length) {
+    Status error;
+    curr_len = process->ReadCStringFromMemory(result_ptr + cstr_len, buf,
+                                              sizeof(buf), error);
+    strm.Write(buf, curr_len);
+    cstr_len += curr_len;
+  }
+  if (cstr_len > 0)
+    return llvm::Error::success();
+  return llvm::createStringError("empty object description");
 }
 
 bool GNUstepObjCRuntime::CouldHaveDynamicValue(ValueObject &in_value) {
