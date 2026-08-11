@@ -122,7 +122,25 @@ protected:
   /// symbol is not named after the class).
   lldb::TypeSP LookupClassTypeInDebugInfo(ConstString class_name);
 
+  /// Lazily-built FunctionCaller for a utility function that reproduces
+  /// gnustep-base's `_NSPrintForDebugger` (NSDebug.m) using nothing but
+  /// libobjc2's exported API, so `po` works whether or not Foundation is
+  /// loaded and regardless of whether gnustep-base exports that hook - it
+  /// does on ELF but not from the MSVC DLL. Returns nullptr on failure; the
+  /// caller is owned by the utility function and stays valid for the
+  /// runtime's life.
+  FunctionCaller *GetObjectDescriptionCaller(ExecutionContext &exe_ctx);
+
   lldb::ModuleSP m_objc_module_sp;
+
+  /// Utility function wrapping the -description/-UTF8String pair; owns
+  /// m_description_caller. Guarded by m_description_mutex, which also
+  /// latches a wrapper that failed to compile so it is not retried on every
+  /// `po`.
+  std::mutex m_description_mutex;
+  std::unique_ptr<UtilityFunction> m_description_utility_up;
+  FunctionCaller *m_description_caller = nullptr;
+  bool m_description_failed = false;
 
   std::unique_ptr<GNUstepTaggedPointerVendor> m_tagged_pointer_vendor_up;
 

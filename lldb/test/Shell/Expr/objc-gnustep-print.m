@@ -105,3 +105,39 @@ int main() {
   [t set_ivars];
   return 0;
 }
+
+// `po` sends -description then -UTF8String, built from libobjc2's exported
+// API rather than resolving gnustep-base's _NSPrintForDebugger. Nothing here
+// needs Foundation, so this covers `po` against a bare runtime too.
+@interface Str : NSObject {
+  const char *_bytes;
+}
++ (id)withBytes:(const char *)bytes;
+- (const char *)UTF8String;
+@end
+@implementation Str
++ (id)withBytes:(const char *)bytes {
+  Str *str = [Str new];
+  str->_bytes = bytes;
+  return str;
+}
+- (const char *)UTF8String {
+  return _bytes;
+}
+@end
+
+@interface TestObj (Description)
+- (id)description;
+@end
+@implementation TestObj (Description)
+- (id)description {
+  return [Str withBytes:"<TestObj: described>"];
+}
+@end
+
+// RUN: %lldb -b -o "b objc-gnustep-print.m:106" -o "run" -o "po t" \
+// RUN:     -- %t | FileCheck %s --check-prefix=PO
+//
+// PO: (lldb) po t
+// PO: <TestObj: described>
+// PO-NOT: warning: `po` was unsuccessful
