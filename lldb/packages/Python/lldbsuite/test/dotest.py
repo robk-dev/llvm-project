@@ -47,6 +47,7 @@ from ..support import seven
 from ..support import temp_file
 from ..support import xcode
 
+
 def is_exe(fpath):
     """Returns true if fpath is an executable."""
     if fpath is None:
@@ -74,8 +75,7 @@ def which(program):
 def usage(parser):
     parser.print_help()
     if configuration.verbose > 0:
-        print(
-            """
+        print("""
 Examples:
 
 This is an example of using the -f option to pinpoint to a specific test class
@@ -166,8 +166,7 @@ to create reference logs for debugging.
 
 $ ./dotest.py --log-success
 
-"""
-        )
+""")
     sys.exit(0)
 
 
@@ -293,6 +292,9 @@ def parseOptionsAndInitTestdirs():
 
     if args.objc_gnustep_dir:
         configuration.objc_gnustep_dir = args.objc_gnustep_dir
+
+    if args.objc_gnustep_base_dir:
+        configuration.objc_gnustep_base_dir = args.objc_gnustep_base_dir
 
     if args.libcxx_include_dir or args.libcxx_library_dir:
         if args.lldb_platform_name:
@@ -671,7 +673,7 @@ def setupSysPath():
         # Some of the code that uses this path assumes it hasn't resolved the Versions... link.
         # If the path we've constructed looks like that, then we'll strip out
         # the Versions/A part.
-        (before, frameWithVersion, after) = lldbPythonDir.rpartition(
+        before, frameWithVersion, after = lldbPythonDir.rpartition(
             "LLDB.framework/Versions/A"
         )
         if frameWithVersion != "":
@@ -947,14 +949,12 @@ def canRunMsvcStlTests():
             stderr=subprocess.PIPE,
             universal_newlines=True,
         )
-        _, stderr = p.communicate(
-            """
+        _, stderr = p.communicate("""
             #include <yvals_core.h>
             #ifndef _MSVC_STL_VERSION
             #error _MSVC_STL_VERSION not defined
             #endif
-            """
-        )
+            """)
         if not p.returncode:
             return True, "Compiling with MSVC STL"
         return (False, f"Not compiling with MSVC STL: {stderr}")
@@ -1029,6 +1029,11 @@ def checkObjcGnustepSupport():
             print("objc-gnustep tests will be skipped because no GNUstep")
             print("libobjc2 installation was specified")
         configuration.skip_categories.append("objc-gnustep")
+    if not configuration.objc_gnustep_base_dir:
+        if configuration.verbose:
+            print("objc-gnustep-base tests will be skipped because no")
+            print("gnustep-base installation was specified")
+        configuration.skip_categories.append("objc-gnustep-base")
 
 
 def checkExpressionSupport():
