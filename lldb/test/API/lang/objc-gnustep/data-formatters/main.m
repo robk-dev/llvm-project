@@ -89,6 +89,11 @@ int main(int argc, const char *argv[]) {
     Account *account = [[Account alloc] initWithOwner:@"Jane" balance:1234.5];
     id anonymous = account;
 
+    // Message sends to step into (through objc_msgSend): one into
+    // gnustep-base, one into this file.
+    NSUInteger fruitCount = [fruits count];        // step here: Foundation
+    NSString *accountText = [account description]; // step here: user class
+
     NSLog(@"%@ %@ %@ %@ %@ %@ %@", tinyString, constantString, unicodeConstant,
           emptyString, builtString, unicodeBuilt, mutableString);
     NSLog(@"%@ %@ %@ %@ %@ %@ %@ %@ %@", boolYes, smallInt, taggedInt,
@@ -96,8 +101,8 @@ int main(int argc, const char *argv[]) {
           heapDouble);
     NSLog(@"%@ %@ %@ %@ %@ %@ %@ %@ %@ %@", emptyArray, fruits, mutableArray,
           nested, emptyDict, person, mutableDict, colors, mutableSet, counted);
-    NSLog(@"%@ %@ %@ %@ %@ %@ %@", data, epoch, someDate, null, url, account,
-          anonymous);
+    NSLog(@"%@ %@ %@ %@ %@ %@ %@ %lu %@", data, epoch, someDate, null, url,
+          account, anonymous, (unsigned long)fruitCount, accountText);
     return nilObject != nil; // break here
   }
 }
