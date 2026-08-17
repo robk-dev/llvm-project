@@ -149,6 +149,28 @@ class TestGNUstepDataFormatters(TestBase):
             substrs=["(Account *) isa"],
         )
 
+    def test_step_through_dispatch(self):
+        """`step` at a message send lands in the method, not in objc_msgSend:
+        the runtime's step-through plan resolves the implementation. Covers
+        a method inside gnustep-base and one in the program."""
+        self.build()
+        target, process, thread, _ = lldbutil.run_to_source_breakpoint(
+            self, "// step here: Foundation", lldb.SBFileSpec("main.m")
+        )
+        thread.StepInto()
+        frame = thread.GetFrameAtIndex(0)
+        self.assertEqual(frame.GetFunctionName(), "-[GSArray count]")
+        self.assertEqual(frame.GetLineEntry().GetFileSpec().GetFilename(), "GSArray.m")
+        thread.StepOut()
+        # Now the send to the user class.
+        lldbutil.continue_to_source_breakpoint(
+            self, process, "// step here: user class", lldb.SBFileSpec("main.m")
+        )
+        thread.StepInto()
+        frame = thread.GetFrameAtIndex(0)
+        self.assertEqual(frame.GetFunctionName(), "-[Account description]")
+        self.assertEqual(frame.GetLineEntry().GetFileSpec().GetFilename(), "main.m")
+
     def test_api(self):
         """The same summaries come back through the SB API."""
         self.stop_at_end()
