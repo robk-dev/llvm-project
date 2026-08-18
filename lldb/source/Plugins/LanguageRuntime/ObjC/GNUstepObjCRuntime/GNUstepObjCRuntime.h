@@ -84,6 +84,19 @@ public:
   CreateExceptionResolver(const lldb::BreakpointSP &bkpt, bool catch_bp,
                           bool throw_bp) override;
 
+  void SetExceptionBreakpoints() override;
+
+  void ClearExceptionBreakpoints() override;
+
+  bool ExceptionBreakpointsAreSet() override;
+
+  bool ExceptionBreakpointsExplainStop(lldb::StopInfoSP stop_reason) override;
+
+  /// The object of the Objective-C exception being thrown on \p thread, or an
+  /// empty ValueObjectSP if the thread is not throwing one.
+  lldb::ValueObjectSP
+  GetExceptionObjectForThread(lldb::ThreadSP thread_sp) override;
+
   lldb::ThreadPlanSP GetStepThroughTrampolinePlan(Thread &thread,
                                                   bool stop_others) override;
 
@@ -211,6 +224,11 @@ protected:
 
   /// Guards against a sweep that resolves a class re-entering the sweep.
   bool m_updating_isa_map = false;
+
+  /// The internal breakpoint on the runtime's throw entry point, used by
+  /// `process handle`/`thread exception` to stop where an exception is
+  /// raised rather than where it is caught.
+  lldb::BreakpointSP m_objc_exception_bp_sp;
 };
 
 } // namespace lldb_private
