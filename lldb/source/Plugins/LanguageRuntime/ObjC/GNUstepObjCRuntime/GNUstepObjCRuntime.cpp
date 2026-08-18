@@ -804,16 +804,20 @@ GNUstepObjCRuntime::GetExceptionObjectForThread(ThreadSP thread_sp) {
   if (!thread_sp || !thread_sp->SafeToCallFunctions())
     return {};
 
-  // libobjc2 picks one of three exception back-ends at build time
-  // (CMakeLists.txt): Itanium unwinding on ELF and Mach-O, __cxa_* over SEH
-  // on MinGW, and native MSVC exceptions on Windows. Only the first two are
-  // reachable through the C++ runtime, so recovering the object mid-unwind
-  // is inherently platform-specific.
+  // Stopped at the throw itself the object is simply argument 0, which holds
+  // on every one of libobjc2's exception back-ends and is where the frame
+  // recognizer already presents it. That is the path that works.
   //
-  // Stopped at the throw itself, though, the object is simply argument 0 -
-  // which holds on every back-end, and is where the frame recognizer already
-  // presents it. Prefer that, and fall back to the C++ runtime for a stop
-  // further into the unwind.
+  // Further into the unwind there is nothing runtime-independent to read, so
+  // ask the C++ runtime - which currently recovers nothing on either
+  // back-end that reaches here, for two different reasons. On ELF libobjc2
+  // raises with its own exception class rather than through __cxa_throw, so
+  // libstdc++ never records it and __cxa_current_exception_type() is null. On
+  // MinGW it does record it, but ItaniumABIRuntime reads the word before the
+  // type_info, which only locates the object for Apple's runtime - objc4
+  // embeds the type_info in the same allocation. libobjc2 shares one exported
+  // type_info, so that word is an unrelated global. `thread exception` is
+  // therefore reliable at the throw site and empty elsewhere.
   if (StackFrameSP frame_sp = thread_sp->GetStackFrameAtIndex(0)) {
     if (RecognizedStackFrameSP recognized_sp = frame_sp->GetRecognizedFrame()) {
       if (ValueObjectSP exception_sp = recognized_sp->GetExceptionObject())
