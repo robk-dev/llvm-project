@@ -1,6 +1,6 @@
 // REQUIRES: objc-gnustep
 //
-// RUN: %build %s --compiler=clang --objc-gnustep --output=%t
+// RUN: %build %inferior_target %s --compiler=clang --objc-gnustep --output=%t
 
 #import "objc/runtime.h"
 
@@ -36,7 +36,7 @@ __attribute__((objc_root_class))
 // registered with the runtime (the GNUstep plugin's IR pass does this);
 // without it the dispatch reaches the runtime with an unregistered selector.
 //
-// RUN: %lldb -b -o "b objc-gnustep-expr.m:46" -o "run" \
+// RUN: %lldb %inferior_abi -b -o "b objc-gnustep-expr.m:46" -o "run" \
 // RUN:          -o "expr [c addFortyTwoTo:100]" \
 // RUN:          -o "expr (int)[[Calc new] addFortyTwoTo:1]" -- %t | FileCheck %s
 //
