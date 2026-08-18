@@ -104,5 +104,7 @@ int main() {
 // RUN: %if objc-gnustep-catch %{ %lldb -b -o "breakpoint set -E objc --on-catch true --on-throw false" -o "run" -o "bt" -- %t | FileCheck %s --check-prefix=CATCH %}
 //
 // CATCH: stop reason = breakpoint
-// CATCH: frame #0: {{.*}}objc_begin_catch
+// objc_begin_catch, or __cxa_begin_catch where clang routes @catch through
+// the C++ ABI.
+// CATCH: frame #0: {{.*}}{{(objc|__cxa)_begin_catch}}
 // CATCH: frame #1: {{.*}}main at objc-gnustep-exceptions.m:

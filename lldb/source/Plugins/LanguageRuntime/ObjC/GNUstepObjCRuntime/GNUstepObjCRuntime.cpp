@@ -731,8 +731,20 @@ GNUstepObjCRuntime::CreateExceptionResolver(const BreakpointSP &bkpt,
   // MSVC build raises a native SEH exception instead (eh_win32_msvc.cc) and
   // catch is a __CxxFrameHandler3 funclet with no symbol to break on, so ask
   // the runtime module rather than the target triple.
-  if (catch_bp && ModuleDefinesFunction(m_objc_module_sp, "objc_begin_catch"))
+  if (catch_bp && ModuleDefinesFunction(m_objc_module_sp, "objc_begin_catch")) {
     names.emplace_back("objc_begin_catch");
+    // For gnustep-2.x on MinGW clang routes @catch through the C++ ABI
+    // instead (CGObjCGNU.cpp, usesCxxExceptions), leaving libobjc2's entry
+    // point exported but never reached. Which one a program calls depends on
+    // how it was compiled, so offer both; the unused name never resolves.
+    // That entry point is shared with C++ catch, so on MinGW this stops on
+    // those too.
+    //
+    // isOSWindows(), not the environment: LLDB reports a MinGW PE as msvc
+    // unless plugin.object-file.pe-coff.abi says otherwise.
+    if (GetTargetRef().GetArchitecture().GetTriple().isOSWindows())
+      names.emplace_back("__cxa_begin_catch");
+  }
 
   if (names.empty())
     return {};
