@@ -102,6 +102,9 @@ bool GNUstepNSDataSummaryProvider(ValueObject &valobj, Stream &stream,
 bool GNUstepNSURLSummaryProvider(ValueObject &valobj, Stream &stream,
                                  const TypeSummaryOptions &options);
 
+bool GNUstepNSExceptionSummaryProvider(ValueObject &valobj, Stream &stream,
+                                       const TypeSummaryOptions &options);
+
 bool GNUstepNSNullSummaryProvider(ValueObject &valobj, Stream &stream,
                                   const TypeSummaryOptions &options);
 
