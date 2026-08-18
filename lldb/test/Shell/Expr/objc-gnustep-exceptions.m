@@ -98,13 +98,10 @@ int main() {
 // CAUGHT-NOT: warning: `po` was unsuccessful
 
 // Unlike Apple's runtime, libobjc2 has an entry point for entering a handler,
-// so catch breakpoints are real. It only exists where exceptions unwind
-// through the Itanium ABI: the MSVC build raises a native SEH exception and
-// catch is a __CxxFrameHandler3 funclet with nothing to break on. MinGW
-// (windows-gnu) uses __cxa_* over SEH and does have it, so gate on the ABI
-// rather than on the OS.
+// so catch breakpoints are real, but only where exceptions unwind through
+// the Itanium ABI, which its MSVC build does not.
 //
-// RUN: %if !windows-msvc %{ %lldb -b -o "breakpoint set -E objc --on-catch true --on-throw false" -o "run" -o "bt" -- %t | FileCheck %s --check-prefix=CATCH %}
+// RUN: %if objc-gnustep-catch %{ %lldb -b -o "breakpoint set -E objc --on-catch true --on-throw false" -o "run" -o "bt" -- %t | FileCheck %s --check-prefix=CATCH %}
 //
 // CATCH: stop reason = breakpoint
 // CATCH: frame #0: {{.*}}objc_begin_catch
