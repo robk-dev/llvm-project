@@ -61,6 +61,12 @@ lldb::ValueObjectSP GNUstepGetIvar(ValueObject &valobj, llvm::StringRef name);
 lldb::ValueObjectSP GNUstepGetIvarFromRuntime(ValueObject &valobj,
                                               llvm::StringRef name);
 
+/// Load address of ivar \p name, from the runtime's metadata. Unlike
+/// GNUstepGetIvarFromRuntime this does not need the ivar's type to be
+/// expressible, which libobjc2's encodings cannot manage for a bitfield.
+std::optional<lldb::addr_t> GNUstepGetIvarAddress(ValueObject &valobj,
+                                                  llvm::StringRef name);
+
 /// The value of a floating-point ValueObject as a double, or nullopt if it
 /// cannot be read as one.
 std::optional<double> GNUstepGetFloatValue(ValueObject &valobj);
@@ -73,6 +79,11 @@ constexpr uint64_t g_gnustep_small_object_mask = 7;
 
 /// GSTinyString packs up to eight 7-bit characters and a 5-bit length into
 /// the pointer (gnustep-base Source/GSString.m, clang CGObjCGNU.cpp).
+/// Whether gnustep-base's `wide` string flag is set in the byte holding it.
+/// It is the first bitfield of its storage unit, so the low bit
+/// little-endian and the high bit big-endian.
+bool GNUstepDecodeWideFlag(uint8_t byte, lldb::ByteOrder byte_order);
+
 std::optional<std::string> GNUstepDecodeTinyString(uint64_t ptr);
 /// NSSmallInt stores an arithmetically shifted integer (Source/NSNumber.m).
 int64_t GNUstepDecodeSmallInt(uint64_t ptr);

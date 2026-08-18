@@ -64,20 +64,26 @@ ValueObjectSP lldb_private::formatters::GNUstepGetIvar(ValueObject &valobj,
   return GNUstepGetIvarFromRuntime(*object_sp, name);
 }
 
-ValueObjectSP
-lldb_private::formatters::GNUstepGetIvarFromRuntime(ValueObject &valobj,
-                                                    llvm::StringRef name) {
+namespace {
+struct FoundIvar {
+  ObjCLanguageRuntime::ClassDescriptor::iVarDescriptor ivar;
+  addr_t object_addr;
+};
+} // namespace
+
+static std::optional<FoundIvar> FindIvarInRuntime(ValueObject &valobj,
+                                                  llvm::StringRef name) {
   ProcessSP process_sp = valobj.GetProcessSP();
   if (!process_sp)
-    return {};
+    return std::nullopt;
   auto *runtime = llvm::dyn_cast_or_null<GNUstepObjCRuntime>(
       ObjCLanguageRuntime::Get(*process_sp));
   if (!runtime)
-    return {};
+    return std::nullopt;
 
   const addr_t object_addr = valobj.GetValueAsUnsigned(LLDB_INVALID_ADDRESS);
   if (object_addr == 0 || object_addr == LLDB_INVALID_ADDRESS)
-    return {};
+    return std::nullopt;
 
   // An ivar declared by a superclass is just as much a part of the object, so
   // walk up until it is found. Offsets are absolute, so no adjustment is
@@ -93,15 +99,31 @@ lldb_private::formatters::GNUstepGetIvarFromRuntime(ValueObject &valobj,
     const size_t num_ivars = descriptor_sp->GetNumIVars();
     for (size_t i = 0; i < num_ivars; ++i) {
       const auto &ivar = descriptor_sp->GetIVarAtIndex(i);
-      if (ivar.m_name != ivar_name)
-        continue;
-      if (!ivar.m_type)
-        return {};
-      return valobj.GetSyntheticChildAtOffset(ivar.m_offset, ivar.m_type,
-                                              /*can_create=*/true, ivar_name);
+      if (ivar.m_name == ivar_name)
+        return FoundIvar{ivar, object_addr};
     }
   }
-  return {};
+  return std::nullopt;
+}
+
+ValueObjectSP
+lldb_private::formatters::GNUstepGetIvarFromRuntime(ValueObject &valobj,
+                                                    llvm::StringRef name) {
+  std::optional<FoundIvar> found = FindIvarInRuntime(valobj, name);
+  if (!found || !found->ivar.m_type)
+    return {};
+  return valobj.GetSyntheticChildAtOffset(
+      found->ivar.m_offset, found->ivar.m_type,
+      /*can_create=*/true, ConstString(name));
+}
+
+std::optional<addr_t>
+lldb_private::formatters::GNUstepGetIvarAddress(ValueObject &valobj,
+                                                llvm::StringRef name) {
+  std::optional<FoundIvar> found = FindIvarInRuntime(valobj, name);
+  if (!found)
+    return std::nullopt;
+  return found->object_addr + found->ivar.m_offset;
 }
 
 std::optional<double>
@@ -119,6 +141,11 @@ lldb_private::formatters::GNUstepGetFloatValue(ValueObject &valobj) {
 }
 
 // --- Small object decoding -------------------------------------------------
+
+bool lldb_private::formatters::GNUstepDecodeWideFlag(
+    uint8_t byte, lldb::ByteOrder byte_order) {
+  return (byte & (byte_order == lldb::eByteOrderBig ? 0x80 : 0x01)) != 0;
+}
 
 std::optional<std::string>
 lldb_private::formatters::GNUstepDecodeTinyString(uint64_t ptr) {
