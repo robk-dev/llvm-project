@@ -306,6 +306,57 @@ static bool GNUstepNSURLSummary(ValueObject &valobj, Stream &stream,
   return true;
 }
 
+bool lldb_private::formatters::GNUstepNSURLSummaryProvider(
+    ValueObject &valobj, Stream &stream, const TypeSummaryOptions &options) {
+  if (!IsGNUstepObjCRuntime(valobj))
+    return false;
+  return GNUstepNSURLSummary(valobj, stream, options, /*depth=*/0);
+}
+
+bool lldb_private::formatters::GNUstepNSExceptionSummaryProvider(
+    ValueObject &valobj, Stream &stream, const TypeSummaryOptions &options) {
+  if (!IsGNUstepObjCRuntime(valobj))
+    return false;
+  // gnustep-base's NSException has three ivars - _e_name, _e_reason and
+  // _reserved - not the four Apple's does, and they sit behind
+  // GS_EXPOSE(NSException), so this depends on the runtime-metadata
+  // fallback. userInfo lives inside _reserved and is not reachable by name.
+  ValueObjectSP reason_sp = GNUstepGetIvar(valobj, "_e_reason");
+  if (!reason_sp || reason_sp->GetValueAsUnsigned(0) == 0) {
+    // A raised exception always has a name even when it carries no reason.
+    ValueObjectSP name_sp = GNUstepGetIvar(valobj, "_e_name");
+    if (!name_sp || name_sp->GetValueAsUnsigned(0) == 0)
+      return false;
+    return GNUstepNSStringSummaryProvider(*name_sp, stream, options);
+  }
+  return GNUstepNSStringSummaryProvider(*reason_sp, stream, options);
+}
+
+bool lldb_private::formatters::GNUstepNSErrorSummaryProvider(
+    ValueObject &valobj, Stream &stream, const TypeSummaryOptions &options) {
+  if (!IsGNUstepObjCRuntime(valobj))
+    return false;
+  // gnustep-base declares `int _code; NSString *_domain;` (NSError.h), where
+  // Apple's NSError has a pointer-sized code at a different offset. Print it
+  // the way Apple's provider does.
+  ValueObjectSP code_sp = GNUstepGetIvar(valobj, "_code");
+  ValueObjectSP domain_sp = GNUstepGetIvar(valobj, "_domain");
+  if (!code_sp || !domain_sp)
+    return false;
+  bool success = false;
+  const int64_t code = code_sp->GetValueAsSigned(0, &success);
+  if (!success)
+    return false;
+  StreamString domain;
+  if (domain_sp->GetValueAsUnsigned(0) == 0 ||
+      !GNUstepNSStringSummaryProvider(*domain_sp, domain, options) ||
+      domain.Empty())
+    stream.Printf("domain: nil - code: %" PRIi64, code);
+  else
+    stream.Printf("domain: %s - code: %" PRIi64, domain.GetData(), code);
+  return true;
+}
+
 bool lldb_private::formatters::GNUstepNSNullSummaryProvider(
     ValueObject &valobj, Stream &stream, const TypeSummaryOptions &options) {
   if (!IsGNUstepObjCRuntime(valobj))
@@ -497,12 +548,4 @@ void lldb_private::formatters::LoadGNUstepFormatters(
 
   AddCXXSummary(objc_category_sp, GNUstepNSNullSummaryProvider,
                 "GNUstep NSNull summary provider", "NSNull", summary_flags);
-}
-
-bool lldb_private::formatters::GNUstepNSURLSummaryProvider(
-    ValueObject &valobj, Stream &stream, const TypeSummaryOptions &options) {
-  // Shared type name with Apple's provider - see GNUstepNSDateSummaryProvider.
-  if (!IsGNUstepObjCRuntime(valobj))
-    return NSURLSummaryProvider(valobj, stream, options);
-  return GNUstepNSURLSummary(valobj, stream, options, /*depth=*/0);
 }

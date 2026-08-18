@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "Cocoa.h"
+#include "GNUstepFormatters.h"
 
 #include "Plugins/Language/ObjC/NSString.h"
 #include "Plugins/LanguageRuntime/ObjC/ObjCLanguageRuntime.h"
@@ -54,6 +55,9 @@ bool lldb_private::formatters::NSError_SummaryProvider(
   ProcessSP process_sp(valobj.GetProcessSP());
   if (!process_sp)
     return false;
+  // gnustep-base lays its classes out differently; hand those over.
+  if (IsGNUstepObjCRuntime(valobj))
+    return GNUstepNSErrorSummaryProvider(valobj, stream, options);
 
   lldb::addr_t ptr_value = DerefToNSErrorPointer(valobj);
   if (ptr_value == LLDB_INVALID_ADDRESS)
@@ -192,6 +196,9 @@ lldb_private::formatters::NSErrorSyntheticFrontEndCreator(
     return nullptr;
   ObjCLanguageRuntime *runtime = ObjCLanguageRuntime::Get(*process_sp);
   if (!runtime)
+    return nullptr;
+  // This reads Apple's Foundation layout, which gnustep-base does not share.
+  if (llvm::isa<GNUstepObjCRuntime>(runtime))
     return nullptr;
 
   ObjCLanguageRuntime::ClassDescriptorSP descriptor(

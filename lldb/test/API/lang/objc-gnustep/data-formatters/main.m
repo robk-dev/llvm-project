@@ -93,6 +93,15 @@ int main(int argc, const char *argv[]) {
     NSNull *null = [NSNull null];
     NSURL *url = [NSURL URLWithString:@"https://www.gnustep.org/resources"];
     id nilObject = nil;
+    NSError *error = [NSError errorWithDomain:@"TestDomain"
+                                         code:42
+                                     userInfo:nil];
+    NSException *exception = [NSException exceptionWithName:@"TestName"
+                                                     reason:@"test reason"
+                                                   userInfo:nil];
+    NSDate *past = [NSDate distantPast];
+    NSCalendarDate *calendarDate =
+        [NSCalendarDate dateWithTimeIntervalSinceReferenceDate:0];
 
     // A custom class: gets dynamic type + ivars, po runs -description.
     Account *account = [[Account alloc] initWithOwner:@"Jane" balance:1234.5];
@@ -114,6 +123,7 @@ int main(int argc, const char *argv[]) {
     NSLog(@"%@", roomyDict);
     NSLog(@"%@ %@ %@ %@ %@ %@ %@ %lu %@", data, epoch, someDate, null, url,
           account, anonymous, (unsigned long)fruitCount, accountText);
+    NSLog(@"%@ %@ %@ %@", error, exception, past, calendarDate);
     return nilObject != nil; // break here
   }
 }
