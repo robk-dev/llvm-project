@@ -8,6 +8,7 @@
 
 #include "GNUstepObjCRuntime.h"
 #include "GNUstepObjCClassDescriptor.h"
+#include "GNUstepObjCDeclVendor.h"
 #include "GNUstepObjCTypeEncodingParser.h"
 #include "GNUstepThreadPlanStepThroughObjCTrampoline.h"
 
@@ -353,7 +354,15 @@ LanguageRuntime *GNUstepObjCRuntime::CreateInstance(Process *process,
   return new GNUstepObjCRuntime(process);
 }
 
-GNUstepObjCRuntime::~GNUstepObjCRuntime() = default;
+GNUstepObjCRuntime::~GNUstepObjCRuntime() {
+  // The encoding parser caches clang::QualTypes keyed by the TypeSystemClang
+  // that minted them, and one of those ASTs belongs to the decl vendor. A
+  // QualType is a tagged pointer and dropping the cache never dereferences
+  // one, so this is ordering hygiene rather than a live hazard - but state it
+  // here instead of leaving it to depend on member declaration order.
+  m_encoding_to_type_sp.reset();
+  m_decl_vendor_up.reset();
+}
 
 GNUstepObjCRuntime::GNUstepObjCRuntime(Process *process)
     : ObjCLanguageRuntime(process), m_objc_module_sp(nullptr),
@@ -1191,6 +1200,38 @@ GNUstepObjCRuntime::GetTypeBitSize(const CompilerType &compiler_type) {
   if (instance_size == 0)
     return std::nullopt;
   return instance_size * 8;
+}
+
+std::optional<CompilerType>
+GNUstepObjCRuntime::GetRuntimeType(CompilerType base_type) {
+  CompilerType class_type;
+  bool is_pointer_type = false;
+  if (TypeSystemClang::IsObjCObjectPointerType(base_type, &class_type))
+    is_pointer_type = true;
+  else if (TypeSystemClang::IsObjCObjectOrInterfaceType(base_type))
+    class_type = base_type;
+  else
+    return std::nullopt;
+  if (!class_type)
+    return std::nullopt;
+
+  ConstString class_name(class_type.GetTypeName());
+  if (!class_name)
+    return std::nullopt;
+
+  if (TypeSP type_sp = LookupClassTypeInDebugInfo(class_name)) {
+    if (CompilerType complete_type = type_sp->GetFullCompilerType();
+        complete_type.GetCompleteType())
+      return is_pointer_type ? complete_type.GetPointerType() : complete_type;
+  }
+
+  return ObjCLanguageRuntime::GetRuntimeType(base_type);
+}
+
+DeclVendor *GNUstepObjCRuntime::GetDeclVendor() {
+  if (!m_decl_vendor_up)
+    m_decl_vendor_up = std::make_unique<GNUstepObjCDeclVendor>(*this);
+  return m_decl_vendor_up.get();
 }
 
 ObjCLanguageRuntime::EncodingToTypeSP
