@@ -9,6 +9,7 @@
 #include "clang/AST/DeclCXX.h"
 
 #include "Cocoa.h"
+#include "GNUstepFormatters.h"
 
 #include "llvm/Support/ErrorExtras.h"
 
@@ -110,6 +111,9 @@ static bool ExtractFields(ValueObject &valobj, ValueObjectSP *name_sp,
 
 bool lldb_private::formatters::NSException_SummaryProvider(
     ValueObject &valobj, Stream &stream, const TypeSummaryOptions &options) {
+  // gnustep-base lays its classes out differently; hand those over.
+  if (IsGNUstepObjCRuntime(valobj))
+    return GNUstepNSExceptionSummaryProvider(valobj, stream, options);
   lldb::ValueObjectSP reason_sp;
   if (!ExtractFields(valobj, nullptr, &reason_sp, nullptr, nullptr,
                      /*owned_by_valobj=*/false))
@@ -194,6 +198,10 @@ lldb_private::formatters::NSExceptionSyntheticFrontEndCreator(
     return nullptr;
   ObjCLanguageRuntime *runtime = ObjCLanguageRuntime::Get(*process_sp);
   if (!runtime)
+    return nullptr;
+  // This reads Apple's Foundation layout, which gnustep-base does not share:
+  // its NSException has three ivars, not four.
+  if (llvm::isa<GNUstepObjCRuntime>(runtime))
     return nullptr;
 
   ObjCLanguageRuntime::ClassDescriptorSP descriptor(

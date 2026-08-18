@@ -266,3 +266,38 @@ class TestGNUstepDataFormatters(TestBase):
         self.stop_at_end()
         for _ in range(3):
             self.expect("po account", substrs=["<Account Jane: 1234.5>"])
+
+    @skipIf(debug_info=["pdb"])  # CodeView cannot describe Objective-C
+    def test_apple_layout_formatters_stand_aside(self):
+        """Classes sharing a name with Apple's are read as gnustep-base's."""
+        self.stop_at_end()
+        self.expect(
+            "frame variable -d run-target error",
+            substrs=['domain: @"TestDomain" - code: 42'],
+        )
+        self.expect(
+            "frame variable -d run-target exception", substrs=['@"test reason"']
+        )
+        # Apple's synthetic children read four ivars where gnustep-base's
+        # NSException has three, so they must not be offered here.
+        # Its own children are shown instead, which proves the command printed
+        # children at all.
+        self.expect(
+            "frame variable -d run-target -P1 exception",
+            substrs=["NSObject = (isa = NSException)"],
+        )
+        self.expect(
+            "frame variable -d run-target -P1 exception",
+            matching=False,
+            patterns=[r"(?<!_)\breserved = ", r"(?<!_)\buserInfo = "],
+        )
+        self.expect(
+            "frame variable -d run-target calendarDate",
+            substrs=["2001-01-01 00:00:00 UTC"],
+        )
+        # -63113817600 seconds, which is 730484 days before 2001 in the
+        # proleptic Gregorian calendar. gnustep-base's own -description prints
+        # it in a historical local-time offset instead.
+        self.expect(
+            "frame variable -d run-target past", substrs=["0001-01-02 00:00:00 UTC"]
+        )
