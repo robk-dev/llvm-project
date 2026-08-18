@@ -1066,6 +1066,10 @@ GNUstepObjCRuntime::FindDispatchEntryPoint(lldb::addr_t pc) {
   return std::nullopt;
 }
 
+// An ISA chain deeper than this is not something a compiler produced. It comes
+// from inferior memory, so it is bounded rather than trusted.
+static constexpr uint32_t g_max_superclass_depth = 256;
+
 // A type encoding longer than this is not something a compiler produced.
 static constexpr size_t g_max_type_encoding_length = 1024;
 
@@ -1378,6 +1382,29 @@ GNUstepObjCRuntime::GetClassDescriptor(ValueObject &in_value) {
       m_tagged_pointer_vendor_up->IsPossibleTaggedPointer(ptr))
     return m_tagged_pointer_vendor_up->GetClassDescriptor(ptr);
   return ObjCLanguageRuntime::GetClassDescriptor(in_value);
+}
+
+size_t GNUstepObjCRuntime::GetByteOffsetForIvar(CompilerType &parent_qual_type,
+                                                const char *ivar_name) {
+  // An instance is allocated behind a reference-count word, and libobjc2
+  // aligns each ivar with that word included (objc_compute_ivar_offsets,
+  // ivar.c). An ivar needing more than pointer alignment therefore sits at a
+  // different offset than laying the class out as a plain struct would give,
+  // and only the runtime's own metadata knows which. Offsets are absolute, so
+  // a superclass's ivar needs no adjustment.
+  ClassDescriptorSP descriptor_sp =
+      GetClassDescriptorByName(parent_qual_type.GetTypeName());
+  const ConstString name(ivar_name);
+  for (uint32_t depth = 0; descriptor_sp && depth < g_max_superclass_depth;
+       ++depth, descriptor_sp = descriptor_sp->GetSuperclass()) {
+    const size_t num_ivars = descriptor_sp->GetNumIVars();
+    for (size_t i = 0; i < num_ivars; ++i) {
+      const auto &ivar = descriptor_sp->GetIVarAtIndex(i);
+      if (ivar.m_name == name)
+        return ivar.m_offset;
+    }
+  }
+  return LLDB_INVALID_IVAR_OFFSET;
 }
 
 std::optional<uint64_t>
