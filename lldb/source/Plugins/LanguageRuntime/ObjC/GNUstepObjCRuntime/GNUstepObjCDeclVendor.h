@@ -52,6 +52,13 @@ public:
   bool FinishDecl(clang::ObjCInterfaceDecl *interface_decl);
 
 private:
+  /// Builds an ObjCMethodDecl from a runtime method name and type
+  /// encoding, or nullptr if the encoding cannot be realized.
+  clang::ObjCMethodDecl *
+  BuildMethodDecl(clang::ObjCInterfaceDecl *interface_decl,
+                  llvm::StringRef name, llvm::StringRef types,
+                  bool is_instance_method);
+
   /// Returns a forward declaration for \p isa, creating it if needed.
   clang::ObjCInterfaceDecl *GetDeclForISA(ObjCLanguageRuntime::ObjCISA isa);
 

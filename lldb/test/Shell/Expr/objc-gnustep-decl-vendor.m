@@ -34,6 +34,9 @@ int main() {
 // RUN:     -o "expr -- ((Hidden *)hidden)->_int" \
 // RUN:     -o "expr -- ((Hidden *)hidden)->_float" \
 // RUN:     -o "frame variable -d run-target *hidden" \
+// RUN:     -o "expr -- [(Hidden *)hidden plainInt]" \
+// RUN:     -o "expr -- [(Hidden *)hidden doubled:21]" \
+// RUN:     -o "expr -- [Hidden classAnswer]" \
 // RUN:     -- %t | FileCheck %s --check-prefix=VENDOR
 //
 // VENDOR: (lldb) type lookup Hidden
@@ -55,3 +58,19 @@ int main() {
 // VENDOR-DAG: _float = 2
 // VENDOR-DAG: _char = '{{.*}}3'
 // VENDOR-DAG: _ptr = 0x{{0*}}4
+//
+// Methods are synthesized too, so a message send type-checks and runs. The
+// selector's name comes from the symbol clang emits for it: after
+// __objc_load the name field in memory holds a dispatch index instead.
+//
+// VENDOR: (lldb) expr -- [(Hidden *)hidden plainInt]
+// VENDOR: (int) $2 = 1
+//
+// VENDOR: (lldb) expr -- [(Hidden *)hidden doubled:21]
+// VENDOR: (int) $3 = 42
+//
+// Class methods come from the metaclass, where libobjc2 keeps them as its
+// instance methods.
+//
+// VENDOR: (lldb) expr -- [Hidden classAnswer]
+// VENDOR: (int) $4 = 7

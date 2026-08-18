@@ -30,8 +30,20 @@ __attribute__((objc_root_class))
   char _char;
   void *_ptr;
 }
+- (int)doubled:(int)value;
+- (int)plainInt;
++ (int)classAnswer;
 @end
 @implementation Hidden
+- (int)doubled:(int)value {
+  return value * 2;
+}
+- (int)plainInt {
+  return _int;
+}
++ (int)classAnswer {
+  return 7;
+}
 @end
 
 id MakeHidden(void) {
