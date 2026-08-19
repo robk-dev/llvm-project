@@ -26,8 +26,6 @@ int main() {
 //
 // NODWARF-NOT: name = "Hidden"
 
-// The interface is synthesized from the runtime instead, so the type can be
-// named and its ivars read.
 //
 // RUN: %lldb %inferior_abi -b -o "b objc-gnustep-decl-vendor.m:17" -o "run" \
 // RUN:     -o "type lookup Hidden" \
@@ -51,7 +49,6 @@ int main() {
 // VENDOR: (lldb) expr -- ((Hidden *)hidden)->_float
 // VENDOR: (float) $1 = 2
 //
-// And the object expands in full, which is what a debugger UI shows.
 //
 // VENDOR: (lldb) frame variable -d run-target *hidden
 // VENDOR-DAG: _int = 1
@@ -59,8 +56,7 @@ int main() {
 // VENDOR-DAG: _char = '{{.*}}3'
 // VENDOR-DAG: _ptr = 0x{{0*}}4
 //
-// Methods are synthesized too, so a message send type-checks and runs. The
-// selector's name comes from the symbol clang emits for it: after
+// A selector's name comes from the symbol clang emits for it: after
 // __objc_load the name field in memory holds a dispatch index instead.
 //
 // VENDOR: (lldb) expr -- [(Hidden *)hidden plainInt]
@@ -69,8 +65,6 @@ int main() {
 // VENDOR: (lldb) expr -- [(Hidden *)hidden doubled:21]
 // VENDOR: (int) $3 = 42
 //
-// Class methods come from the metaclass, where libobjc2 keeps them as its
-// instance methods.
 //
 // VENDOR: (lldb) expr -- [Hidden classAnswer]
 // VENDOR: (int) $4 = 7
