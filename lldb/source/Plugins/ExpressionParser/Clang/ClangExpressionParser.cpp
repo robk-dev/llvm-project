@@ -1544,11 +1544,18 @@ lldb_private::Status ClangExpressionParser::DoPrepareForExecution(
     LLDB_LOGF(log, "%s - Current expression language is %s\n", __FUNCTION__,
               lang.GetDescription().data());
     lldb::ProcessSP process_sp = exe_ctx.GetProcessSP();
-    if (process_sp && lang) {
-      auto runtime = process_sp->GetLanguageRuntime(lang.AsLanguageType());
-      if (runtime)
-        runtime->GetIRPasses(custom_passes);
-    }
+    // The language options, not the expression's language, decide whether
+    // this was compiled as Objective-C, and they enable it more often: in a
+    // frame without debug info the language is unknown, and in an
+    // Objective-C++ frame it is not Objective-C. Ask the same runtime
+    // SetupLangOpts configured them from.
+    LanguageRuntime *runtime = nullptr;
+    if (process_sp && m_compiler->getLangOpts().ObjC)
+      runtime = ObjCLanguageRuntime::Get(*process_sp);
+    else if (process_sp && lang)
+      runtime = process_sp->GetLanguageRuntime(lang.AsLanguageType());
+    if (runtime)
+      runtime->GetIRPasses(custom_passes);
   }
 
   if (custom_passes.EarlyPasses) {
