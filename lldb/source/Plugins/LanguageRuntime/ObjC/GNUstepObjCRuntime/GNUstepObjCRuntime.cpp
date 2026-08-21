@@ -37,30 +37,46 @@ void GNUstepObjCRuntime::Terminate() {
   PluginManager::UnregisterPlugin(CreateInstance);
 }
 
-static bool CanModuleBeGNUstepObjCLibrary(const ModuleSP &module_sp,
-                                          const llvm::Triple &TT) {
+/// True if \p module_sp defines \p name, rather than merely referencing it.
+static bool ModuleDefinesFunction(const ModuleSP &module_sp,
+                                  llvm::StringRef name) {
   if (!module_sp)
     return false;
-  const FileSpec &module_file_spec = module_sp->GetFileSpec();
-  if (!module_file_spec)
+  SymbolContextList sc_list;
+  module_sp->FindSymbolsWithNameAndType(ConstString(name), eSymbolTypeCode,
+                                        sc_list);
+  bool defines_function = false;
+  for (const SymbolContext &sc : sc_list) {
+    // Every module compiled against libobjc2 carries an undefined reference to
+    // __objc_load from its load constructor, so only a definition identifies
+    // the runtime itself.
+    if (sc.symbol && sc.symbol->GetAddress().IsValid()) {
+      defines_function = true;
+      break;
+    }
+  }
+  if (!defines_function)
     return false;
-  llvm::StringRef filename = module_file_spec.GetFilename().GetStringRef();
-  if (TT.isOSBinFormatELF())
-    return filename.starts_with("libobjc.so");
-  if (TT.isOSWindows())
-    return filename == "objc.dll";
-  return false;
+  // On PE/COFF an importing module contains an import thunk carrying the
+  // imported function's plain name and a valid code address, which the check
+  // above cannot tell apart from a definition. Only the importer also has the
+  // IAT pointer symbol `__imp_<name>`; the implementing module does not.
+  SymbolContextList imp_list;
+  const std::string imp_name = "__imp_" + name.str();
+  module_sp->FindSymbolsWithNameAndType(ConstString(imp_name), eSymbolTypeAny,
+                                        imp_list);
+  for (const SymbolContext &sc : imp_list)
+    if (sc.symbol && sc.symbol->GetAddress().IsValid())
+      return false;
+  return true;
 }
 
-static bool ScanForGNUstepObjCLibraryCandidate(const ModuleList &modules,
-                                               const llvm::Triple &TT) {
+static bool ScanForGNUstepObjCLibraryCandidate(const ModuleList &modules) {
   std::lock_guard<std::recursive_mutex> guard(modules.GetMutex());
-  size_t num_modules = modules.GetSize();
-  for (size_t i = 0; i < num_modules; i++) {
-    auto mod = modules.GetModuleAtIndex(i);
-    if (CanModuleBeGNUstepObjCLibrary(mod, TT))
+  const size_t num_modules = modules.GetSize();
+  for (size_t i = 0; i < num_modules; i++)
+    if (ModuleDefinesFunction(modules.GetModuleAtIndex(i), "__objc_load"))
       return true;
-  }
   return false;
 }
 
@@ -76,23 +92,13 @@ LanguageRuntime *GNUstepObjCRuntime::CreateInstance(Process *process,
   if (TT.getVendor() == llvm::Triple::VendorType::Apple)
     return nullptr;
 
+  // Identify the runtime by the symbol it defines rather than by the file it
+  // was packaged in. A library named libobjc.so that predates the gnustep-2.0
+  // ABI has no __objc_load, and claiming it here makes the expression parser
+  // compile every Objective-C++ expression for a runtime that is not present.
   const ModuleList &images = target.GetImages();
-  if (!ScanForGNUstepObjCLibraryCandidate(images, TT))
+  if (!ScanForGNUstepObjCLibraryCandidate(images))
     return nullptr;
-
-  if (TT.isOSBinFormatELF()) {
-    SymbolContextList eh_pers;
-    RegularExpression regex("__gnustep_objc[x]*_personality_v[0-9]+");
-    images.FindSymbolsMatchingRegExAndType(regex, eSymbolTypeCode, eh_pers);
-    if (eh_pers.GetSize() == 0)
-      return nullptr;
-  } else if (TT.isOSWindows()) {
-    SymbolContextList objc_mandatory;
-    images.FindSymbolsWithNameAndType(ConstString("__objc_load"),
-                                      eSymbolTypeCode, objc_mandatory);
-    if (objc_mandatory.GetSize() == 0)
-      return nullptr;
-  }
 
   return new GNUstepObjCRuntime(process);
 }
@@ -206,8 +212,7 @@ void GNUstepObjCRuntime::UpdateISAToDescriptorMapIfNeeded() {
 }
 
 bool GNUstepObjCRuntime::IsModuleObjCLibrary(const ModuleSP &module_sp) {
-  const llvm::Triple &TT = GetTargetRef().GetArchitecture().GetTriple();
-  return CanModuleBeGNUstepObjCLibrary(module_sp, TT);
+  return ModuleDefinesFunction(module_sp, "__objc_load");
 }
 
 bool GNUstepObjCRuntime::ReadObjCLibrary(const ModuleSP &module_sp) {
