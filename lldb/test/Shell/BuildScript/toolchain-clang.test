@@ -18,3 +18,16 @@ RUN:    | FileCheck --check-prefix=NODEBUG %s
 
 NODEBUG: compiling foobar.c -> foo.exe-foobar.o
 NODEBUG: {{.*}}clang{{(\.EXE)?}} -m64 -g0 -O0 -c {{.*}}-o {{.*}}foo.exe-foobar.o {{.*}}foobar.c
+
+An explicit target triple decides the width, so the default --arch must not
+add an -m64 that would turn an i686 target back into x86-64.
+
+RUN: %build -n --verbose --arch=64 --compiler=clang --target=i686-pc-linux-gnu --mode=compile-and-link -o %t/foo.exe foobar.c \
+RUN:    | FileCheck --check-prefix=TARGET %s
+
+TARGET: compiling foobar.c -> foo.exe-foobar.o
+TARGET-NOT: -m64
+TARGET: --target=i686-pc-linux-gnu
+TARGET: linking foo.exe-foobar.o -> foo.exe
+TARGET-NOT: -m64
+TARGET: --target=i686-pc-linux-gnu

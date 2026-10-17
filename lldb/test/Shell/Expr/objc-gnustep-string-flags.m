@@ -1,6 +1,6 @@
 // REQUIRES: objc-gnustep
 //
-// RUN: %build %s --compiler=clang --objc-gnustep --output=%t
+// RUN: %build %inferior_target %s --compiler=clang --objc-gnustep --output=%t
 
 #import "objc/runtime.h"
 
@@ -70,7 +70,7 @@ int main() {
   return 0; // break here
 }
 
-// RUN: %lldb -b -o "breakpoint set -p \"break [h]ere\" -X main" \
+// RUN: %lldb %inferior_abi -b -o "breakpoint set -p \"break [h]ere\" -X main" \
 // RUN:     -o "run" \
 // RUN:     -o "frame variable -d run-target narrow" \
 // RUN:     -o "frame variable -d run-target wide" \

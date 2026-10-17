@@ -1,6 +1,6 @@
 // REQUIRES: objc-gnustep
 //
-// RUN: %build %s --compiler=clang --objc-gnustep --output=%t
+// RUN: %build %inferior_target %s --compiler=clang --objc-gnustep --output=%t
 
 #import "objc/runtime.h"
 
@@ -66,7 +66,7 @@ int main() {
 }
 
 //
-// RUN: %lldb -b -o "breakpoint set -E objc" -o "run" -o "frame variable" \
+// RUN: %lldb %inferior_abi -b -o "breakpoint set -E objc" -o "run" -o "frame variable" \
 // RUN:     -o "thread exception" \
 // RUN:     -- %t | FileCheck %s --check-prefix=THROW
 //
@@ -86,7 +86,7 @@ int main() {
 // THROW: (Boom *) exception = 0x
 
 //
-// RUN: %lldb -b -o "b objc-gnustep-exceptions.m:63" -o "run" -o "po caught" \
+// RUN: %lldb %inferior_abi -b -o "b objc-gnustep-exceptions.m:63" -o "run" -o "po caught" \
 // RUN:     -- %t | FileCheck %s --check-prefix=CAUGHT
 //
 // CAUGHT: (lldb) po caught
@@ -97,7 +97,7 @@ int main() {
 // so catch breakpoints are real, but only where exceptions unwind through
 // the Itanium ABI, which its MSVC build does not.
 //
-// RUN: %if objc-gnustep-catch %{ %lldb -b -o "breakpoint set -E objc --on-catch true --on-throw false" -o "run" -o "bt" -- %t | FileCheck %s --check-prefix=CATCH %}
+// RUN: %if objc-gnustep-catch %{ %lldb %inferior_abi -b -o "breakpoint set -E objc --on-catch true --on-throw false" -o "run" -o "bt" -- %t | FileCheck %s --check-prefix=CATCH %}
 //
 // The catch entry point is objc_begin_catch, or __cxa_begin_catch where clang
 // routes @catch through the C++ ABI.

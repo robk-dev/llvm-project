@@ -59,6 +59,46 @@ set(LLDB_TEST_MODULE_CACHE_CLANG "${LLDB_TEST_BUILD_DIRECTORY}/module-cache-clan
 file(MAKE_DIRECTORY ${LLDB_TEST_MODULE_CACHE_LLDB})
 file(MAKE_DIRECTORY ${LLDB_TEST_MODULE_CACHE_CLANG})
 
+# Set before either add_subdirectory(): both suites build inferiors, and a
+# cache variable set in one only leaks out after that subdirectory has run.
+if (DEFINED LLVM_TARGET_TRIPLE)
+  set(default_lldb_test_triple ${LLVM_TARGET_TRIPLE})
+else()
+  set(default_lldb_test_triple ${LLVM_HOST_TRIPLE})
+endif()
+
+# LLDB's own macOS deployment target is typically much older than the
+# host OS. For tests we want to clamp the deployment target to
+# someting more recent, such as min(host, sdk), so the latest compiler
+# features, such as newer DWARF versions, are available and tested.
+if (CMAKE_HOST_APPLE AND
+    default_lldb_test_triple MATCHES "^([^-]+-apple-macosx?)[0-9.]*$")
+  set(triple_without_version ${CMAKE_MATCH_1})
+  execute_process(COMMAND sw_vers -productVersion
+    RESULT_VARIABLE host_version_result
+    OUTPUT_VARIABLE host_version
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET)
+  execute_process(COMMAND xcrun --sdk macosx --show-sdk-version
+    RESULT_VARIABLE sdk_version_result
+    OUTPUT_VARIABLE sdk_version
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET)
+  if (host_version_result EQUAL 0 AND sdk_version_result EQUAL 0)
+    set(test_os_version ${host_version})
+    if (sdk_version VERSION_LESS host_version)
+      set(test_os_version ${sdk_version})
+    endif()
+    set(default_lldb_test_triple ${triple_without_version}${test_os_version})
+  endif()
+endif()
+
+set(LLDB_TEST_TRIPLE
+  ${default_lldb_test_triple}
+  CACHE STRING "The target triple used to build test inferiors.")
+
+set(LLDB_TEST_SYSROOT "" CACHE PATH "Sysroot for cross-compiling test inferiors")
+
 # Windows and Linux have no built-in ObjC runtime. Turn this on in order to run tests with GNUstep.
 option(LLDB_TEST_OBJC_GNUSTEP "Enable ObjC tests with GNUstep libobjc2 on non-Apple platforms" Off)
 set(LLDB_TEST_OBJC_GNUSTEP_DIR "" CACHE PATH "Custom path to the GNUstep shared library")
