@@ -1,0 +1,130 @@
+name: LLDB GNUstep Objective-C Tests
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Daily, to catch breakage from changes outside the paths below.
+    - cron: '0 4 * * *'
+  pull_request:
+    paths:
+      - 'lldb/source/Plugins/LanguageRuntime/ObjC/**'
+      - 'lldb/source/Plugins/Language/ObjC/**'
+      - 'lldb/source/Plugins/ExpressionParser/Clang/ClangExpressionParser.cpp'
+      - 'lldb/include/lldb/Symbol/DeclVendor.h'
+      - 'lldb/test/Shell/Expr/objc-gnustep*'
+      - 'lldb/test/Shell/Expr/Inputs/objc-gnustep*'
+      - 'lldb/test/Shell/Expr/lit.local.cfg'
+      - 'lldb/test/Shell/helper/**'
+      - 'lldb/test/Shell/lit.cfg.py'
+      - 'lldb/test/Shell/lit.site.cfg.py.in'
+      - 'lldb/test/API/lang/objc-gnustep/**'
+      - 'lldb/test/API/lit.cfg.py'
+      - 'lldb/test/API/lit.site.cfg.py.in'
+      - 'lldb/test/API/CMakeLists.txt'
+      - 'lldb/test/CMakeLists.txt'
+      - 'lldb/packages/Python/lldbsuite/test/builders/builder.py'
+      - 'lldb/packages/Python/lldbsuite/test/configuration.py'
+      - 'lldb/packages/Python/lldbsuite/test/dotest.py'
+      - 'lldb/packages/Python/lldbsuite/test/dotest_args.py'
+      - 'lldb/packages/Python/lldbsuite/test/make/Makefile.rules'
+      - 'lldb/packages/Python/lldbsuite/test/test_categories.py'
+      - 'lldb/cmake/modules/FindGNUstepObjC.cmake'
+      - 'lldb/utils/ci/build-gnustep.sh'
+      - 'clang/lib/CodeGen/CGObjCGNU.cpp'
+      - '.github/workflows/lldb-gnustep-tests.yml'
+
+concurrency:
+  # Skip intermediate builds: always.
+  # Cancel intermediate builds: only if it is a pull request build.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ startsWith(github.ref, 'refs/pull/') }}
+
+jobs:
+  check_lldb_gnustep:
+    if: github.repository_owner == 'llvm'
+    name: Test LLDB against GNUstep libobjc2
+    runs-on: ubuntu-26.04
+    timeout-minutes: 360
+    defaults:
+      run:
+        # A container defaults to sh; bash also turns on pipefail.
+        shell: bash
+    container:
+      image: ghcr.io/llvm/ci-ubuntu-26.04:latest@sha256:7ac659feb90ac48dd8676e4eb305b9aa5b31fc8b329b7e39379c38af06efc6e1
+      # LLDB launches inferiors with ASLR disabled through personality(2),
+      # which Docker's default seccomp profile rejects.
+      options: --cap-add=SYS_PTRACE --security-opt seccomp=unconfined
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install dependencies
+        run: |
+          # gnustep-base: libcurl is a hard dependency when it is built for
+          # libobjc2. LLDB: SWIG, plus the Python modules that
+          # LLDB_ENFORCE_STRICT_TEST_REQUIREMENTS checks for.
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            libcurl4-gnutls-dev libffi-dev libgnutls28-dev libicu-dev \
+            libxml2-dev libxslt1-dev make pkg-config \
+            python3-cryptography python3-dev python3-packaging python3-pexpect \
+            swig
+      - name: Restore GNUstep
+        id: restore-gnustep
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: gnustep-install
+          # The workflow pins the image and the libraries the prefix links
+          # against, so it is part of what the prefix depends on.
+          key: gnustep-${{ hashFiles('lldb/utils/ci/build-gnustep.sh', '.github/workflows/lldb-gnustep-tests.yml') }}
+      - name: Build GNUstep
+        if: steps.restore-gnustep.outputs.cache-hit != 'true'
+        run: bash lldb/utils/ci/build-gnustep.sh "$PWD/gnustep-install" "$RUNNER_TEMP/gnustep-src"
+      - name: Save GNUstep
+        if: steps.restore-gnustep.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: gnustep-install
+          key: ${{ steps.restore-gnustep.outputs.cache-primary-key }}
+      - name: Setup ccache
+        uses: hendrikmuhs/ccache-action@f09c25b45002a07be2955cbe52e8cee55643f89d # v1.2.24
+        with:
+          max-size: 2G
+          key: lldb-gnustep-ubuntu-26.04
+          variant: sccache
+      - name: Build
+        run: |
+          cmake -GNinja \
+            -S llvm \
+            -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DLLVM_ENABLE_ASSERTIONS=ON \
+            -DCMAKE_C_COMPILER_LAUNCHER=sccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=sccache \
+            -DLLVM_ENABLE_PROJECTS="clang;lldb" \
+            -DLLVM_TARGETS_TO_BUILD=host \
+            -DLLVM_ENABLE_LLD=ON \
+            -DLLDB_ENABLE_PYTHON=ON \
+            -DLLDB_ENFORCE_STRICT_TEST_REQUIREMENTS=ON \
+            -DLLDB_TEST_OBJC_GNUSTEP=On \
+            -DLLDB_TEST_OBJC_GNUSTEP_DIR="$PWD/gnustep-install"
+          ninja -C build lldb-test-depends
+      - name: GNUstep tests
+        run: |
+          # Every test selected here needs only libobjc2 and gnustep-base,
+          # which this job provides, so one that did not run means the
+          # prefix was not picked up. lit counts that as success. An API
+          # test file is reported once, so this catches a file whose every
+          # method skipped - as all do when the prefix is missing - but not
+          # one method skipping among others.
+          build/bin/llvm-lit -v --filter=objc-gnustep \
+            build/tools/lldb/test/Shell build/tools/lldb/test/API \
+            | tee lit.log
+          if grep -E '^(UNSUPPORTED|SKIPPED|UNRESOLVED): ' lit.log; then
+            echo "::error::GNUstep tests did not run; is the GNUstep prefix complete?"
+            exit 1
+          fi
+          grep -E '^PASS: ' lit.log > /dev/null
