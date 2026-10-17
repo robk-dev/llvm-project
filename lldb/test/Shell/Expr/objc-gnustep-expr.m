@@ -1,5 +1,5 @@
 // REQUIRES: objc-gnustep
-// XFAIL: system-windows
+//
 // RUN: %build %s --compiler=clang --objc-gnustep --output=%t
 
 #import "objc/runtime.h"

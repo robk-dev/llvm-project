@@ -437,6 +437,10 @@ Makes programs 10x faster by doing Special New Thing.
 * MiniDebugInfo (the ELF `.gnu_debugdata` section) is now decompressed by LLVM
   rather than by LLDB's own liblzma binding, and is enabled with
   `LLVM_ENABLE_LZMA` instead of the deprecated `LLDB_ENABLE_LZMA`.
+* Debugging Objective-C with the GNUstep libobjc2 runtime is now supported on
+  Linux and Windows: dynamic types, tagged pointers, printing objects with
+  `po`, stepping through message dispatch, and evaluating expressions that
+  send messages.
 
 #### SBAPI
 

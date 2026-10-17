@@ -792,8 +792,11 @@ class GccBuilder(Builder):
             if source.endswith(".m") or source.endswith(".mm"):
                 args.extend(["-fobjc-runtime=gnustep-2.0", "-I", self.objc_gnustep_inc])
                 if sys.platform == "win32":
+                    # CodeView cannot represent Objective-C types, so force
+                    # DWARF even though the target is MSVC. The debugger needs
+                    # it to recognize classes and resolve dynamic types.
                     if not self.no_debug_info:
-                        args.extend(["-Xclang", "-gcodeview"])
+                        args.append("-gdwarf")
                     args.extend(["-Xclang", "--dependent-lib=msvcrtd"])
         elif self.sysroot:
             args.extend(["--sysroot", self.sysroot])
@@ -842,9 +845,10 @@ class GccBuilder(Builder):
             if sys.platform == "linux":
                 args.extend(["-Wl,-rpath," + self.objc_gnustep_lib])
             elif sys.platform == "win32":
-                args.extend(
-                    ["-fuse-ld=lld-link", "-g", "-Xclang", "--dependent-lib=msvcrtd"]
-                )
+                # /debug:dwarf keeps the DWARF sections in the image and, unlike
+                # the PDB route, writes a COFF symbol table, which the debugger
+                # needs to find the runtime metadata symbols ($_OBJC_CLASS_...).
+                args.extend(["-fuse-ld=lld-link", "-Wl,/debug:dwarf"])
         elif self.sysroot:
             args.extend(["--sysroot", self.sysroot])
 
