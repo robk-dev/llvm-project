@@ -144,10 +144,28 @@ public:
 
   ClassDescriptorSP GetClassDescriptorFromISA(ObjCISA isa) override;
 
+  ObjCISA GetISA(ConstString name) override;
+
+  /// The class named \p name, including one swept before the runtime had
+  /// resolved it.
+  ClassDescriptorSP GetClassDescriptorByName(ConstString name);
+
   /// Realizes libobjc2's type encodings, which is what makes the ivar and
   /// method metadata usable as types. Built on first use and kept, because
   /// the types it returns are only valid in the AST it created them in.
   EncodingToTypeSP GetEncodingToType() override;
+
+  /// Size of an Objective-C class, in bits.
+  ///
+  /// The inherited implementation derives this from the ivar list, as the end
+  /// of the last ivar. That is wrong for libobjc2 twice over: it ignores
+  /// trailing padding, and `objc_class::ivars` holds only the class's *own*
+  /// ivars, so a class that declares none would report nothing at all while
+  /// its sibling reported a size. The runtime already knows the answer -
+  /// `instance_size` is the true body size once the class is resolved - so
+  /// use that, and decline rather than guess when it is not yet available.
+  std::optional<uint64_t>
+  GetTypeBitSize(const CompilerType &compiler_type) override;
 
   /// Lazily-built FunctionCaller for a utility function that resolves a
   /// method implementation via libobjc2's
@@ -249,6 +267,10 @@ protected:
   /// the next update is not kept alive for it.
   std::vector<lldb::ModuleWP> m_pending_modules;
   bool m_swept_all_modules = false;
+
+  /// Classes whose symbol was swept before the runtime resolved them, by
+  /// name. GetISA retries them on demand.
+  llvm::DenseMap<ConstString, ObjCISA> m_unresolved_classes;
 
   /// Set when new modules arrive; cleared once the ISA-to-descriptor map has
   /// been refreshed, so the symbol sweep only reruns after module changes.

@@ -92,6 +92,27 @@ std::optional<StringContents> ReadConstantString(ValueObject &valobj) {
   return contents;
 }
 
+/// `_flags` is a struct of bitfields, and libobjc2's encodings give struct
+/// members no names, so without debug info there is no `wide` to look up:
+/// read it out of the byte it occupies instead.
+std::optional<bool> IsWide(ValueObject &valobj) {
+  if (ValueObjectSP flags_sp = GNUstepGetIvar(valobj, "_flags"))
+    if (ValueObjectSP wide_sp = flags_sp->GetChildMemberWithName("wide"))
+      return wide_sp->GetValueAsUnsigned(0) != 0;
+
+  std::optional<addr_t> flags_addr = GNUstepGetIvarAddress(valobj, "_flags");
+  ProcessSP process_sp = valobj.GetProcessSP();
+  if (!flags_addr || !process_sp)
+    return std::nullopt;
+  Status error;
+  uint8_t byte = 0;
+  if (process_sp->ReadMemory(*flags_addr, &byte, sizeof(byte), error) !=
+          sizeof(byte) ||
+      error.Fail())
+    return std::nullopt;
+  return GNUstepDecodeWideFlag(byte, process_sp->GetByteOrder());
+}
+
 /// GSString and everything derived from it, plus GSMutableString: the buffer
 /// pointer `_contents`, the character count `_count`, and `_flags` whose bit
 /// 0 (`wide`) selects 16-bit characters (Source/GSPrivate.h). The buffer is
@@ -99,18 +120,17 @@ std::optional<StringContents> ReadConstantString(ValueObject &valobj) {
 std::optional<StringContents> ReadGSString(ValueObject &valobj) {
   ValueObjectSP contents_sp = GNUstepGetIvar(valobj, "_contents");
   ValueObjectSP count_sp = GNUstepGetIvar(valobj, "_count");
-  ValueObjectSP flags_sp = GNUstepGetIvar(valobj, "_flags");
-  if (!contents_sp || !count_sp || !flags_sp)
+  if (!contents_sp || !count_sp)
     return std::nullopt;
   StringContents contents;
   contents.address = GetPointerValue(*contents_sp);
   if (contents.address == LLDB_INVALID_ADDRESS)
     return std::nullopt;
   contents.count = count_sp->GetValueAsUnsigned(0);
-  bool wide = false;
-  if (ValueObjectSP wide_sp = flags_sp->GetChildMemberWithName("wide"))
-    wide = wide_sp->GetValueAsUnsigned(0) != 0;
-  contents.encoding = wide ? Encoding::UTF16 : Encoding::Latin1;
+  std::optional<bool> wide = IsWide(valobj);
+  if (!wide)
+    return std::nullopt;
+  contents.encoding = *wide ? Encoding::UTF16 : Encoding::Latin1;
   return contents;
 }
 
