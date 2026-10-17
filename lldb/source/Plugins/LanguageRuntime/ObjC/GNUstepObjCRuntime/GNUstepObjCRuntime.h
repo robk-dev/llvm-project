@@ -143,6 +143,15 @@ public:
   /// module is the program's own and the distinction cannot be drawn.
   bool IsRuntimeInternalAddress(lldb::addr_t addr);
 
+  /// The name of the selector at \p sel_addr, recovered from the symbol
+  /// clang emits for it. Empty when there is no such symbol.
+  ///
+  /// This cannot be read from memory: __objc_load overwrites a selector's
+  /// name field with a numeric dispatch index (selector_table.cc), so the
+  /// string is gone by the time a debugger sees it. No code is run in the
+  /// inferior to find it.
+  ConstString GetSelectorName(lldb::addr_t sel_addr);
+
 protected:
   /// Drops everything cached from looking symbols up in \p module_list, so
   /// that modules, or symbols, that arrived since are seen.

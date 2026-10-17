@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "Cocoa.h"
+#include "GNUstepFormatters.h"
 #include "NSString.h"
 #include "ObjCConstants.h"
 
@@ -1188,6 +1189,11 @@ bool lldb_private::formatters::ObjCBooleanSummaryProvider(
 template <bool is_sel_ptr>
 bool lldb_private::formatters::ObjCSELSummaryProvider(
     ValueObject &valobj, Stream &stream, const TypeSummaryOptions &options) {
+  // libobjc2 overwrites a registered selector's name with its dispatch index,
+  // so the name is not readable through the pointer; hand those over.
+  if (IsGNUstepObjCRuntime(valobj))
+    return GNUstepObjCSELSummaryProvider<is_sel_ptr>(valobj, stream, options);
+
   lldb::ValueObjectSP valobj_sp;
 
   CompilerType charstar(valobj.GetCompilerType()
