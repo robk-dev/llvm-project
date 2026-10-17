@@ -292,6 +292,9 @@ def parseOptionsAndInitTestdirs():
         logging.warning("No valid FileCheck executable; some tests may fail...")
         logging.warning("(Double-check the --llvm-tools-dir argument to dotest.py)")
 
+    if args.objc_gnustep_dir:
+        configuration.objc_gnustep_dir = args.objc_gnustep_dir
+
     if args.libcxx_include_dir or args.libcxx_library_dir:
         if args.lldb_platform_name:
             logging.warning(
@@ -1019,6 +1022,16 @@ def checkObjcSupport():
         configuration.skip_categories.append("objc")
 
 
+def checkObjcGnustepSupport():
+    """The GNUstep libobjc2 runtime is not part of any platform's SDK, so its
+    tests only run when a build of it has been pointed at."""
+    if not configuration.objc_gnustep_dir:
+        if configuration.verbose:
+            print("objc-gnustep tests will be skipped because no GNUstep")
+            print("libobjc2 installation was specified")
+        configuration.skip_categories.append("objc-gnustep")
+
+
 def checkExpressionSupport():
     from lldbsuite.test import lldbplatformutil
 
@@ -1218,6 +1231,7 @@ def run_suite():
     checkDebugInfoSupport()
     checkDebugServerSupport()
     checkObjcSupport()
+    checkObjcGnustepSupport()
     checkExpressionSupport()
     checkForkVForkSupport()
     checkPexpectSupport()
