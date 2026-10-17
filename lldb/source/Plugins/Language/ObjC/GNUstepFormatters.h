@@ -24,6 +24,7 @@
 #include "Plugins/LanguageRuntime/ObjC/GNUstepObjCRuntime/GNUstepObjCRuntime.h"
 #include "lldb/DataFormatters/TypeCategory.h"
 #include "lldb/DataFormatters/TypeSummary.h"
+#include "lldb/DataFormatters/TypeSynthetic.h"
 #include "lldb/ValueObject/ValueObject.h"
 #include "lldb/lldb-forward.h"
 
@@ -105,10 +106,26 @@ bool GNUstepNSNumberSummaryProvider(ValueObject &valobj, Stream &stream,
                                     const TypeSummaryOptions &options);
 bool GNUstepNSDateSummaryProvider(ValueObject &valobj, Stream &stream,
                                   const TypeSummaryOptions &options);
+bool GNUstepNSArraySummaryProvider(ValueObject &valobj, Stream &stream,
+                                   const TypeSummaryOptions &options);
+bool GNUstepNSDictionarySummaryProvider(ValueObject &valobj, Stream &stream,
+                                        const TypeSummaryOptions &options);
+bool GNUstepNSSetSummaryProvider(ValueObject &valobj, Stream &stream,
+                                 const TypeSummaryOptions &options);
 bool GNUstepNSDataSummaryProvider(ValueObject &valobj, Stream &stream,
                                   const TypeSummaryOptions &options);
 bool GNUstepNSNullSummaryProvider(ValueObject &valobj, Stream &stream,
                                   const TypeSummaryOptions &options);
+
+SyntheticChildrenFrontEnd *
+GNUstepNSArraySyntheticFrontEndCreator(CXXSyntheticChildren *,
+                                       lldb::ValueObjectSP);
+SyntheticChildrenFrontEnd *
+GNUstepNSDictionarySyntheticFrontEndCreator(CXXSyntheticChildren *,
+                                            lldb::ValueObjectSP);
+SyntheticChildrenFrontEnd *
+GNUstepNSSetSyntheticFrontEndCreator(CXXSyntheticChildren *,
+                                     lldb::ValueObjectSP);
 
 } // namespace formatters
 } // namespace lldb_private

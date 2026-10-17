@@ -5,6 +5,8 @@ add_lldb_library(lldbPluginObjCLanguage PLUGIN
   Cocoa.cpp
   CoreMedia.cpp
   GNUstepFormatters.cpp
+  GNUstepNSArray.cpp
+  GNUstepNSDictionary.cpp
   GNUstepNSNumber.cpp
   GNUstepNSString.cpp
   NSArray.cpp
