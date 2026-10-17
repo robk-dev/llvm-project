@@ -4,6 +4,7 @@ add_lldb_library(lldbPluginObjCLanguage PLUGIN
   CFBasicHash.cpp
   Cocoa.cpp
   CoreMedia.cpp
+  GNUstepFormatters.cpp
   NSArray.cpp
   NSDictionary.cpp
   NSError.cpp
@@ -22,6 +23,7 @@ add_lldb_library(lldbPluginObjCLanguage PLUGIN
     lldbUtility
     lldbValueObject
     lldbPluginAppleObjCRuntime
+    lldbPluginGNUstepObjCRuntime
     lldbPluginTypeSystemClang
   CLANG_LIBS
     clangAST
