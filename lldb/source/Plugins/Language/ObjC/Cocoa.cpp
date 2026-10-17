@@ -47,6 +47,9 @@ bool lldb_private::formatters::NSBundleSummaryProvider(
 
   if (!runtime)
     return false;
+  // This reads Apple's Foundation layout, which gnustep-base does not share.
+  if (llvm::isa<GNUstepObjCRuntime>(runtime))
+    return false;
 
   ObjCLanguageRuntime::ClassDescriptorSP descriptor(
       runtime->GetClassDescriptor(valobj));
@@ -98,6 +101,9 @@ bool lldb_private::formatters::NSTimeZoneSummaryProvider(
 
   if (!runtime)
     return false;
+  // This reads Apple's Foundation layout, which gnustep-base does not share.
+  if (llvm::isa<GNUstepObjCRuntime>(runtime))
+    return false;
 
   ObjCLanguageRuntime::ClassDescriptorSP descriptor(
       runtime->GetClassDescriptor(valobj));
@@ -146,6 +152,9 @@ bool lldb_private::formatters::NSNotificationSummaryProvider(
   ObjCLanguageRuntime *runtime = ObjCLanguageRuntime::Get(*process_sp);
 
   if (!runtime)
+    return false;
+  // This reads Apple's Foundation layout, which gnustep-base does not share.
+  if (llvm::isa<GNUstepObjCRuntime>(runtime))
     return false;
 
   ObjCLanguageRuntime::ClassDescriptorSP descriptor(
@@ -446,6 +455,10 @@ bool lldb_private::formatters::NSNumberSummaryProvider(
 
   if (!runtime)
     return false;
+  // gnustep-base lays its classes out differently and names them
+  // differently; hand those over.
+  if (llvm::isa<GNUstepObjCRuntime>(runtime))
+    return GNUstepNSNumberSummaryProvider(valobj, stream, options);
 
   ObjCLanguageRuntime::ClassDescriptorSP descriptor(
       runtime->GetClassDescriptor(valobj));
@@ -911,6 +924,10 @@ bool lldb_private::formatters::NSDateSummaryProvider(
 
   if (!runtime)
     return false;
+  // gnustep-base lays its classes out differently and names them
+  // differently; hand those over.
+  if (llvm::isa<GNUstepObjCRuntime>(runtime))
+    return GNUstepNSDateSummaryProvider(valobj, stream, options);
 
   ObjCLanguageRuntime::ClassDescriptorSP descriptor(
       runtime->GetClassDescriptor(valobj));
@@ -1073,6 +1090,10 @@ bool lldb_private::formatters::NSDataSummaryProvider(
 
   if (!runtime)
     return false;
+  // gnustep-base lays its classes out differently and names them
+  // differently; hand those over.
+  if (llvm::isa<GNUstepObjCRuntime>(runtime))
+    return GNUstepNSDataSummaryProvider(valobj, stream, options);
 
   ObjCLanguageRuntime::ClassDescriptorSP descriptor(
       runtime->GetClassDescriptor(valobj));
