@@ -122,6 +122,11 @@ public:
 
   iVarDescriptor GetIVarAtIndex(size_t idx) override;
 
+  /// Address of the runtime's offset variable for \p ivar_name, or
+  /// LLDB_INVALID_ADDRESS. Distinct from iVarDescriptor::m_offset, which is
+  /// the value that address holds.
+  lldb::addr_t GetIVarOffsetAddress(ConstString ivar_name);
+
 protected:
   /// One entry of libobjc2's `objc_ivar_list`, as read from memory. The type
   /// is kept as its encoding here; turning it into a CompilerType needs the
@@ -133,7 +138,9 @@ protected:
     uint32_t size = 0;
     /// Address of the `int` the runtime keeps the offset in. libobjc2 stores
     /// a pointer rather than the value so it can rewrite the offset in place,
-    /// and that address is what Describe reports.
+    /// and that address is what Describe reports and what an expression's
+    /// `__objc_ivar_offset_*` global has to resolve to when the inferior
+    /// exports no symbol for it.
     lldb::addr_t offset_ptr = 0;
   };
 
@@ -187,6 +194,8 @@ protected:
   bool m_valid = false;
 
   std::vector<iVarDescriptor> m_ivars;
+  /// Parallel to m_ivars: where the runtime keeps each ivar's offset.
+  std::vector<lldb::addr_t> m_ivar_offset_addrs;
   bool m_ivars_filled = false;
   /// Guards the three above. Recursive because realizing an ivar's type can
   /// re-enter this runtime; the list is published only once it is complete,
