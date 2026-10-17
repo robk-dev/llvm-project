@@ -66,6 +66,74 @@ class TestGNUstepDataFormatters(TestBase):
         self.expect("frame variable -d run-target heapDouble", substrs=["(double)0.1"])
 
     @skipIf(debug_info=["pdb"])  # CodeView cannot describe Objective-C
+    def test_collections(self):
+        """Collections summarize their count and expose elements as children."""
+        self.stop_at_end()
+        self.expect(
+            "frame variable -d run-target emptyArray", substrs=['@"0 elements"']
+        )
+        self.expect("frame variable -d run-target fruits", substrs=['@"3 elements"'])
+        self.expect(
+            "frame variable -d run-target mutableArray", substrs=['@"4 elements"']
+        )
+        self.expect("frame variable -d run-target nested", substrs=['@"2 elements"'])
+        self.expect(
+            "frame variable -d run-target emptyDict", substrs=["0 key/value pairs"]
+        )
+        self.expect(
+            "frame variable -d run-target person", substrs=["3 key/value pairs"]
+        )
+        self.expect(
+            "frame variable -d run-target mutableDict", substrs=["4 key/value pairs"]
+        )
+        self.expect("frame variable -d run-target colors", substrs=["3 elements"])
+        self.expect("frame variable -d run-target mutableSet", substrs=["4 elements"])
+        self.expect("frame variable -d run-target counted", substrs=["2 elements"])
+
+        # Children.
+        self.expect(
+            "frame variable -d run-target fruits[0] fruits[1] fruits[2]",
+            substrs=['@"apple"', '@"banana"', '@"cherry"'],
+        )
+        self.expect("frame variable -d run-target nested[0]", substrs=['@"3 elements"'])
+        # Dictionary entries are key/value pairs; order is hash order, so
+        # look at the whole set of entries.
+        self.expect(
+            "frame variable -d run-target person[0] person[1] person[2]",
+            # @30 lands in a tagged NSSmallInt (only -1..12 are boxed
+            # singletons), which prints as a long.
+            substrs=[
+                "key = ",
+                "value = ",
+                '@"name"',
+                '@"John Doe"',
+                '@"age"',
+                "(long)30",
+                '@"skills"',
+                '@"2 elements"',
+            ],
+            ordered=False,
+        )
+        self.expect(
+            "frame variable -d run-target colors[0] colors[1] colors[2]",
+            substrs=['@"red"', '@"green"', '@"blue"'],
+            ordered=False,
+        )
+
+    @skipIf(debug_info=["pdb"])  # CodeView cannot describe Objective-C
+    def test_sparse_dictionary(self):
+        """A table with far more buckets than entries still has children."""
+        self.stop_at_end()
+        roomy = self.frame().FindVariable("roomyDict", lldb.eDynamicCanRunTarget)
+        self.assertTrue(roomy.IsValid())
+        self.assertEqual(roomy.GetNumChildren(), 2)
+        self.expect(
+            "frame variable -d run-target roomyDict[0] roomyDict[1]",
+            substrs=['@"one"', '@"two"', "(int)1", "(int)2"],
+            ordered=False,
+        )
+
+    @skipIf(debug_info=["pdb"])  # CodeView cannot describe Objective-C
     def test_others(self):
         """NSData, NSDate, NSNull, nil and a custom object."""
         self.stop_at_end()
@@ -91,6 +159,8 @@ class TestGNUstepDataFormatters(TestBase):
                 '@"Jane"',
                 "balance = ",
                 "(double)1234.5",
+                "tags = ",
+                '@"2 elements"',
             ],
         )
         self.expect(
@@ -147,6 +217,16 @@ class TestGNUstepDataFormatters(TestBase):
             lldb.eDynamicCanRunTarget
         )
         self.assertEqual(number.GetSummary(), "(long)123456")
+        fruits = frame.FindVariable("fruits").GetDynamicValue(lldb.eDynamicCanRunTarget)
+        self.assertEqual(fruits.GetSummary(), '@"3 elements"')
+        self.assertEqual(fruits.GetNumChildren(), 3)
+        first = fruits.GetChildAtIndex(0).GetDynamicValue(lldb.eDynamicCanRunTarget)
+        self.assertEqual(first.GetSummary(), '@"apple"')
+        person = frame.FindVariable("person").GetDynamicValue(lldb.eDynamicCanRunTarget)
+        self.assertEqual(person.GetNumChildren(), 3)
+        pair = person.GetChildAtIndex(0)
+        self.assertEqual(pair.GetChildMemberWithName("key").GetName(), "key")
+        self.assertEqual(pair.GetNumChildren(), 2)
 
     @skipIf(debug_info=["pdb"])  # CodeView cannot describe Objective-C
     def test_po(self):

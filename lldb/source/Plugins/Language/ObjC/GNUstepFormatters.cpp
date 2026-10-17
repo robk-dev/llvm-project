@@ -260,6 +260,9 @@ void lldb_private::formatters::LoadGNUstepFormatters(
       .SetShowMembersOneLiner(false)
       .SetHideItemNames(false);
 
+  SyntheticChildren::Flags synth_flags;
+  synth_flags.SetCascades(true).SetSkipPointers(false).SetSkipReferences(false);
+
   // The names below are gnustep-base's concrete classes: the runtime reports
   // them for a value and ObjCLanguage offers them as formatter candidates.
   // Placeholder classes are omitted on purpose; they are what +alloc returns
@@ -300,6 +303,32 @@ void lldb_private::formatters::LoadGNUstepFormatters(
        {"GSSmallDate", "NSGDate", "GSDatePast", "GSDateFuture"})
     AddCXXSummary(objc_category_sp, GNUstepNSDateSummaryProvider,
                   "GNUstep NSDate summary provider", name, summary_flags);
+
+  // Arrays (Source/GSArray.m).
+  for (const char *name : {"GSArray", "GSInlineArray", "GSMutableArray"}) {
+    AddCXXSummary(objc_category_sp, GNUstepNSArraySummaryProvider,
+                  "GNUstep NSArray summary provider", name, summary_flags);
+    AddCXXSynthetic(objc_category_sp, GNUstepNSArraySyntheticFrontEndCreator,
+                    "GNUstep NSArray synthetic children", name, synth_flags);
+  }
+
+  // Dictionaries (Source/GSDictionary.m).
+  for (const char *name :
+       {"GSDictionary", "GSMutableDictionary", "GSCachedDictionary"}) {
+    AddCXXSummary(objc_category_sp, GNUstepNSDictionarySummaryProvider,
+                  "GNUstep NSDictionary summary provider", name, summary_flags);
+    AddCXXSynthetic(
+        objc_category_sp, GNUstepNSDictionarySyntheticFrontEndCreator,
+        "GNUstep NSDictionary synthetic children", name, synth_flags);
+  }
+
+  // Sets (Source/GSSet.m, Source/GSCountedSet.m).
+  for (const char *name : {"GSSet", "GSMutableSet", "GSCountedSet"}) {
+    AddCXXSummary(objc_category_sp, GNUstepNSSetSummaryProvider,
+                  "GNUstep NSSet summary provider", name, summary_flags);
+    AddCXXSynthetic(objc_category_sp, GNUstepNSSetSyntheticFrontEndCreator,
+                    "GNUstep NSSet synthetic children", name, synth_flags);
+  }
 
   // Data (Source/NSData.m).
   for (const char *name :

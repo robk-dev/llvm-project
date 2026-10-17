@@ -1,7 +1,7 @@
 // Every local below is a distinct concrete gnustep-base class, so the data
 // formatters for strings in all their storage forms, boxed and tagged
-// numbers, data, dates and NSNull each get exercised, plus a custom object.
-// The collections are also sent messages and described with `po`.
+// numbers, arrays, dictionaries, sets, data, dates and NSNull each get
+// exercised, plus a custom object.
 
 #import <Foundation/Foundation.h>
 
