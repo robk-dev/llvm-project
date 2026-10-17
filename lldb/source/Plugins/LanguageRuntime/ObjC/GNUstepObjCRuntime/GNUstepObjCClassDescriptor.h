@@ -97,6 +97,27 @@ public:
   /// producer (associate.m).
   bool IsKVO() override { return m_is_hidden; }
 
+  /// Reports this class's superclass, methods and ivars to the matching
+  /// callbacks. Any callback may be null, and a method or ivar callback
+  /// returning true stops the iteration.
+  ///
+  /// Class methods are collected from the metaclass, which is where libobjc2
+  /// keeps them, as its instance methods.
+  ///
+  /// A method whose name cannot be recovered is skipped rather than reported
+  /// under a placeholder: the name lives only in the symbol clang emitted for
+  /// the selector, because __objc_load overwrites the name field in memory
+  /// with a numeric dispatch index (selector_table.cc).
+  ///
+  /// Returns true if the class could be described at all.
+  bool Describe(
+      std::function<void(ObjCLanguageRuntime::ObjCISA)> const &superclass_func,
+      std::function<bool(const char *, const char *)> const
+          &instance_method_func,
+      std::function<bool(const char *, const char *)> const &class_method_func,
+      std::function<bool(const char *, const char *, lldb::addr_t,
+                         uint64_t)> const &ivar_func) const override;
+
   size_t GetNumIVars() override;
 
   iVarDescriptor GetIVarAtIndex(size_t idx) override;
@@ -110,7 +131,23 @@ protected:
     std::string type_encoding;
     int32_t offset = 0;
     uint32_t size = 0;
+    /// Address of the `int` the runtime keeps the offset in. libobjc2 stores
+    /// a pointer rather than the value so it can rewrite the offset in place,
+    /// and that address is what Describe reports.
+    lldb::addr_t offset_ptr = 0;
   };
+
+  /// One entry of libobjc2's `objc_method_list`. The selector is kept as its
+  /// address: after __objc_load its name field holds a dispatch index rather
+  /// than a string, so the name has to come from the symbol emitted for it.
+  struct RawMethod {
+    lldb::addr_t selector = 0;
+    std::string types;
+  };
+
+  /// Reads the methods this class implements, walking the whole list chain
+  /// (categories are prepended to it). Pure memory reads.
+  std::vector<RawMethod> ReadMethodList() const;
 
   /// Reads this class's own ivars, or an empty list if the class has none or
   /// its metadata is not yet trustworthy. Pure memory reads.
