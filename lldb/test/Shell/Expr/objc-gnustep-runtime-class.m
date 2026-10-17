@@ -1,6 +1,6 @@
 // REQUIRES: objc-gnustep
 //
-// RUN: %build %s --compiler=clang --objc-gnustep --output=%t
+// RUN: %build %inferior_target %s --compiler=clang --objc-gnustep --output=%t
 
 #import "objc/runtime.h"
 
@@ -26,7 +26,7 @@ __attribute__((objc_root_class))
 @implementation Compiled
 @end
 
-// RUN: %lldb -b -o "breakpoint set -p \"break [h]ere\" -X main" -o "run" \
+// RUN: %lldb %inferior_abi -b -o "breakpoint set -p \"break [h]ere\" -X main" -o "run" \
 // RUN:          -o "frame variable -d run-target made compiled" -- %t \
 // RUN:     | FileCheck %s
 //

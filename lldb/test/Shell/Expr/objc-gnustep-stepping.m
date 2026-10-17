@@ -1,6 +1,6 @@
 // REQUIRES: objc-gnustep
 //
-// RUN: %build %s --compiler=clang --objc-gnustep --output=%t
+// RUN: %build %inferior_target %s --compiler=clang --objc-gnustep --output=%t
 
 #import "objc/runtime.h"
 
@@ -33,7 +33,7 @@ __attribute__((objc_root_class))
 @end
 
 //
-// RUN: %lldb -b -o "b objc-gnustep-stepping.m:49" -o "run" -o "step" \
+// RUN: %lldb %inferior_abi -b -o "b objc-gnustep-stepping.m:49" -o "run" -o "step" \
 // RUN:     -- %t | FileCheck %s --check-prefix=STEP_IN
 //
 // A message to nil dispatches nowhere, so the step must land back in the
@@ -41,7 +41,7 @@ __attribute__((objc_root_class))
 // the frame's source location because the function name alone looks
 // plausible either way.
 //
-// RUN: %lldb -b -o "b objc-gnustep-stepping.m:51" -o "run" -o "step" \
+// RUN: %lldb %inferior_abi -b -o "b objc-gnustep-stepping.m:51" -o "run" -o "step" \
 // RUN:     -o "frame info" -- %t | FileCheck %s --check-prefix=STEP_OVER_NIL
 //
 int main() {
