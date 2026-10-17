@@ -5,6 +5,7 @@ add_lldb_library(lldbPluginGNUstepObjCRuntime PLUGIN
 
   LINK_COMPONENTS
     Support
+    TransformUtils
   LINK_LIBS
     lldbBreakpoint
     lldbCore

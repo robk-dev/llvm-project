@@ -52,6 +52,8 @@ public:
 
   void DidPush() override;
 
+  void DidPop() override;
+
   bool WillStop() override { return true; }
 
 protected:
@@ -59,6 +61,11 @@ protected:
 
 private:
   bool InitializeFunctionCaller();
+
+  /// Frees the lookup's argument block, if one is allocated. Every way out of
+  /// the plan goes through here: FunctionCaller allocates the block before
+  /// writing the arguments, so even a failed setup can leave one behind.
+  void ReleaseArguments();
 
   GNUstepObjCRuntime &m_runtime;
   /// Address of the argument struct of the msg-lookup function call.

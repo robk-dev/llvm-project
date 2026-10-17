@@ -46,6 +46,26 @@ void GNUstepThreadPlanStepThroughObjCTrampoline::DidPush() {
   m_process.AddPreResumeAction(PreResumeInitializeFunctionCaller, (void *)this);
 }
 
+void GNUstepThreadPlanStepThroughObjCTrampoline::DidPop() {
+  // The action holds a bare pointer to this plan, so it must not outlive it -
+  // the plan can be discarded before the process ever resumes.
+  m_process.ClearPreResumeAction(PreResumeInitializeFunctionCaller,
+                                 (void *)this);
+  // A plan discarded before it collected the lookup's result still owns the
+  // argument block. Its call has been unwound by now: the nested call plan is
+  // above this one and popped first.
+  ReleaseArguments();
+}
+
+void GNUstepThreadPlanStepThroughObjCTrampoline::ReleaseArguments() {
+  if (!m_lookup_function || m_args_addr == LLDB_INVALID_ADDRESS)
+    return;
+  ExecutionContext exe_ctx;
+  GetThread().CalculateExecutionContext(exe_ctx);
+  m_lookup_function->DeallocateFunctionResults(exe_ctx, m_args_addr);
+  m_args_addr = LLDB_INVALID_ADDRESS;
+}
+
 bool GNUstepThreadPlanStepThroughObjCTrampoline::
     PreResumeInitializeFunctionCaller(void *void_myself) {
   auto *myself =
@@ -68,10 +88,12 @@ bool GNUstepThreadPlanStepThroughObjCTrampoline::InitializeFunctionCaller() {
   // built (GetMsgLookupFunctionCaller); only write a fresh argument struct
   // here. m_args_addr starts invalid so WriteFunctionArguments allocates one.
   DiagnosticManager diagnostics;
-  m_args_addr = LLDB_INVALID_ADDRESS;
+  ReleaseArguments();
   if (!m_lookup_function->WriteFunctionArguments(exe_ctx, m_args_addr,
-                                                 m_input_values, diagnostics))
+                                                 m_input_values, diagnostics)) {
+    ReleaseArguments();
     return false;
+  }
 
   EvaluateExpressionOptions options;
   options.SetUnwindOnError(true);
@@ -80,8 +102,10 @@ bool GNUstepThreadPlanStepThroughObjCTrampoline::InitializeFunctionCaller() {
 
   m_func_sp = m_lookup_function->GetThreadPlanToCallFunction(
       exe_ctx, m_args_addr, options, diagnostics);
-  if (!m_func_sp)
+  if (!m_func_sp) {
+    ReleaseArguments();
     return false;
+  }
   m_func_sp->SetOkayToDiscard(true);
   PushPlan(m_func_sp);
   return true;
@@ -106,12 +130,7 @@ bool GNUstepThreadPlanStepThroughObjCTrampoline::ShouldStop(Event *event_ptr) {
     if (!m_func_sp->IsPlanComplete())
       return false;
     if (!m_func_sp->PlanSucceeded()) {
-      if (m_lookup_function && m_args_addr != LLDB_INVALID_ADDRESS) {
-        ExecutionContext exe_ctx;
-        GetThread().CalculateExecutionContext(exe_ctx);
-        m_lookup_function->DeallocateFunctionResults(exe_ctx, m_args_addr);
-        m_args_addr = LLDB_INVALID_ADDRESS;
-      }
+      ReleaseArguments();
       SetPlanComplete(false);
       return true;
     }
@@ -122,12 +141,20 @@ bool GNUstepThreadPlanStepThroughObjCTrampoline::ShouldStop(Event *event_ptr) {
 
   // Second stage: fetch the IMP the lookup returned and run to it.
   if (!m_run_to_sp) {
+    // Setting up the call can fail after the plan is already on the stack,
+    // in which case there is nothing to collect a result from.
+    if (!m_lookup_function || m_args_addr == LLDB_INVALID_ADDRESS) {
+      LLDB_LOG(log, "objc_msg_lookup call was never set up, stopping.");
+      SetPlanComplete(false);
+      return true;
+    }
+
     Value target_addr_value;
     ExecutionContext exe_ctx;
     GetThread().CalculateExecutionContext(exe_ctx);
     const bool fetched = m_lookup_function->FetchFunctionResults(
         exe_ctx, m_args_addr, target_addr_value);
-    m_lookup_function->DeallocateFunctionResults(exe_ctx, m_args_addr);
+    ReleaseArguments();
     if (!fetched) {
       LLDB_LOG(log, "could not read objc_msg_lookup's result, stopping.");
       SetPlanComplete(false);
@@ -140,6 +167,17 @@ bool GNUstepThreadPlanStepThroughObjCTrampoline::ShouldStop(Event *event_ptr) {
 
     if (target_addr == 0 || target_addr == LLDB_INVALID_ADDRESS) {
       LLDB_LOG(log, "objc_msg_lookup returned {0:x}, stopping.", target_addr);
+      SetPlanComplete();
+      return true;
+    }
+
+    // A selector the class does not implement resolves to the runtime's
+    // forwarding machinery, which lives inside libobjc itself - as do the
+    // runtime's own internal method implementations. There is no user code to
+    // step into in either case, so stop here instead.
+    if (m_runtime.IsRuntimeInternalAddress(target_addr)) {
+      LLDB_LOG(log, "objc_msg_lookup resolved into the runtime itself "
+                    "(forwarding or an internal method), stopping.");
       SetPlanComplete();
       return true;
     }
