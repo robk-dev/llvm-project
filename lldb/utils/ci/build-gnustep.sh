@@ -12,6 +12,7 @@
 #
 #   -DLLDB_TEST_OBJC_GNUSTEP=On
 #   -DLLDB_TEST_OBJC_GNUSTEP_DIR=<prefix>
+#   -DLLDB_TEST_OBJC_GNUSTEP_BASE_DIR=<prefix>
 #
 # Distribution packages cannot be used: Debian and Ubuntu build gnustep-base
 # against GCC's Objective-C runtime, not libobjc2.
