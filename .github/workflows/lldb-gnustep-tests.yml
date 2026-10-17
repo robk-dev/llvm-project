@@ -110,7 +110,8 @@ jobs:
             -DLLDB_ENABLE_PYTHON=ON \
             -DLLDB_ENFORCE_STRICT_TEST_REQUIREMENTS=ON \
             -DLLDB_TEST_OBJC_GNUSTEP=On \
-            -DLLDB_TEST_OBJC_GNUSTEP_DIR="$PWD/gnustep-install"
+            -DLLDB_TEST_OBJC_GNUSTEP_DIR="$PWD/gnustep-install" \
+            -DLLDB_TEST_OBJC_GNUSTEP_BASE_DIR="$PWD/gnustep-install"
           ninja -C build lldb-test-depends
       - name: GNUstep tests
         run: |

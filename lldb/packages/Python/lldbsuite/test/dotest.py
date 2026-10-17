@@ -295,6 +295,9 @@ def parseOptionsAndInitTestdirs():
     if args.objc_gnustep_dir:
         configuration.objc_gnustep_dir = args.objc_gnustep_dir
 
+    if args.objc_gnustep_base_dir:
+        configuration.objc_gnustep_base_dir = args.objc_gnustep_base_dir
+
     if args.libcxx_include_dir or args.libcxx_library_dir:
         if args.lldb_platform_name:
             logging.warning(
@@ -1030,6 +1033,11 @@ def checkObjcGnustepSupport():
             print("objc-gnustep tests will be skipped because no GNUstep")
             print("libobjc2 installation was specified")
         configuration.skip_categories.append("objc-gnustep")
+    if not configuration.objc_gnustep_base_dir:
+        if configuration.verbose:
+            print("objc-gnustep-base tests will be skipped because no")
+            print("gnustep-base installation was specified")
+        configuration.skip_categories.append("objc-gnustep-base")
 
 
 def checkExpressionSupport():

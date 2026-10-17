@@ -310,8 +310,15 @@ the GNUstep [libobjc2](https://github.com/gnustep/libobjc2) runtime:
 The directory is the install prefix of libobjc2, containing `lib` and
 `include`. With these set, the Shell tests that require the `objc-gnustep`
 feature and the API tests in the `objc-gnustep` category are enabled; without
-them those tests are skipped. Foundation is not required: the tests run
-against libobjc2 alone.
+them those tests are skipped. Most of them need nothing more than libobjc2.
+
+The tests of the Foundation data formatters and exception reporting also need
+gnustep-base, and are in the `objc-gnustep-base` category. Point the build at
+its install prefix, which may be the same one, to enable them:
+
+```
+-DLLDB_TEST_OBJC_GNUSTEP_BASE_DIR=/path/to/gnustep-base/install
+```
 
 #### Windows
 
