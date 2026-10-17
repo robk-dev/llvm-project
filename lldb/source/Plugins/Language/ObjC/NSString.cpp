@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "NSString.h"
+#include "GNUstepFormatters.h"
 
 #include "lldb/DataFormatters/FormattersHelpers.h"
 #include "lldb/DataFormatters/StringPrinter.h"
@@ -45,6 +46,10 @@ bool lldb_private::formatters::NSStringSummaryProvider(
 
   if (!runtime)
     return false;
+  // gnustep-base lays its classes out differently and names them
+  // differently; hand those over.
+  if (llvm::isa<GNUstepObjCRuntime>(runtime))
+    return GNUstepNSStringSummaryProvider(valobj, stream, summary_options);
 
   ObjCLanguageRuntime::ClassDescriptorSP descriptor(
       runtime->GetClassDescriptor(valobj));
@@ -300,6 +305,9 @@ bool lldb_private::formatters::NSStringSummaryProvider(
 
 bool lldb_private::formatters::NSAttributedStringSummaryProvider(
     ValueObject &valobj, Stream &stream, const TypeSummaryOptions &options) {
+  // This reads Apple's Foundation layout, which gnustep-base does not share.
+  if (IsGNUstepObjCRuntime(valobj))
+    return false;
   TargetSP target_sp(valobj.GetTargetSP());
   if (!target_sp)
     return false;
