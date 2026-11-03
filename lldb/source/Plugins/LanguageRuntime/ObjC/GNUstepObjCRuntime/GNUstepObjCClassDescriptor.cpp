@@ -488,12 +488,15 @@ void GNUstepObjCClassDescriptor::GetIVarInformation() {
   }
 
   std::vector<iVarDescriptor> ivars;
+  std::vector<lldb::addr_t> offset_addrs;
   ivars.reserve(raw.size());
+  offset_addrs.reserve(raw.size());
   for (const RawIvar &ivar : raw) {
     iVarDescriptor descriptor;
     descriptor.m_name = ivar.name;
     descriptor.m_size = ivar.size;
     descriptor.m_offset = ivar.offset;
+    offset_addrs.push_back(ivar.offset_ptr);
     // The name, offset and size are useful on their own, so an encoding that
     // does not realize leaves the ivar in place with an empty type rather
     // than dropping it.
@@ -505,6 +508,7 @@ void GNUstepObjCClassDescriptor::GetIVarInformation() {
   // Publish only once complete, so that nothing reached from the loop above
   // can observe a partial list.
   m_ivars = std::move(ivars);
+  m_ivar_offset_addrs = std::move(offset_addrs);
   m_instance_size = instance_size;
   m_ivars_filled = true;
 }
@@ -543,6 +547,17 @@ GNUstepObjCClassDescriptor::GetIVarAtIndex(size_t idx) {
   if (idx >= GetNumIVars())
     return iVarDescriptor();
   return m_ivars[idx];
+}
+
+addr_t GNUstepObjCClassDescriptor::GetIVarOffsetAddress(ConstString ivar_name) {
+  std::lock_guard<std::recursive_mutex> guard(m_ivars_mutex);
+  const size_t num_ivars = GetNumIVars();
+  if (m_ivar_offset_addrs.size() != num_ivars)
+    return LLDB_INVALID_ADDRESS;
+  for (size_t i = 0; i < num_ivars; ++i)
+    if (m_ivars[i].m_name == ivar_name)
+      return m_ivar_offset_addrs[i];
+  return LLDB_INVALID_ADDRESS;
 }
 
 ObjCLanguageRuntime::ClassDescriptorSP
