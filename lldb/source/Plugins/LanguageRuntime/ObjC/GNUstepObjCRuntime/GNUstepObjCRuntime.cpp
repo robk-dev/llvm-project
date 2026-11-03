@@ -39,7 +39,6 @@
 #include "lldb/Utility/ConstString.h"
 #include "lldb/Utility/LLDBLog.h"
 #include "lldb/Utility/Log.h"
-#include "lldb/Utility/RegularExpression.h"
 #include "lldb/Utility/StructuredData.h"
 #include "lldb/ValueObject/ValueObject.h"
 #include "lldb/ValueObject/ValueObjectConstResult.h"
@@ -51,7 +50,6 @@
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Pass.h"
-#include "llvm/Support/Regex.h"
 #include "llvm/Support/SaveAndRestore.h"
 #include "llvm/Transforms/Utils/ModuleUtils.h"
 
@@ -1287,31 +1285,91 @@ llvm::StringRef GNUstepObjCRuntime::GetClassSymbolPrefix() {
 void GNUstepObjCRuntime::AddClassesFromModule(const ModuleSP &module_sp) {
   if (!module_sp || !m_process)
     return;
+  Symtab *symtab = module_sp->GetSymtab();
+  if (!symtab)
+    return;
 
   // The gnustep-2.x ABI emits every compiled class as a `<prefix>OBJC_CLASS_`
   // data symbol whose address is the class object itself (the ISA of its
   // instances), so the map can be seeded from symbol tables alone - without
   // running any code in the inferior. Classes created dynamically at runtime
   // are handled by the create-on-miss path in GetClassDescriptorFromISA.
+  // Collect first, so the symbol table is not held across memory reads.
   const llvm::StringRef prefix = GetClassSymbolPrefix();
-  RegularExpression regex("^" + llvm::Regex::escape(prefix));
-  SymbolContextList sc_list;
-  module_sp->FindSymbolsMatchingRegExAndType(regex, eSymbolTypeAny, sc_list);
-
   Target &target = GetTargetRef();
-  for (const SymbolContext &sc : sc_list) {
-    if (!sc.symbol)
+  std::vector<std::pair<addr_t, ConstString>> classes;
+  {
+    std::lock_guard<std::recursive_mutex> guard(symtab->GetMutex());
+    const size_t num_symbols = symtab->GetNumSymbols();
+    for (size_t i = 0; i < num_symbols; ++i) {
+      const Symbol *symbol = symtab->SymbolAtIndex(i);
+      // Preferring the mangled name avoids demangling every C++ symbol in
+      // the module just to find out it is not a class.
+      llvm::StringRef name =
+          symbol->GetMangled().GetName(Mangled::ePreferMangled).GetStringRef();
+      if (!name.consume_front(prefix) || name.empty())
+        continue;
+      const addr_t isa = symbol->GetAddress().GetLoadAddress(&target);
+      if (isa != 0 && isa != LLDB_INVALID_ADDRESS)
+        classes.emplace_back(isa, ConstString(name));
+    }
+  }
+
+  for (const auto &[isa, name] : classes) {
+    // An image unloaded and another mapped at the same address can leave its
+    // classes' ISAs in the map under the old names, so only an entry for this
+    // same class is current.
+    if (ClassDescriptorSP cached =
+            ObjCLanguageRuntime::GetClassDescriptorFromISA(isa);
+        cached && cached->GetClassName() == name)
       continue;
-    const addr_t isa = sc.symbol->GetAddress().GetLoadAddress(&target);
-    if (isa == 0 || isa == LLDB_INVALID_ADDRESS || ISAIsCached(isa))
-      continue;
-    llvm::StringRef name = sc.symbol->GetName().GetStringRef();
-    name.consume_front(prefix);
     auto descriptor_sp = std::make_shared<GNUstepObjCClassDescriptor>(
         m_process->shared_from_this(), isa);
-    if (descriptor_sp->IsValid())
-      AddClass(isa, descriptor_sp, name.str().c_str());
+    if (!descriptor_sp->IsValid())
+      continue;
+    // A descriptor is a snapshot taken when it was built, and the map holds
+    // it for the life of the process. Before the runtime resolves a class its
+    // superclass pointer and instance size are not yet meaningful - and a
+    // dlopen'd image is swept before its __objc_load has run - so caching one
+    // then would pin an empty class permanently. Remember it by name instead,
+    // and look again when something asks for it.
+    if (descriptor_sp->IsResolved())
+      AddClass(isa, descriptor_sp, name.GetCString());
+    else
+      m_unresolved_classes[name] = isa;
   }
+}
+
+ObjCLanguageRuntime::ObjCISA GNUstepObjCRuntime::GetISA(ConstString name) {
+  if (ObjCISA isa = ObjCLanguageRuntime::GetISA(name))
+    return isa;
+  // A class that was not yet resolved when its module was swept. Resolving
+  // it is up to the runtime, which does so lazily, so only a lookup can tell
+  // whether it has happened since.
+  auto it = m_unresolved_classes.find(name);
+  if (it == m_unresolved_classes.end())
+    return 0;
+  const ObjCISA isa = it->second;
+  ClassDescriptorSP descriptor_sp = GetClassDescriptorFromISA(isa);
+  // The image may have been unloaded and the address reused since.
+  if (!descriptor_sp || descriptor_sp->GetClassName() != name) {
+    m_unresolved_classes.erase(it);
+    return 0;
+  }
+  if (!static_cast<GNUstepObjCClassDescriptor *>(descriptor_sp.get())
+           ->IsResolved())
+    return 0;
+  m_unresolved_classes.erase(it);
+  return isa;
+}
+
+ObjCLanguageRuntime::ClassDescriptorSP
+GNUstepObjCRuntime::GetClassDescriptorByName(ConstString name) {
+  // Unlike GetClassDescriptorFromClassName, this goes through GetISA, so it
+  // also finds a class that was not yet resolved when its module was swept.
+  if (ObjCISA isa = GetISA(name))
+    return GetClassDescriptorFromISA(isa);
+  return ClassDescriptorSP();
 }
 
 bool GNUstepObjCRuntime::GetIRPasses(
@@ -1333,6 +1391,18 @@ GNUstepObjCRuntime::GetClassDescriptor(ValueObject &in_value) {
       m_tagged_pointer_vendor_up->IsPossibleTaggedPointer(ptr))
     return m_tagged_pointer_vendor_up->GetClassDescriptor(ptr);
   return ObjCLanguageRuntime::GetClassDescriptor(in_value);
+}
+
+std::optional<uint64_t>
+GNUstepObjCRuntime::GetTypeBitSize(const CompilerType &compiler_type) {
+  ClassDescriptorSP descriptor_sp =
+      GetClassDescriptorByName(compiler_type.GetTypeName());
+  if (!descriptor_sp || !descriptor_sp->IsValid())
+    return std::nullopt;
+  const uint64_t instance_size = descriptor_sp->GetInstanceSize();
+  if (instance_size == 0)
+    return std::nullopt;
+  return instance_size * 8;
 }
 
 ObjCLanguageRuntime::EncodingToTypeSP GNUstepObjCRuntime::GetEncodingToType() {
@@ -1363,10 +1433,13 @@ GNUstepObjCRuntime::GetClassDescriptorFromISA(ObjCISA isa) {
   // class methods look like instance methods and which has no ivars. Cache
   // metaclasses by ISA all the same, so they are not re-parsed on every
   // lookup.
-  if (descriptor_sp->IsMetaclass())
-    AddClass(isa, descriptor_sp);
-  else
-    AddClass(isa, descriptor_sp, descriptor_sp->GetClassName().GetCString());
+  // Only a resolved class is safe to cache; see AddClassesFromModule.
+  if (descriptor_sp->IsResolved()) {
+    if (descriptor_sp->IsMetaclass())
+      AddClass(isa, descriptor_sp);
+    else
+      AddClass(isa, descriptor_sp, descriptor_sp->GetClassName().GetCString());
+  }
   return descriptor_sp;
 }
 

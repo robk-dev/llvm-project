@@ -14,7 +14,11 @@
 #include "lldb/lldb-forward.h"
 #include "lldb/lldb-types.h"
 
+#include <functional>
+#include <mutex>
 #include <optional>
+#include <string>
+#include <vector>
 
 namespace lldb_private {
 
@@ -70,7 +74,7 @@ public:
     return false;
   }
 
-  uint64_t GetInstanceSize() override { return m_instance_size; }
+  uint64_t GetInstanceSize() override;
 
   ObjCLanguageRuntime::ObjCISA GetISA() override { return m_isa; }
 
@@ -80,7 +84,65 @@ public:
   /// that resolves to one is a Class, not an object.
   bool IsMetaclass() const { return m_is_meta; }
 
+  /// True once libobjc2 has resolved the class: before that its superclass
+  /// pointer may still hold a name, its instance size is the negated size of
+  /// its own ivars, and its ivar offsets are not yet absolute. A descriptor
+  /// built in that state is a snapshot of it, so callers that cache
+  /// descriptors must not cache an unresolved one.
+  bool IsResolved() const { return m_resolved; }
+
+  /// libobjc2's analogue of an Apple KVO subclass: a class the runtime hides
+  /// from object_getClass(), which walks past it to the first visible
+  /// superclass (runtime.c). Associated-object classes are the in-tree
+  /// producer (associate.m).
+  bool IsKVO() override { return m_is_hidden; }
+
+  size_t GetNumIVars() override;
+
+  iVarDescriptor GetIVarAtIndex(size_t idx) override;
+
 protected:
+  /// One entry of libobjc2's `objc_ivar_list`, as read from memory. The type
+  /// is kept as its encoding here; turning it into a CompilerType needs the
+  /// runtime, which this class deliberately does not depend on.
+  struct RawIvar {
+    ConstString name;
+    std::string type_encoding;
+    int32_t offset = 0;
+    uint32_t size = 0;
+  };
+
+  /// Reads this class's own ivars, or an empty list if the class has none or
+  /// its metadata is not yet trustworthy. Pure memory reads.
+  ///
+  /// The offsets libobjc2 stores are only meaningful once the runtime has
+  /// computed them, and `objc_class_flag_resolved` alone does not say that:
+  /// objc_resolve_class sets the flag *before* calling
+  /// objc_compute_ivar_offsets (class_table.c), so a stop anywhere in that
+  /// window - including a +load breakpoint while a sibling class is being
+  /// resolved - would otherwise yield offsets relative to the start of this
+  /// class's own ivars rather than to the object. Until
+  /// objc_compute_ivar_offsets starts, instance_size is not positive (ivar.c),
+  /// so the parser only reports the class resolved once it is. The
+  /// computation then starts the size at the superclass's and grows it ivar
+  /// by ivar, so the list is checked against the size as it is now - read
+  /// again here, and returned in \p instance_size - rather than the one seen
+  /// when the descriptor was built.
+  std::vector<RawIvar> ReadIvarList(uint64_t *instance_size = nullptr) const;
+
+  /// Re-reads instance_size until a consistent ivar list has been read: a
+  /// size read part-way through objc_compute_ivar_offsets is too small, and
+  /// the descriptor outlives the stop it was read at.
+  /// Requires m_ivars_mutex.
+  void RefreshInstanceSize();
+
+  /// Realized ivars, filled on first use. Not cached while the class is
+  /// unresolved: a descriptor lives in the runtime's ISA map for the life of
+  /// the process, so caching an unresolved class's ivars would pin
+  /// class-relative offsets forever.
+  /// Requires m_ivars_mutex.
+  void GetIVarInformation();
+
   /// Parse `struct objc_class` at m_isa. Called from the constructor; sets
   /// m_valid only if the structure passes the consistency checks that keep a
   /// stray pointer into readable memory from being reported as a class.
@@ -93,7 +155,17 @@ protected:
   ObjCLanguageRuntime::ObjCISA m_metaclass_isa = 0;
   uint64_t m_instance_size = 0;
   bool m_is_meta = false;
+  bool m_is_hidden = false;
+  bool m_resolved = false;
   bool m_valid = false;
+
+  std::vector<iVarDescriptor> m_ivars;
+  bool m_ivars_filled = false;
+  /// Guards the three above, and m_instance_size once the descriptor is
+  /// shared. Recursive because realizing an ivar's type can
+  /// re-enter this runtime; the list is published only once it is complete,
+  /// so a re-entrant reader sees either nothing or all of it.
+  std::recursive_mutex m_ivars_mutex;
 };
 
 /// Class descriptor for libobjc2 "small objects" (tagged pointers). The

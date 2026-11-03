@@ -1,0 +1,92 @@
+// REQUIRES: objc-gnustep
+//
+// RUN: %build %s --compiler=clang --objc-gnustep --output=%t
+
+#import "objc/runtime.h"
+
+#ifdef __has_attribute
+#if __has_attribute(objc_root_class)
+__attribute__((objc_root_class))
+#endif
+#endif
+@interface NSObject {
+  id isa;
+  int refcount;
+}
++ (id)new;
+@end
+@implementation NSObject
++ (id)new {
+  return class_createInstance(self, 0);
+}
+@end
+
+// gnustep-base spells the wide flag as a one-bit field of an anonymous struct
+// (`struct { unsigned wide:1; ... } _flags`, Source/GSPrivate.h). libobjc2's
+// type encodings give struct members no names, so where the class has no
+// debug info the summary provider has no `wide` member to read and falls back
+// to reading the bit out of memory. Declaring it as a plain word here leaves
+// the member missing in the same way, which is what takes that path.
+//
+// The name is what matters: formatters are matched on the class name the
+// runtime reports, so this stands in for gnustep-base's own GSCInlineString.
+@interface GSCInlineString : NSObject {
+@public
+  char *_contents;
+  unsigned _count;
+  unsigned _flags;
+}
+@end
+@implementation GSCInlineString
+@end
+
+int main() {
+  GSCInlineString *narrow = [GSCInlineString new];
+  narrow->_contents = "hi";
+  narrow->_count = 2;
+  narrow->_flags = 0;
+
+  // Set `wide` and the contents are read as UTF-16, which is what proves the
+  // fallback read the flag rather than defaulting to narrow. It is the first
+  // bit of a bitfield, so bit 0 of the word on a little-endian target and its
+  // top bit on a big-endian one.
+  static unsigned short wide_text[] = {'h', 'i'};
+  GSCInlineString *wide = [GSCInlineString new];
+  wide->_contents = (char *)wide_text;
+  wide->_count = 2;
+#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+  wide->_flags = 0x80000000u;
+#else
+  wide->_flags = 1;
+#endif
+
+  // A narrow string is Latin-1, so a byte above 0x7f is a character of its
+  // own rather than part of a UTF-8 sequence.
+  GSCInlineString *latin1 = [GSCInlineString new];
+  latin1->_contents = "gr\xfc\xdf";
+  latin1->_count = 4;
+  latin1->_flags = 0;
+
+  return 0; // break here
+}
+
+// RUN: %lldb -b -o "breakpoint set -p \"break [h]ere\" -X main" \
+// RUN:     -o "run" \
+// RUN:     -o "frame variable -d run-target narrow" \
+// RUN:     -o "frame variable -d run-target wide" \
+// RUN:     -o "frame variable -d run-target latin1" \
+// RUN:     -o "settings set target.max-string-summary-length 2" \
+// RUN:     -o "frame variable -d run-target latin1" \
+// RUN:     -- %t | FileCheck %s
+//
+// CHECK: (lldb) frame variable -d run-target narrow
+// CHECK-NEXT: (GSCInlineString *) narrow = 0x{{[0-9a-f]+}} @"hi"
+//
+// CHECK: (lldb) frame variable -d run-target wide
+// CHECK-NEXT: (GSCInlineString *) wide = 0x{{[0-9a-f]+}} @"hi"
+//
+// CHECK: (lldb) frame variable -d run-target latin1
+// CHECK-NEXT: (GSCInlineString *) latin1 = 0x{{[0-9a-f]+}} @"grüß"
+//
+// CHECK: (lldb) frame variable -d run-target latin1
+// CHECK-NEXT: (GSCInlineString *) latin1 = 0x{{[0-9a-f]+}} @"gr"...

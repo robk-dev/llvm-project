@@ -800,6 +800,9 @@ bool lldb_private::formatters::NSURLSummaryProvider(
 
   if (!runtime)
     return false;
+  // gnustep-base lays its classes out differently; hand those over.
+  if (llvm::isa<GNUstepObjCRuntime>(runtime))
+    return GNUstepNSURLSummaryProvider(valobj, stream, options);
 
   ObjCLanguageRuntime::ClassDescriptorSP descriptor(
       runtime->GetClassDescriptor(valobj));
